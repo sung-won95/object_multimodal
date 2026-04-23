@@ -11,6 +11,7 @@ from .eduvidqa import iter_lecture_segments, iter_records
 from .eval import evaluate_query, summarize
 from .ingest import VideoIngestConfig, ingest_video, make_video_id
 from .meili import LECTURE_SEGMENT_SETTINGS, MeiliClient
+from .project_index import index_project_segments, project_dir_from_args
 from .schemas import SearchCandidate
 from .stt import DEFAULT_MLX_WHISPER_MODEL
 
@@ -44,6 +45,20 @@ def build_parser() -> argparse.ArgumentParser:
     index.add_argument("--batch-size", type=int, default=500)
     index.add_argument("--reset", action="store_true")
     index.set_defaults(func=cmd_index_eduvidqa)
+
+    index_project = subparsers.add_parser("index-project", help="Index a local project segment JSONL")
+    index_project.add_argument("--index", required=True)
+    location = index_project.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    index_project.add_argument(
+        "--segments",
+        type=Path,
+        help="Optional JSONL path. Relative paths are resolved from --project-dir.",
+    )
+    index_project.add_argument("--batch-size", type=int, default=500)
+    index_project.add_argument("--reset", action="store_true")
+    index_project.set_defaults(func=cmd_index_project)
 
     ingest = subparsers.add_parser("ingest-video", help="Ingest a local lecture video")
     ingest.add_argument("--video", required=True, type=Path)
@@ -168,6 +183,20 @@ def cmd_index_eduvidqa(args: argparse.Namespace) -> None:
         total += len(batch)
 
     print(json.dumps({"index": args.index, "indexed_documents": total}, indent=2))
+
+
+def cmd_index_project(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = index_project_segments(
+        client,
+        index_uid=args.index,
+        project_dir=project_dir,
+        batch_size=args.batch_size,
+        reset=args.reset,
+        segments=args.segments,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def cmd_ingest_video(args: argparse.Namespace) -> None:

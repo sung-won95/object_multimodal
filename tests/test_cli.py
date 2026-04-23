@@ -45,3 +45,24 @@ def test_align_frames_cli_defaults() -> None:
     assert args.project_id == "sample"
     assert args.output_root.as_posix() == "artifacts/projects"
     assert args.margin_seconds == 0.0
+
+
+def test_index_project_accepts_project_id() -> None:
+    args = build_parser().parse_args(
+        ["index-project", "--index", "local_segments", "--project-id", "sample", "--batch-size", "100"]
+    )
+
+    assert args.index == "local_segments"
+    assert args.project_id == "sample"
+    assert args.project_dir is None
+    assert args.batch_size == 100
+
+
+def test_index_project_accepts_project_dir() -> None:
+    args = build_parser().parse_args(
+        ["index-project", "--index", "local_segments", "--project-dir", "artifacts/projects/sample"]
+    )
+
+    assert args.index == "local_segments"
+    assert str(args.project_dir) == "artifacts/projects/sample"
+    assert args.project_id is None
