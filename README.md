@@ -132,6 +132,33 @@ Defaults:
   - `alignment` summary counts
   - `counts.lecture_segments_aligned`
 
+## Index Local Project Segments
+
+Index one local project artifact folder into Meilisearch:
+
+```bash
+PYTHONPATH=src python -m oarag index-project \
+  --project-id upswing_matrices \
+  --index upswing_matrices_segments \
+  --batch-size 500 \
+  --reset
+```
+
+You can also index by explicit path:
+
+```bash
+PYTHONPATH=src python -m oarag index-project \
+  --project-dir artifacts/projects/upswing_matrices \
+  --index upswing_matrices_segments
+```
+
+Segment artifact selection order:
+
+- `segments/lecture_segments_aligned.jsonl` (preferred when present)
+- `segments/lecture_segments.jsonl` (fallback)
+
+Use `--segments` to override the default segment file path.
+
 ## Notes
 
 This first baseline is a pipeline smoke test, not the final object-aligned evaluation. EDUVIDQA provides transcript/timestamp data but not visual entity or entity-link labels. Local video pilots will add `visual_entities` and weak `entity_links` next.
