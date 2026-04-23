@@ -132,6 +132,40 @@ Defaults:
   - `alignment` summary counts
   - `counts.lecture_segments_aligned`
 
+## Visual Entity Extraction (OCR-first)
+
+Extract frame-level visual entities from sampled frames:
+
+```bash
+PYTHONPATH=src python -m oarag extract-visual-entities \
+  --project-id upswing_matrices \
+  --backend auto
+```
+
+Defaults:
+
+- Reads `artifacts/projects/{project_id}/manifests/frames_manifest.jsonl`
+- Writes `artifacts/projects/{project_id}/manifests/visual_entities.jsonl`
+- Updates `artifacts/projects/{project_id}/manifests/project_manifest.json` with
+  - `artifacts.visual_entities`
+  - `counts.visual_entities`
+  - `visual_entity_extraction` summary
+
+Backends:
+
+- `--backend stub` always emits zero entities (safe test/default fallback).
+- `--backend local-ocr` uses local `tesseract` command and emits `ocr_text` entities.
+- `--backend auto` uses `local-ocr` when `tesseract` is available, otherwise `stub`.
+
+Optional local OCR language hint:
+
+```bash
+PYTHONPATH=src python -m oarag extract-visual-entities \
+  --project-id upswing_matrices \
+  --backend local-ocr \
+  --ocr-language eng
+```
+
 ## Index Local Project Segments
 
 Index one local project artifact folder into Meilisearch:

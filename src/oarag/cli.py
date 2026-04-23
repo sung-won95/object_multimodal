@@ -16,6 +16,7 @@ from .meili import LECTURE_SEGMENT_SETTINGS, MeiliClient
 from .project_index import index_project_segments, project_dir_from_args
 from .schemas import SearchCandidate
 from .stt import DEFAULT_MLX_WHISPER_MODEL
+from .visual_entities import extract_visual_entities
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -167,6 +168,40 @@ def build_parser() -> argparse.ArgumentParser:
     evidence.add_argument("--output", type=Path, help="Optional JSON output path.")
     evidence.set_defaults(func=cmd_evidence_window)
 
+    extract_visual = subparsers.add_parser(
+        "extract-visual-entities",
+        help="Extract OCR-first visual entities from sampled frames",
+    )
+    location = extract_visual.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    extract_visual.add_argument(
+        "--backend",
+        choices=["auto", "stub", "local-ocr"],
+        default="auto",
+        help="auto uses local OCR when available, otherwise stub.",
+    )
+    extract_visual.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Input frames manifest JSONL. Relative paths are resolved from project dir.",
+    )
+    extract_visual.add_argument(
+        "--output",
+        type=Path,
+        help="Output visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    extract_visual.add_argument(
+        "--manifest",
+        type=Path,
+        help="Project manifest JSON path. Relative paths are resolved from project dir.",
+    )
+    extract_visual.add_argument(
+        "--ocr-language",
+        help="Optional OCR language hint for the local-ocr backend (for example eng or kor).",
+    )
+    extract_visual.set_defaults(func=cmd_extract_visual_entities)
+
     query = subparsers.add_parser("query", help="Search one query")
     query.add_argument("--index", required=True)
     query.add_argument("--query", required=True)
@@ -292,6 +327,19 @@ def cmd_evidence_window(args: argparse.Namespace) -> None:
             output_path = project_dir / output_path
         write_json(output_path, response)
     print(json.dumps(response, ensure_ascii=False, indent=2))
+
+
+def cmd_extract_visual_entities(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = extract_visual_entities(
+        project_dir=project_dir,
+        backend=args.backend,
+        frames_manifest_path=args.frames_manifest,
+        output_path=args.output,
+        manifest_path=args.manifest,
+        ocr_language=args.ocr_language,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def cmd_query(args: argparse.Namespace) -> None:

@@ -90,3 +90,17 @@ def test_evidence_window_cli_accepts_project_and_segment() -> None:
     assert args.segment_id == ["seg_1", "seg_2"]
     assert args.query == "bet size"
     assert args.neighbor_count == 2
+
+
+def test_extract_visual_entities_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        ["extract-visual-entities", "--project-id", "sample_project"]
+    )
+
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.backend == "auto"
+    assert args.frames_manifest is None
+    assert args.output is None
+    assert args.manifest is None
+    assert args.ocr_language is None
