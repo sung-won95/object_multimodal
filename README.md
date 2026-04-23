@@ -73,6 +73,29 @@ The command writes:
 
 By default the source video is symlinked, not copied. Use `--copy-source` only when you really want a duplicate video file.
 
+Ingest an entire local lecture folder recursively:
+
+```bash
+PYTHONPATH=src python -m oarag batch-ingest \
+  --root "../data/업스윙 포커" \
+  --project-prefix upswing \
+  --frame-rate 0.5 \
+  --max-frames 120 \
+  --summary-json artifacts/upswing_batch_summary.json \
+  --summary-jsonl artifacts/upswing_batch_results.jsonl \
+  --summary-csv artifacts/upswing_batch_results.csv
+```
+
+Behavior:
+
+- Discovers supported video files under `--root` (`.mp4`, `.mov`, `.mkv`, `.avi`, `.webm`, `.m4v`).
+- Generates stable `project_id` values from each video's relative path (plus a deterministic hash suffix).
+- Reuses the same transcript/STT options as `ingest-video`, including `OARAG_STT_LANGUAGE` defaults.
+- Resumes by default: if `manifests/project_manifest.json` already exists for that generated `project_id`, the video is skipped.
+- Use `--force` to re-ingest already ingested videos.
+- Per-video failures are recorded and the batch continues by default; use `--strict` to stop at the first failure.
+- Prints a full JSON summary to stdout, with optional JSON/JSONL/CSV files via summary flags.
+
 Transcript source behavior:
 
 - `--transcript-source auto` uses a sibling `.srt` file when present, otherwise runs local STT with `mlx-whisper`.
