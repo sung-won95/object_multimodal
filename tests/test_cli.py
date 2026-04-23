@@ -106,6 +106,19 @@ def test_extract_visual_entities_cli_defaults() -> None:
     assert args.ocr_language is None
 
 
+def test_link_entities_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        ["link-entities", "--project-id", "sample_project"]
+    )
+
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.segments is None
+    assert args.visual_entities is None
+    assert args.output is None
+    assert args.manifest is None
+
+
 def test_batch_ingest_cli_defaults() -> None:
     args = build_parser().parse_args(["batch-ingest", "--root", "lectures"])
 

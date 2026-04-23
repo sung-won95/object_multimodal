@@ -23,9 +23,12 @@ DEICTIC_HINTS = (
     "red",
     "blue",
     "box",
+    "board",
     "line",
     "point",
     "figure",
+    "stack",
+    "bet size",
     "이것",
     "이거",
     "이 부분",
@@ -219,6 +222,40 @@ class VisualEntity:
             entity_type=str(payload.get("entity_type", "")),
             confidence=_optional_float(payload.get("confidence")),
             source=str(payload.get("source", "")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class EntityLink:
+    link_id: str
+    project_id: str
+    segment_id: str
+    entity_id: str
+    frame_id: str
+    link_type: str
+    score: float
+    evidence: list[str]
+    time_overlap: bool
+    lexical_match: list[str]
+    mention_candidate: list[str]
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "EntityLink":
+        return cls(
+            link_id=str(payload.get("link_id", "")),
+            project_id=str(payload.get("project_id", "")),
+            segment_id=str(payload.get("segment_id", "")),
+            entity_id=str(payload.get("entity_id", "")),
+            frame_id=str(payload.get("frame_id", "")),
+            link_type=str(payload.get("link_type", "")),
+            score=float(payload.get("score", 0.0)),
+            evidence=[str(item) for item in payload.get("evidence", [])],
+            time_overlap=bool(payload.get("time_overlap", False)),
+            lexical_match=[str(item) for item in payload.get("lexical_match", [])],
+            mention_candidate=[str(item) for item in payload.get("mention_candidate", [])],
         )
 
     def to_dict(self) -> dict[str, Any]:

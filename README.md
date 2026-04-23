@@ -189,6 +189,31 @@ PYTHONPATH=src python -m oarag extract-visual-entities \
   --ocr-language eng
 ```
 
+## Entity Linking
+
+Link transcript segments to nearby visual entities:
+
+```bash
+PYTHONPATH=src python -m oarag link-entities \
+  --project-id upswing_matrices
+```
+
+Defaults:
+
+- Reads aligned segments when `segments/lecture_segments_aligned.jsonl` exists, otherwise falls back to `segments/lecture_segments.jsonl`
+- Reads `artifacts/projects/{project_id}/manifests/visual_entities.jsonl`
+- Writes `artifacts/projects/{project_id}/manifests/entity_links.jsonl`
+- Updates `artifacts/projects/{project_id}/manifests/project_manifest.json` with
+  - `artifacts.entity_links`
+  - `counts.entity_links`
+  - `entity_linking` summary
+
+Current linking behavior:
+
+- Requires segment/entity time overlap (or matching `frame_refs`) to create a weak link.
+- Adds `lexical_match` evidence when transcript terms overlap OCR text.
+- Adds `mention_candidate` evidence when transcript mention hooks such as `this`, `board`, `stack`, or `bet size` appear in the OCR text.
+
 ## Index Local Project Segments
 
 Index one local project artifact folder into Meilisearch:
