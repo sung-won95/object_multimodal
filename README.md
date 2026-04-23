@@ -159,6 +159,27 @@ Segment artifact selection order:
 
 Use `--segments` to override the default segment file path.
 
+## Evidence Windows
+
+Build a transcript and frame evidence bundle around one or more retrieved segment IDs:
+
+```bash
+PYTHONPATH=src python -m oarag evidence-window \
+  --project-id upswing_matrices \
+  --segment-id seg_12._Betsize_000003 \
+  --query "what affects bet size" \
+  --neighbor-count 1
+```
+
+Defaults:
+
+- Reads `segments/lecture_segments_aligned.jsonl` when present
+- Falls back to `segments/lecture_segments.jsonl`
+- Reads `manifests/frames_manifest.jsonl`
+- Includes the target segment, neighboring transcript context, and frame metadata for `frame_refs`
+
+Use `--window-seconds` instead of `--neighbor-count` to select timestamp-overlapping context around the target segment.
+
 ## Notes
 
 This first baseline is a pipeline smoke test, not the final object-aligned evaluation. EDUVIDQA provides transcript/timestamp data but not visual entity or entity-link labels. Local video pilots will add `visual_entities` and weak `entity_links` next.

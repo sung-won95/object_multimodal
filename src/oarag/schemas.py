@@ -214,6 +214,20 @@ class SearchCandidate:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class EvidenceWindow:
+    target_segment_id: str
+    project_id: str | None
+    video_id: str | None
+    start_time: float | None
+    end_time: float | None
+    transcript_segments: list[dict[str, Any]]
+    frame_refs: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def _optional_float(value: Any) -> float | None:
     if value is None:
         return None
