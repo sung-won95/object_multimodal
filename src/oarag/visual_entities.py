@@ -43,9 +43,10 @@ class TesseractVisualEntityExtractor:
         if shutil.which("tesseract") is None:
             raise RuntimeError("local-ocr backend requires the `tesseract` command in PATH")
 
-        command = ["tesseract", frame.frame_path, "stdout", "tsv"]
+        command = ["tesseract", frame.frame_path, "stdout"]
         if self.language:
             command.extend(["-l", self.language])
+        command.append("tsv")
 
         result = _run(command)
         rows = _parse_tesseract_tsv(result.stdout)

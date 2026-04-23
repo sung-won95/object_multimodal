@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from oarag.schemas import VisualEntity
-from oarag.visual_entities import extract_visual_entities
+from oarag.visual_entities import FrameRecord, TesseractVisualEntityExtractor, extract_visual_entities
 
 
 def test_extract_visual_entities_stub_writes_empty_jsonl_and_updates_manifest(tmp_path: Path) -> None:
@@ -86,6 +87,36 @@ def test_extract_visual_entities_rejects_entity_with_mismatched_frame_reference(
 
     with pytest.raises(ValueError, match="frame_id mismatch"):
         extract_visual_entities(project_dir=project_dir, backend="stub")
+
+
+def test_tesseract_language_option_is_placed_before_tsv_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[list[str]] = []
+
+    def fake_run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        captured.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\t"
+                "left\ttop\twidth\theight\tconf\ttext\n"
+                "5\t1\t1\t1\t1\t1\t10\t20\t30\t40\t90.0\tSTACK\n"
+            ),
+        )
+
+    monkeypatch.setattr("oarag.visual_entities.shutil.which", lambda _: "/usr/bin/tesseract")
+    monkeypatch.setattr("oarag.visual_entities._run", fake_run)
+
+    extractor = TesseractVisualEntityExtractor(language="eng")
+    entities = extractor.extract(
+        project_id="sample_project",
+        frame=FrameRecord(frame_id="frame_000001", frame_path="/tmp/frame.jpg", timestamp=1.0),
+    )
+
+    assert captured == [["tesseract", "/tmp/frame.jpg", "stdout", "-l", "eng", "tsv"]]
+    assert [entity.text for entity in entities] == ["STACK"]
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
