@@ -112,6 +112,26 @@ The default STT model is `mlx-community/whisper-large-v3-mlx`, which is slower t
 - `artifacts/projects/{project_id}/transcripts/mlx_whisper_raw.json`
 - `artifacts/projects/{project_id}/segments/lecture_segments.jsonl`
 
+## Segment-to-Frame Alignment
+
+Attach frame references to each transcript segment using timestamp overlap:
+
+```bash
+PYTHONPATH=src python -m oarag align-frames \
+  --project-id upswing_matrices \
+  --margin-seconds 0.5
+```
+
+Defaults:
+
+- Reads `artifacts/projects/{project_id}/segments/lecture_segments.jsonl`
+- Reads `artifacts/projects/{project_id}/manifests/frames_manifest.jsonl`
+- Writes `artifacts/projects/{project_id}/segments/lecture_segments_aligned.jsonl`
+- Updates `artifacts/projects/{project_id}/manifests/project_manifest.json` with
+  - `artifacts.lecture_segments_aligned`
+  - `alignment` summary counts
+  - `counts.lecture_segments_aligned`
+
 ## Notes
 
 This first baseline is a pipeline smoke test, not the final object-aligned evaluation. EDUVIDQA provides transcript/timestamp data but not visual entity or entity-link labels. Local video pilots will add `visual_entities` and weak `entity_links` next.

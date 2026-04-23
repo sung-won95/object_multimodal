@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from .alignment import align_segments_to_frames
 from .config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
 from .eduvidqa import iter_lecture_segments, iter_records
 from .eval import evaluate_query, summarize
@@ -96,6 +97,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ingest.set_defaults(func=cmd_ingest_video)
 
+    align = subparsers.add_parser(
+        "align-frames",
+        help="Attach frame_refs to transcript segments using timestamp overlap",
+    )
+    align.add_argument("--project-id", required=True)
+    align.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path("artifacts/projects"),
+        help="Directory where project artifacts are written",
+    )
+    align.add_argument("--segments", type=Path, help="Input lecture_segments JSONL")
+    align.add_argument("--frames-manifest", type=Path, help="Input frames_manifest JSONL")
+    align.add_argument("--output", type=Path, help="Aligned output JSONL")
+    align.add_argument("--manifest", type=Path, help="Project manifest JSON path")
+    align.add_argument(
+        "--margin-seconds",
+        type=float,
+        default=0.0,
+        help="Expand each segment time window by this margin on both sides.",
+    )
+    align.set_defaults(func=cmd_align_frames)
+
     query = subparsers.add_parser("query", help="Search one query")
     query.add_argument("--index", required=True)
     query.add_argument("--query", required=True)
@@ -171,6 +195,23 @@ def cmd_ingest_video(args: argparse.Namespace) -> None:
         )
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
+
+
+def cmd_align_frames(args: argparse.Namespace) -> None:
+    output_root = args.output_root
+    if not output_root.is_absolute():
+        output_root = default_paths().repo_root / output_root
+
+    summary = align_segments_to_frames(
+        project_id=args.project_id,
+        output_root=output_root,
+        margin_seconds=args.margin_seconds,
+        segments_path=args.segments,
+        frames_manifest_path=args.frames_manifest,
+        output_path=args.output,
+        manifest_path=args.manifest,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def cmd_query(args: argparse.Namespace) -> None:
