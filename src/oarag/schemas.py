@@ -183,6 +183,49 @@ class LectureSegment:
 
 
 @dataclass(frozen=True)
+class VisualEntity:
+    entity_id: str
+    project_id: str
+    frame_id: str
+    timestamp: float | None
+    frame_path: str
+    bbox: dict[str, float] | None
+    text: str
+    entity_type: str
+    confidence: float | None
+    source: str
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "VisualEntity":
+        raw_bbox = payload.get("bbox")
+        bbox: dict[str, float] | None = None
+        if isinstance(raw_bbox, dict):
+            bbox = {}
+            for key, value in raw_bbox.items():
+                parsed = _optional_float(value)
+                if parsed is not None:
+                    bbox[str(key)] = parsed
+            if not bbox:
+                bbox = None
+
+        return cls(
+            entity_id=str(payload.get("entity_id", "")),
+            project_id=str(payload.get("project_id", "")),
+            frame_id=str(payload.get("frame_id", "")),
+            timestamp=_optional_float(payload.get("timestamp")),
+            frame_path=str(payload.get("frame_path", "")),
+            bbox=bbox,
+            text=str(payload.get("text", "")),
+            entity_type=str(payload.get("entity_type", "")),
+            confidence=_optional_float(payload.get("confidence")),
+            source=str(payload.get("source", "")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class SearchCandidate:
     rank: int
     segment_id: str
