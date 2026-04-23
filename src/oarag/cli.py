@@ -9,7 +9,9 @@ from .alignment import align_segments_to_frames
 from .config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
 from .eduvidqa import iter_lecture_segments, iter_records
 from .eval import evaluate_query, summarize
+from .evidence import build_evidence_response
 from .ingest import VideoIngestConfig, ingest_video, make_video_id
+from .io import write_json
 from .meili import LECTURE_SEGMENT_SETTINGS, MeiliClient
 from .project_index import index_project_segments, project_dir_from_args
 from .schemas import SearchCandidate
@@ -135,6 +137,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
     align.set_defaults(func=cmd_align_frames)
 
+    evidence = subparsers.add_parser(
+        "evidence-window",
+        help="Build transcript and frame evidence windows around retrieved segment IDs",
+    )
+    location = evidence.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    evidence.add_argument(
+        "--segment-id",
+        action="append",
+        required=True,
+        help="Retrieved segment ID. Repeat this option for multiple top segments.",
+    )
+    evidence.add_argument("--query", help="Optional original query string to include in output.")
+    evidence.add_argument("--segments", type=Path, help="Optional segment JSONL path.")
+    evidence.add_argument("--frames-manifest", type=Path, help="Optional frames_manifest JSONL path.")
+    evidence.add_argument(
+        "--window-seconds",
+        type=float,
+        help="Include segments whose timestamps overlap this many seconds around the target.",
+    )
+    evidence.add_argument(
+        "--neighbor-count",
+        type=int,
+        default=1,
+        help="Neighboring segments to include on each side when --window-seconds is omitted.",
+    )
+    evidence.add_argument("--output", type=Path, help="Optional JSON output path.")
+    evidence.set_defaults(func=cmd_evidence_window)
+
     query = subparsers.add_parser("query", help="Search one query")
     query.add_argument("--index", required=True)
     query.add_argument("--query", required=True)
@@ -241,6 +273,25 @@ def cmd_align_frames(args: argparse.Namespace) -> None:
         manifest_path=args.manifest,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_evidence_window(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    response = build_evidence_response(
+        project_dir=project_dir,
+        segment_ids=args.segment_id,
+        query=args.query,
+        segments_path=args.segments,
+        frames_manifest_path=args.frames_manifest,
+        window_seconds=args.window_seconds,
+        neighbor_count=args.neighbor_count,
+    )
+    if args.output is not None:
+        output_path = args.output
+        if not output_path.is_absolute():
+            output_path = project_dir / output_path
+        write_json(output_path, response)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
 
 
 def cmd_query(args: argparse.Namespace) -> None:

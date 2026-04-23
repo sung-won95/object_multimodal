@@ -66,3 +66,27 @@ def test_index_project_accepts_project_dir() -> None:
     assert args.index == "local_segments"
     assert str(args.project_dir) == "artifacts/projects/sample"
     assert args.project_id is None
+
+
+def test_evidence_window_cli_accepts_project_and_segment() -> None:
+    args = build_parser().parse_args(
+        [
+            "evidence-window",
+            "--project-id",
+            "sample",
+            "--segment-id",
+            "seg_1",
+            "--segment-id",
+            "seg_2",
+            "--query",
+            "bet size",
+            "--neighbor-count",
+            "2",
+        ]
+    )
+
+    assert args.project_id == "sample"
+    assert args.project_dir is None
+    assert args.segment_id == ["seg_1", "seg_2"]
+    assert args.query == "bet size"
+    assert args.neighbor_count == 2
