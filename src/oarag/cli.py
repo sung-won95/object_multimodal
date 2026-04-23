@@ -10,7 +10,16 @@ from .config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, 
 from .eduvidqa import iter_lecture_segments, iter_records
 from .eval import evaluate_query, summarize
 from .evidence import build_evidence_response
-from .ingest import VideoIngestConfig, ingest_video, make_video_id
+from .ingest import (
+    BatchIngestConfig,
+    VideoIngestConfig,
+    batch_ingest_videos,
+    ingest_video,
+    make_video_id,
+    write_batch_summary_csv,
+    write_batch_summary_json,
+    write_batch_summary_jsonl,
+)
 from .io import write_json
 from .meili import LECTURE_SEGMENT_SETTINGS, MeiliClient
 from .project_index import index_project_segments, project_dir_from_args
@@ -114,6 +123,85 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ask mlx-whisper for word-level timestamps in the raw transcript artifact.",
     )
     ingest.set_defaults(func=cmd_ingest_video)
+
+    batch_ingest = subparsers.add_parser(
+        "batch-ingest",
+        aliases=["ingest-folder"],
+        help="Ingest all supported video files under a local folder",
+    )
+    batch_ingest.add_argument("--root", required=True, type=Path, help="Root folder to scan recursively")
+    batch_ingest.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path("artifacts/projects"),
+        help="Directory where project artifacts are written",
+    )
+    batch_ingest.add_argument(
+        "--project-prefix",
+        help="Optional prefix for generated project IDs",
+    )
+    batch_ingest.add_argument("--frame-rate", type=float, default=1.0)
+    batch_ingest.add_argument(
+        "--max-frames",
+        type=int,
+        default=120,
+        help="Frame cap for smoke tests. Use 0 for no cap.",
+    )
+    batch_ingest.add_argument("--skip-frames", action="store_true")
+    batch_ingest.add_argument(
+        "--copy-source",
+        action="store_true",
+        help="Copy source video instead of symlinking it into the artifact folder.",
+    )
+    batch_ingest.add_argument(
+        "--transcript-source",
+        choices=["auto", "srt", "stt", "none"],
+        default="auto",
+        help="Transcript source. auto uses SRT when present, otherwise mlx-whisper STT.",
+    )
+    batch_ingest.add_argument(
+        "--stt-model",
+        default=DEFAULT_MLX_WHISPER_MODEL,
+        help="MLX Whisper model used when --transcript-source resolves to stt.",
+    )
+    batch_ingest.add_argument(
+        "--stt-language",
+        default=env_default(ENV_STT_LANGUAGE),
+        help=f"Optional Whisper language hint, for example ko or en. Defaults to ${ENV_STT_LANGUAGE}.",
+    )
+    batch_ingest.add_argument(
+        "--stt-task",
+        choices=["transcribe", "translate"],
+        default="transcribe",
+    )
+    batch_ingest.add_argument(
+        "--stt-word-timestamps",
+        action="store_true",
+        help="Ask mlx-whisper for word-level timestamps in the raw transcript artifact.",
+    )
+    batch_ingest.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-ingest even when project_manifest.json already exists for a discovered video.",
+    )
+    batch_ingest.add_argument(
+        "--strict",
+        action="store_true",
+        help="Stop at first per-video failure. Without this flag the batch continues.",
+    )
+    batch_ingest.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Plan-only mode that discovers videos and generated IDs without running ingest.",
+    )
+    batch_ingest.add_argument("--summary-json", type=Path, help="Optional path to write full summary JSON.")
+    batch_ingest.add_argument(
+        "--summary-jsonl",
+        type=Path,
+        help="Optional path to write one result row per line.",
+    )
+    batch_ingest.add_argument("--summary-csv", type=Path, help="Optional path to write summary CSV.")
+    batch_ingest.set_defaults(func=cmd_batch_ingest)
 
     align = subparsers.add_parser(
         "align-frames",
@@ -291,6 +379,41 @@ def cmd_ingest_video(args: argparse.Namespace) -> None:
         )
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
+
+
+def cmd_batch_ingest(args: argparse.Namespace) -> None:
+    output_root = args.output_root
+    if not output_root.is_absolute():
+        output_root = default_paths().repo_root / output_root
+    max_frames = None if args.max_frames == 0 else args.max_frames
+    summary = batch_ingest_videos(
+        BatchIngestConfig(
+            root_dir=args.root,
+            output_root=output_root,
+            frame_rate=args.frame_rate,
+            max_frames=max_frames,
+            skip_frames=args.skip_frames,
+            copy_source=args.copy_source,
+            transcript_source=args.transcript_source,
+            stt_model=args.stt_model,
+            stt_language=args.stt_language,
+            stt_task=args.stt_task,
+            stt_word_timestamps=args.stt_word_timestamps,
+            force=args.force,
+            strict=args.strict,
+            dry_run=args.dry_run,
+            project_prefix=args.project_prefix,
+        )
+    )
+    if args.summary_json:
+        write_batch_summary_json(args.summary_json, summary)
+    if args.summary_jsonl:
+        write_batch_summary_jsonl(args.summary_jsonl, summary)
+    if args.summary_csv:
+        write_batch_summary_csv(args.summary_csv, summary)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if args.strict and summary["counts"]["failed"] > 0:
+        raise SystemExit(1)
 
 
 def cmd_align_frames(args: argparse.Namespace) -> None:

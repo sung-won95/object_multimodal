@@ -104,3 +104,21 @@ def test_extract_visual_entities_cli_defaults() -> None:
     assert args.output is None
     assert args.manifest is None
     assert args.ocr_language is None
+
+
+def test_batch_ingest_cli_defaults() -> None:
+    args = build_parser().parse_args(["batch-ingest", "--root", "lectures"])
+
+    assert str(args.root) == "lectures"
+    assert args.output_root.as_posix() == "artifacts/projects"
+    assert args.transcript_source == "auto"
+    assert args.force is False
+    assert args.strict is False
+    assert args.dry_run is False
+
+
+def test_ingest_folder_alias_maps_to_batch_ingest() -> None:
+    args = build_parser().parse_args(["ingest-folder", "--root", "lectures", "--force"])
+
+    assert str(args.root) == "lectures"
+    assert args.force is True

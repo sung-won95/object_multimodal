@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 import shutil
 import subprocess
@@ -19,6 +21,7 @@ from .stt import (
 
 
 TRANSCRIPT_SOURCES = {"auto", "srt", "stt", "none"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,25 @@ class VideoIngestConfig:
     stt_language: str | None = None
     stt_task: str = "transcribe"
     stt_word_timestamps: bool = False
+
+
+@dataclass(frozen=True)
+class BatchIngestConfig:
+    root_dir: Path
+    output_root: Path
+    frame_rate: float = 1.0
+    max_frames: int | None = 120
+    skip_frames: bool = False
+    copy_source: bool = False
+    transcript_source: str = "auto"
+    stt_model: str = DEFAULT_MLX_WHISPER_MODEL
+    stt_language: str | None = None
+    stt_task: str = "transcribe"
+    stt_word_timestamps: bool = False
+    force: bool = False
+    strict: bool = False
+    dry_run: bool = False
+    project_prefix: str | None = None
 
 
 def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
@@ -301,6 +323,175 @@ def run(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 def make_video_id(video_path: Path) -> str:
     return slugify(video_path.stem)
+
+
+def discover_video_files(root_dir: Path, *, extensions: set[str] | None = None) -> list[Path]:
+    resolved_root = root_dir.expanduser().resolve()
+    if not resolved_root.exists():
+        raise FileNotFoundError(f"Root directory not found: {resolved_root}")
+    if not resolved_root.is_dir():
+        raise NotADirectoryError(f"Root path is not a directory: {resolved_root}")
+
+    allowed = {ext.lower() for ext in (extensions or VIDEO_EXTENSIONS)}
+    return sorted(
+        path
+        for path in resolved_root.rglob("*")
+        if path.is_file() and path.suffix.lower() in allowed
+    )
+
+
+def make_project_id_for_video(
+    video_path: Path,
+    *,
+    root_dir: Path,
+    prefix: str | None = None,
+) -> str:
+    resolved_video = video_path.expanduser().resolve()
+    resolved_root = root_dir.expanduser().resolve()
+    relative_path = resolved_video.relative_to(resolved_root)
+    relative_no_suffix = relative_path.with_suffix("")
+    normalized = relative_no_suffix.as_posix()
+    digest = hashlib.blake2s(normalized.encode("utf-8"), digest_size=4).hexdigest()
+
+    parts = [slugify(part) for part in relative_no_suffix.parts]
+    base = "__".join(part for part in parts if part) or "video"
+    if prefix:
+        prefix_slug = slugify(prefix)
+        if prefix_slug:
+            base = f"{prefix_slug}__{base}"
+    return f"{base}_{digest}"
+
+
+def batch_ingest_videos(
+    config: BatchIngestConfig,
+    *,
+    ingest_fn: Any = ingest_video,
+) -> dict[str, Any]:
+    resolved_root = config.root_dir.expanduser().resolve()
+    resolved_output_root = config.output_root.expanduser().resolve()
+    videos = discover_video_files(resolved_root)
+
+    results: list[dict[str, Any]] = []
+    counts = {"discovered": len(videos), "ingested": 0, "skipped_existing": 0, "failed": 0}
+    aborted = False
+
+    for video_path in videos:
+        project_id = make_project_id_for_video(
+            video_path,
+            root_dir=resolved_root,
+            prefix=config.project_prefix,
+        )
+        video_id = make_video_id(video_path)
+        project_dir = resolved_output_root / project_id
+        manifest_path = project_dir / "manifests" / "project_manifest.json"
+
+        result = {
+            "video_path": str(video_path),
+            "project_id": project_id,
+            "video_id": video_id,
+            "project_dir": str(project_dir),
+            "manifest_path": str(manifest_path),
+        }
+
+        if manifest_path.exists() and not config.force:
+            counts["skipped_existing"] += 1
+            result["status"] = "skipped_existing"
+            results.append(result)
+            continue
+
+        if config.dry_run:
+            counts["ingested"] += 1
+            result["status"] = "dry_run"
+            results.append(result)
+            continue
+
+        try:
+            manifest = ingest_fn(
+                VideoIngestConfig(
+                    video_path=video_path,
+                    project_id=project_id,
+                    video_id=video_id,
+                    output_root=resolved_output_root,
+                    frame_rate=config.frame_rate,
+                    max_frames=config.max_frames,
+                    skip_frames=config.skip_frames,
+                    copy_source=config.copy_source,
+                    transcript_source=config.transcript_source,
+                    stt_model=config.stt_model,
+                    stt_language=config.stt_language,
+                    stt_task=config.stt_task,
+                    stt_word_timestamps=config.stt_word_timestamps,
+                )
+            )
+            counts["ingested"] += 1
+            result["status"] = "ingested"
+            result["transcript_source"] = manifest.get("transcript_source")
+            result["segments"] = _safe_nested_int(manifest, "counts", "lecture_segments")
+            result["frames"] = _safe_nested_int(manifest, "counts", "frames")
+        except Exception as exc:
+            counts["failed"] += 1
+            result["status"] = "failed"
+            result["error"] = str(exc)
+            results.append(result)
+            if config.strict:
+                aborted = True
+                break
+            continue
+
+        results.append(result)
+
+    return {
+        "root_dir": str(resolved_root),
+        "output_root": str(resolved_output_root),
+        "force": config.force,
+        "strict": config.strict,
+        "dry_run": config.dry_run,
+        "project_prefix": config.project_prefix,
+        "aborted": aborted,
+        "counts": counts,
+        "results": results,
+    }
+
+
+def write_batch_summary_json(path: Path, summary: dict[str, Any]) -> None:
+    write_json(path, summary)
+
+
+def write_batch_summary_jsonl(path: Path, summary: dict[str, Any]) -> int:
+    return write_jsonl(path, summary.get("results", []))
+
+
+def write_batch_summary_csv(path: Path, summary: dict[str, Any]) -> None:
+    rows = summary.get("results", [])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "status",
+        "video_path",
+        "project_id",
+        "video_id",
+        "project_dir",
+        "manifest_path",
+        "transcript_source",
+        "segments",
+        "frames",
+        "error",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name) for name in fieldnames})
+
+
+def _safe_nested_int(payload: dict[str, Any], key: str, nested_key: str) -> int | None:
+    raw = payload.get(key)
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get(nested_key)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _optional_float(value: Any) -> float | None:
