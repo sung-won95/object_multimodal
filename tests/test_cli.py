@@ -37,3 +37,11 @@ def test_blank_stt_language_env_is_ignored(monkeypatch) -> None:
     )
 
     assert args.stt_language is None
+
+
+def test_align_frames_cli_defaults() -> None:
+    args = build_parser().parse_args(["align-frames", "--project-id", "sample"])
+
+    assert args.project_id == "sample"
+    assert args.output_root.as_posix() == "artifacts/projects"
+    assert args.margin_seconds == 0.0
