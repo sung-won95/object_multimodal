@@ -9,6 +9,7 @@ from .alignment import align_segments_to_frames
 from .config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
 from .eduvidqa import iter_lecture_segments, iter_records
 from .eval import evaluate_query, summarize
+from .entity_links import link_entities
 from .evidence import build_evidence_response
 from .ingest import (
     BatchIngestConfig,
@@ -290,6 +291,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extract_visual.set_defaults(func=cmd_extract_visual_entities)
 
+    entity_links = subparsers.add_parser(
+        "link-entities",
+        help="Link transcript segments to nearby visual entities with weak evidence",
+    )
+    location = entity_links.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    entity_links.add_argument(
+        "--segments",
+        type=Path,
+        help="Input segment JSONL path. Relative paths are resolved from project dir.",
+    )
+    entity_links.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Input visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    entity_links.add_argument(
+        "--output",
+        type=Path,
+        help="Output entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    entity_links.add_argument(
+        "--manifest",
+        type=Path,
+        help="Project manifest JSON path. Relative paths are resolved from project dir.",
+    )
+    entity_links.set_defaults(func=cmd_link_entities)
+
     query = subparsers.add_parser("query", help="Search one query")
     query.add_argument("--index", required=True)
     query.add_argument("--query", required=True)
@@ -461,6 +491,18 @@ def cmd_extract_visual_entities(args: argparse.Namespace) -> None:
         output_path=args.output,
         manifest_path=args.manifest,
         ocr_language=args.ocr_language,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_link_entities(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = link_entities(
+        project_dir=project_dir,
+        segments_path=args.segments,
+        visual_entities_path=args.visual_entities,
+        output_path=args.output,
+        manifest_path=args.manifest,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

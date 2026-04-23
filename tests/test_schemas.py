@@ -1,4 +1,4 @@
-from oarag.schemas import VisualEntity, mention_candidates
+from oarag.schemas import EntityLink, VisualEntity, mention_candidates
 
 
 def test_mention_candidates_do_not_match_korean_character_substrings() -> None:
@@ -35,3 +35,24 @@ def test_visual_entity_from_dict_to_dict_roundtrip() -> None:
         "confidence": 0.91,
         "source": "ocr:tesseract",
     }
+
+
+def test_entity_link_from_dict_to_dict_roundtrip() -> None:
+    payload = {
+        "link_id": "link_seg_1_ent_1",
+        "project_id": "sample_project",
+        "segment_id": "seg_1",
+        "entity_id": "ent_1",
+        "frame_id": "frame_000001",
+        "link_type": "time_overlap+lexical_match",
+        "score": 1.25,
+        "evidence": ["time_overlap", "lexical_match"],
+        "time_overlap": True,
+        "lexical_match": ["stack", "size"],
+        "mention_candidate": ["stack"],
+    }
+
+    link = EntityLink.from_dict(payload)
+    encoded = link.to_dict()
+
+    assert encoded == payload
