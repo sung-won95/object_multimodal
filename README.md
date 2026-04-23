@@ -1,0 +1,117 @@
+# Object-Aligned RAG Pilot
+
+Python-first implementation scaffold for the Meilisearch/object-aligned lecture video QA pilot.
+
+Current goal:
+
+- Index EDUVIDQA normalized JSONL as `lecture_segments`.
+- Ingest local lecture videos into a reproducible artifact folder.
+- Query Meilisearch for transcript evidence candidates.
+- Evaluate timestamp proximity with Hit@5s/10s/15s.
+- Keep schemas open for `visual_entities`, `entity_links`, and `evidence_windows`.
+
+## Quick Start
+
+Start Meilisearch:
+
+```bash
+docker compose up -d meilisearch
+```
+
+Check health:
+
+```bash
+PYTHONPATH=src python -m oarag health
+```
+
+Index the EDUVIDQA test split:
+
+```bash
+PYTHONPATH=src python -m oarag index-eduvidqa \
+  --input ../data/normalized_links/mathsc_timestamp_test.jsonl \
+  --index eduvidqa_mathsc_test_segments \
+  --reset
+```
+
+Run one query:
+
+```bash
+PYTHONPATH=src python -m oarag query \
+  --index eduvidqa_mathsc_test_segments \
+  --query "why is N the number of molecules" \
+  --limit 3
+```
+
+Run timestamp baseline evaluation:
+
+```bash
+PYTHONPATH=src python -m oarag eval-eduvidqa \
+  --input ../data/normalized_links/mathsc_timestamp_test.jsonl \
+  --index eduvidqa_mathsc_test_segments \
+  --output artifacts/eduvidqa_test_eval.jsonl
+```
+
+## Local Video Ingest
+
+For a local video with a sibling `.srt` file:
+
+```bash
+PYTHONPATH=src python -m oarag ingest-video \
+  --video "../data/업스윙 포커/2. 매트릭스(V)/2. Matrices.mp4" \
+  --project-id upswing_matrices \
+  --frame-rate 1 \
+  --max-frames 120
+```
+
+The command writes:
+
+- `artifacts/projects/{project_id}/source/`
+- `artifacts/projects/{project_id}/frames/`
+- `artifacts/projects/{project_id}/segments/lecture_segments.jsonl`
+- `artifacts/projects/{project_id}/manifests/project_manifest.json`
+- `artifacts/projects/{project_id}/manifests/frames_manifest.jsonl`
+
+By default the source video is symlinked, not copied. Use `--copy-source` only when you really want a duplicate video file.
+
+Transcript source behavior:
+
+- `--transcript-source auto` uses a sibling `.srt` file when present, otherwise runs local STT with `mlx-whisper`.
+- `--transcript-source srt` requires `--srt` or a sibling `.srt` file.
+- `--transcript-source stt` forces STT even when an `.srt` exists.
+- `--transcript-source none` creates frame/source artifacts without transcript segments.
+
+Install local Apple Silicon STT support:
+
+```bash
+python -m pip install ".[stt]"
+```
+
+Run STT segment generation on an M-series Mac:
+
+```bash
+export OARAG_STT_LANGUAGE=en
+
+PYTHONPATH=src python -m oarag ingest-video \
+  --video "../data/업스윙 포커/2. 매트릭스(V)/2. Matrices.mp4" \
+  --project-id upswing_matrices_stt \
+  --transcript-source stt \
+  --stt-model mlx-community/whisper-large-v3-mlx \
+  --frame-rate 0.2 \
+  --max-frames 0
+```
+
+You can also put the language in a local `.env` file:
+
+```bash
+OARAG_STT_LANGUAGE=en
+```
+
+The default STT model is `mlx-community/whisper-large-v3-mlx`, which is slower than Turbo but worked better on the pilot lecture. Use `--stt-model mlx-community/whisper-large-v3-turbo` when speed matters more than transcript quality. Set `OARAG_STT_LANGUAGE=en` for English lectures or `OARAG_STT_LANGUAGE=ko` for Korean lectures; `--stt-language` overrides `.env` and the environment variable for a single command. If neither is set, Whisper auto-detects the language. Do not force `ko` for English audio, because Whisper will decode Korean-looking text. The first STT run downloads the MLX Whisper model into the Hugging Face cache. STT artifacts are written to:
+
+- `artifacts/projects/{project_id}/audio/`
+- `artifacts/projects/{project_id}/transcripts/mlx_whisper_raw.json`
+- `artifacts/projects/{project_id}/segments/lecture_segments.jsonl`
+
+## Notes
+
+This first baseline is a pipeline smoke test, not the final object-aligned evaluation. EDUVIDQA provides transcript/timestamp data but not visual entity or entity-link labels. Local video pilots will add `visual_entities` and weak `entity_links` next.
