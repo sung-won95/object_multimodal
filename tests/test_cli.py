@@ -119,6 +119,25 @@ def test_link_entities_cli_defaults() -> None:
     assert args.manifest is None
 
 
+def test_query_project_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        ["query-project", "--index", "sample_segments", "--project-id", "sample_project", "--query", "bet size"]
+    )
+
+    assert args.index == "sample_segments"
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.query == "bet size"
+    assert args.limit == 5
+    assert args.segments is None
+    assert args.frames_manifest is None
+    assert args.visual_entities is None
+    assert args.entity_links is None
+    assert args.window_seconds is None
+    assert args.neighbor_count == 1
+    assert args.output is None
+
+
 def test_batch_ingest_cli_defaults() -> None:
     args = build_parser().parse_args(["batch-ingest", "--root", "lectures"])
 
