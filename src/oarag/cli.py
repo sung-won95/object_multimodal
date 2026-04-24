@@ -23,6 +23,7 @@ from .ingest import (
 )
 from .io import write_json
 from .meili import LECTURE_SEGMENT_SETTINGS, MeiliClient
+from .project_query import query_project
 from .project_index import index_project_segments, project_dir_from_args
 from .schemas import SearchCandidate
 from .stt import DEFAULT_MLX_WHISPER_MODEL
@@ -326,6 +327,50 @@ def build_parser() -> argparse.ArgumentParser:
     query.add_argument("--limit", type=int, default=5)
     query.set_defaults(func=cmd_query)
 
+    query_project = subparsers.add_parser(
+        "query-project",
+        help="Search a local project and return multimodal evidence bundles",
+    )
+    query_project.add_argument("--index", required=True)
+    location = query_project.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    query_project.add_argument("--query", required=True)
+    query_project.add_argument("--limit", type=int, default=5)
+    query_project.add_argument(
+        "--segments",
+        type=Path,
+        help="Optional segment JSONL path. Relative paths are resolved from project dir.",
+    )
+    query_project.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Optional frames manifest JSONL path. Relative paths are resolved from project dir.",
+    )
+    query_project.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Optional visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    query_project.add_argument(
+        "--entity-links",
+        type=Path,
+        help="Optional entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    query_project.add_argument(
+        "--window-seconds",
+        type=float,
+        help="Include segments whose timestamps overlap this many seconds around the matched hit.",
+    )
+    query_project.add_argument(
+        "--neighbor-count",
+        type=int,
+        default=1,
+        help="Neighboring segments to include on each side when --window-seconds is omitted.",
+    )
+    query_project.add_argument("--output", type=Path, help="Optional JSON output path.")
+    query_project.set_defaults(func=cmd_query_project)
+
     evaluate = subparsers.add_parser("eval-eduvidqa", help="Run timestamp proximity eval")
     evaluate.add_argument("--input", required=True, type=Path)
     evaluate.add_argument("--index", required=True)
@@ -526,6 +571,32 @@ def cmd_query(args: argparse.Namespace) -> None:
             indent=2,
         )
     )
+
+
+def cmd_query_project(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    response = query_project(
+        client=client,
+        index_uid=args.index,
+        project_dir=project_dir,
+        query=args.query,
+        limit=args.limit,
+        segments_path=args.segments,
+        frames_manifest_path=args.frames_manifest,
+        visual_entities_path=args.visual_entities,
+        entity_links_path=args.entity_links,
+        window_seconds=args.window_seconds,
+        neighbor_count=args.neighbor_count,
+    )
+    if args.output is not None:
+        output_path = args.output
+        if not output_path.is_absolute():
+            output_path = project_dir / output_path
+        write_json(output_path, response)
+    for line in response.get("summary_lines", []):
+        print(line, file=sys.stderr)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
 
 
 def cmd_eval_eduvidqa(args: argparse.Namespace) -> None:

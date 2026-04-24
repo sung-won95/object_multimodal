@@ -262,6 +262,32 @@ Defaults:
 
 Use `--window-seconds` instead of `--neighbor-count` to select timestamp-overlapping context around the target segment.
 
+## Multimodal Project Query
+
+Search a local project index and assemble transcript, frame, visual, and link evidence for each top hit:
+
+```bash
+PYTHONPATH=src python -m oarag query-project \
+  --project-id upswing_matrices \
+  --index upswing_matrices_segments \
+  --query "what affects bet size" \
+  --limit 3 \
+  --neighbor-count 1
+```
+
+Behavior:
+
+- Searches the provided Meilisearch index and converts each hit into a local multimodal evidence bundle.
+- Loads transcript context and frame metadata from the project artifact folder.
+- Loads `visual_entities.jsonl` and `entity_links.jsonl` when present, but still works when those artifacts do not exist yet.
+- Prints short human-readable summary lines to stderr and a JSON bundle to stdout.
+- Keeps resolved artifact paths in the JSON output for reproducibility and later figure/report generation.
+
+Optional:
+
+- Use `--window-seconds` instead of `--neighbor-count` for timestamp-based context windows.
+- Use `--output` to save the assembled JSON bundle inside or outside the project directory.
+
 ## Notes
 
 This first baseline is a pipeline smoke test, not the final object-aligned evaluation. EDUVIDQA provides transcript/timestamp data but not visual entity or entity-link labels. Local video pilots will add `visual_entities` and weak `entity_links` next.
