@@ -1,0 +1,7 @@
+query_id,video_id,query_text,expected_topic,expected_time_hint,expected_visual_hint,notes
+matrices_what_is_matrix,2_Matrices,매트릭스가 무엇인지,hand matrix introduction,6-10s,opening matrix screen and OCRable chart labels,frame-backed representative hit
+matrices_offsuit_location,2_Matrices,오프수딧 핸드는 어디에 있나요,offsuit hand layout,69-74s,left-side offsuit area on the matrix,frame-backed representative hit with noisy OCR entities
+matrices_77_vs_ak_equity,2_Matrices,77이 AK 상대로 가지는 에퀴티,equity explanation,142-148s,equity result around 77 vs AK,expected transcript-only fallback because sampled frames stop near 120s
+charts_ajo_by_position,10_Deviating_From_The_Charts,AJo 전략은 포지션에 따라 어떻게 바뀌나요,AJo position-dependent example,34-36s,AJo example slide,frame-backed representative hit
+charts_utg_3x_aj,10_Deviating_From_The_Charts,UTG 3x를 마주하면 AJ를 어떻게 해야 하나요,UTG 3x response,95-102s or 126-131s,UTG example board or transcript-only fallback,top hit fell back to transcript-only while candidate 2 still had frame evidence
+charts_co_ajo_3bet,10_Deviating_From_The_Charts,CO에서 AJo로 3벳을 좋아하는 이유,CO AJo 3-bet rationale,144-151s,AJo/CO example board,expected transcript-only fallback because sampled frames stop near 120s

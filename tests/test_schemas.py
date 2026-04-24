@@ -1,4 +1,4 @@
-from oarag.schemas import EntityLink, VisualEntity, mention_candidates
+from oarag.schemas import EntityLink, LectureSegment, VisualEntity, mention_candidates
 
 
 def test_mention_candidates_do_not_match_korean_character_substrings() -> None:
@@ -56,3 +56,16 @@ def test_entity_link_from_dict_to_dict_roundtrip() -> None:
     encoded = link.to_dict()
 
     assert encoded == payload
+
+
+def test_local_transcript_segment_id_is_meili_safe() -> None:
+    segment = LectureSegment.from_local_transcript(
+        project_id="sample_project",
+        video_id="10. Deviating From The Charts",
+        seq_no=1,
+        start_time=0.0,
+        end_time=1.0,
+        text="Sample text",
+    )
+
+    assert segment.segment_id == "seg_10_Deviating_From_The_Charts_000001"

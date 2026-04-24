@@ -45,7 +45,7 @@ DEICTIC_HINTS = (
 
 
 def slugify(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9_.:-]+", "_", value.strip())
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip())
     return cleaned.strip("_") or "empty"
 
 
