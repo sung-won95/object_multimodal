@@ -171,3 +171,18 @@ def test_ingest_folder_alias_maps_to_batch_ingest() -> None:
 
     assert str(args.root) == "lectures"
     assert args.force is True
+
+
+def test_benchmark_retrieval_cli_accepts_manifest_and_output_dir() -> None:
+    args = build_parser().parse_args(
+        [
+            "benchmark-retrieval",
+            "--manifest",
+            "benchmarks/retrieval.json",
+            "--output-dir",
+            "reports/perf_runs/dev",
+        ]
+    )
+
+    assert str(args.manifest) == "benchmarks/retrieval.json"
+    assert str(args.output_dir) == "reports/perf_runs/dev"

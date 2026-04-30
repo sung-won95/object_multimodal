@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .alignment import align_segments_to_frames
+from .benchmark import run_benchmark
 from .config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
 from .eduvidqa import iter_lecture_segments, iter_records
 from .eval import evaluate_query, summarize
@@ -392,6 +393,18 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--output", type=Path)
     evaluate.set_defaults(func=cmd_eval_eduvidqa)
 
+    benchmark = subparsers.add_parser(
+        "benchmark-retrieval",
+        help="Run cross-domain retrieval benchmarks from a manifest",
+    )
+    benchmark.add_argument("--manifest", required=True, type=Path)
+    benchmark.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Optional output directory. Defaults to reports/perf_runs/{run_id} near the manifest.",
+    )
+    benchmark.set_defaults(func=cmd_benchmark_retrieval)
+
     return parser
 
 
@@ -656,6 +669,29 @@ def cmd_eval_eduvidqa(args: argparse.Namespace) -> None:
             output_handle.close()
 
     print(json.dumps(summarize(evals, deltas=deltas), ensure_ascii=False, indent=2))
+
+
+def cmd_benchmark_retrieval(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    run = run_benchmark(
+        client=client,
+        manifest_path=args.manifest,
+        output_dir=args.output_dir,
+        repo_root=default_paths().repo_root,
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": run.run_id,
+                "output_dir": str(run.output_dir),
+                "metrics": str(run.metrics_path),
+                "query_results": str(run.query_results_path),
+                "summary": str(run.summary_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def parse_deltas(value: str) -> list[int]:
