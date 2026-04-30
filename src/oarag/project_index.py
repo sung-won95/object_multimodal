@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from .config import default_paths
-from .meili import LECTURE_SEGMENT_SETTINGS, MeiliClient
+from .meili import LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE, MeiliClient
+from .meili import lecture_segment_settings, lecture_segment_settings_snapshot
 
 
 def project_dir_from_args(*, project_id: str | None, project_dir: Path | None) -> Path:
@@ -77,13 +78,16 @@ def index_project_segments(
     batch_size: int = 500,
     reset: bool = False,
     segments: Path | None = None,
+    settings_profile: str = LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
 ) -> dict[str, Any]:
     segments_path = segment_artifact_path(project_dir, segments=segments)
+    settings = lecture_segment_settings(settings_profile)
+    settings_snapshot = lecture_segment_settings_snapshot(settings, profile=settings_profile)
 
     if reset:
         client.wait_task(client.delete_index(index_uid))
     client.wait_task(client.create_index(index_uid, primary_key="segment_id"))
-    client.wait_task(client.update_settings(index_uid, LECTURE_SEGMENT_SETTINGS))
+    client.wait_task(client.update_settings(index_uid, settings))
 
     indexed_documents = 0
     indexed_batches = 0
@@ -100,4 +104,7 @@ def index_project_segments(
         "reset": reset,
         "indexed_documents": indexed_documents,
         "indexed_batches": indexed_batches,
+        "settings_profile": settings_snapshot["profile"],
+        "settings_hash": settings_snapshot["hash"],
+        "settings_snapshot": settings_snapshot,
     }

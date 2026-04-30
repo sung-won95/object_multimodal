@@ -23,7 +23,12 @@ from .ingest import (
     write_batch_summary_jsonl,
 )
 from .io import write_json
-from .meili import LECTURE_SEGMENT_SETTINGS, MeiliClient
+from .meili import (
+    LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+    LECTURE_SEGMENT_SETTINGS,
+    MeiliClient,
+    lecture_segment_settings_profile_names,
+)
 from .project_query import query_project
 from .project_index import index_project_segments, project_dir_from_args
 from .schemas import SearchCandidate
@@ -73,6 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     index_project.add_argument("--batch-size", type=int, default=500)
     index_project.add_argument("--reset", action="store_true")
+    index_project.add_argument(
+        "--settings-profile",
+        choices=lecture_segment_settings_profile_names(),
+        default=LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+        help="Meilisearch settings profile to apply to lecture_segments.",
+    )
     index_project.set_defaults(func=cmd_index_project)
 
     ingest = subparsers.add_parser("ingest-video", help="Ingest a local lecture video")
@@ -521,6 +532,7 @@ def cmd_index_project(args: argparse.Namespace) -> None:
         batch_size=args.batch_size,
         reset=args.reset,
         segments=args.segments,
+        settings_profile=args.settings_profile,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

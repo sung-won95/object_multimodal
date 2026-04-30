@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import time
 import urllib.error
@@ -9,28 +11,153 @@ from dataclasses import dataclass
 from typing import Any
 
 
-LECTURE_SEGMENT_SETTINGS = {
-    "searchableAttributes": [
-        "transcript_text",
-        "normalized_text",
-        "mention_candidates",
-        "video_name",
-    ],
-    "filterableAttributes": [
-        "project_id",
-        "dataset_name",
-        "subset_name",
-        "split_name",
-        "video_id",
-        "video_name",
-        "source",
-    ],
-    "sortableAttributes": [
-        "timestamp_center",
-        "sample_index",
-    ],
-    "displayedAttributes": ["*"],
+LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE = "lecture_segments_legacy_v0"
+LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE = "lecture_segments_default_v1"
+
+LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
+    LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE: {
+        "searchableAttributes": [
+            "transcript_text",
+            "normalized_text",
+            "mention_candidates",
+            "video_name",
+        ],
+        "filterableAttributes": [
+            "project_id",
+            "dataset_name",
+            "subset_name",
+            "split_name",
+            "video_id",
+            "video_name",
+            "source",
+        ],
+        "sortableAttributes": [
+            "timestamp_center",
+            "sample_index",
+        ],
+        "displayedAttributes": ["*"],
+    },
+    LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE: {
+        "searchableAttributes": [
+            "transcript_text",
+            "normalized_text",
+            "mention_candidates",
+            "video_name",
+            "video_id",
+            "slide_id",
+            "sample_id",
+        ],
+        "filterableAttributes": [
+            "project_id",
+            "dataset_name",
+            "subset_name",
+            "split_name",
+            "video_id",
+            "video_name",
+            "source",
+            "segment_id",
+            "sample_id",
+            "slide_id",
+            "sample_index",
+            "start_time",
+            "end_time",
+            "timestamp_center",
+        ],
+        "sortableAttributes": [
+            "timestamp_center",
+            "start_time",
+            "end_time",
+            "sample_index",
+        ],
+        "displayedAttributes": [
+            "segment_id",
+            "project_id",
+            "dataset_name",
+            "subset_name",
+            "split_name",
+            "sample_id",
+            "sample_index",
+            "video_id",
+            "video_name",
+            "start_time",
+            "end_time",
+            "timestamp_center",
+            "timestamp_points",
+            "transcript_text",
+            "normalized_text",
+            "slide_id",
+            "frame_refs",
+            "mention_candidates",
+            "source",
+        ],
+        "rankingRules": [
+            "words",
+            "typo",
+            "proximity",
+            "attribute",
+            "sort",
+            "exactness",
+        ],
+        "stopWords": [],
+        "synonyms": {},
+        "typoTolerance": {
+            "enabled": True,
+            "minWordSizeForTypos": {
+                "oneTypo": 5,
+                "twoTypos": 9,
+            },
+            "disableOnAttributes": [
+                "video_id",
+                "slide_id",
+                "sample_id",
+            ],
+            "disableOnWords": [],
+        },
+    },
 }
+
+
+def lecture_segment_settings(
+    profile: str = LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+) -> dict[str, Any]:
+    if profile not in LECTURE_SEGMENT_SETTINGS_PROFILES:
+        valid = ", ".join(sorted(LECTURE_SEGMENT_SETTINGS_PROFILES))
+        raise ValueError(f"Unknown lecture segment settings profile: {profile}. Valid profiles: {valid}")
+    return copy.deepcopy(LECTURE_SEGMENT_SETTINGS_PROFILES[profile])
+
+
+def lecture_segment_settings_profile_names() -> list[str]:
+    return sorted(LECTURE_SEGMENT_SETTINGS_PROFILES)
+
+
+def lecture_segment_settings_hash(
+    settings: dict[str, Any] | None = None,
+    *,
+    profile: str = LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+) -> str:
+    payload = lecture_segment_settings(profile) if settings is None else settings
+    encoded = _canonical_settings_json(payload).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def lecture_segment_settings_snapshot(
+    settings: dict[str, Any] | None = None,
+    *,
+    profile: str = LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+) -> dict[str, Any]:
+    payload = lecture_segment_settings(profile) if settings is None else copy.deepcopy(settings)
+    return {
+        "profile": profile,
+        "hash": lecture_segment_settings_hash(payload),
+        "settings": payload,
+    }
+
+
+def _canonical_settings_json(settings: dict[str, Any]) -> str:
+    return json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+LECTURE_SEGMENT_SETTINGS = lecture_segment_settings()
 
 
 @dataclass(frozen=True)
@@ -125,4 +252,3 @@ class MeiliClient:
 
 def quote(value: str) -> str:
     return urllib.parse.quote(value, safe="")
-
