@@ -197,13 +197,22 @@ def run_local_project_suite(
     domain_lexicon_path = (
         Path(str(suite["domain_lexicon"])) if suite.get("domain_lexicon") is not None else None
     )
+    rerank_enabled = bool(suite.get("rerank", False))
+    rerank_time_hint = str(suite["rerank_time_hint"]) if suite.get("rerank_time_hint") else None
+    rerank_time_hint_field = (
+        str(suite["rerank_time_hint_field"]) if suite.get("rerank_time_hint_field") else None
+    )
 
     rows: list[dict[str, Any]] = []
     latencies = []
     domain_lexicon_metadata: dict[str, Any] | None = None
+    rerank_metadata: dict[str, Any] | None = None
     for query_row in _read_query_csv(queries_path):
         if video_filter and str(query_row.get("video_id")) != video_filter:
             continue
+        row_rerank_time_hint = rerank_time_hint
+        if rerank_time_hint_field and query_row.get(rerank_time_hint_field):
+            row_rerank_time_hint = str(query_row[rerank_time_hint_field])
         started = time.perf_counter()
         response = query_project(
             client=client,
@@ -213,10 +222,15 @@ def run_local_project_suite(
             limit=limit,
             neighbor_count=neighbor_count,
             domain_lexicon_path=domain_lexicon_path,
+            rerank=rerank_enabled,
+            rerank_time_hint=row_rerank_time_hint,
         )
         if domain_lexicon_metadata is None:
             loaded_metadata = response.get("domain_lexicon")
             domain_lexicon_metadata = loaded_metadata if isinstance(loaded_metadata, dict) else None
+        if rerank_metadata is None:
+            loaded_rerank = (response.get("retrieval_context") or {}).get("rerank")
+            rerank_metadata = loaded_rerank if isinstance(loaded_rerank, dict) else None
         elapsed_ms = (time.perf_counter() - started) * 1000
         processing_time_ms = response.get("processing_time_ms")
         latencies.append(_optional_float(processing_time_ms) or elapsed_ms)
@@ -254,6 +268,8 @@ def run_local_project_suite(
                 "linked_entity_backed": linked_backed,
                 "domain_lexicon": response.get("domain_lexicon"),
                 "query_expansion": response.get("query_expansion"),
+                "rerank": (response.get("retrieval_context") or {}).get("rerank"),
+                "top_rerank": bundles[0].get("rerank") if bundles else None,
                 "processing_time_ms": processing_time_ms,
                 "elapsed_time_ms": round(elapsed_ms, 4),
             }
@@ -267,6 +283,12 @@ def run_local_project_suite(
         "limit": limit,
         "query_count": len(rows),
         "domain_lexicon": domain_lexicon_metadata or _empty_domain_lexicon_metadata(),
+        "rerank": _suite_rerank_metadata(
+            enabled=rerank_enabled,
+            observed=rerank_metadata,
+            time_hint=rerank_time_hint,
+            time_hint_field=rerank_time_hint_field,
+        ),
         "mean_abs_error": round(
             _mean(row["best_abs_error"] for row in rows if row["best_abs_error"] is not None), 4
         )
@@ -464,13 +486,13 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
         "## Suites",
         "",
         "| suite | type | domain | lexicon | queries | Hit@10s | MRR | latency ms | "
-        "frame-backed | linked-backed |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "frame-backed | linked-backed | rerank |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for suite in metrics["suites"]:
         lines.append(
             "| {suite_id} | {suite_type} | {domain} | {lexicon} | {query_count} | "
-            "{hit10} | {mrr} | {latency} | {frame} | {linked} |".format(
+            "{hit10} | {mrr} | {latency} | {frame} | {linked} | {rerank} |".format(
                 suite_id=suite.get("suite_id"),
                 suite_type=suite.get("suite_type"),
                 domain=suite.get("domain"),
@@ -481,6 +503,7 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 latency=_format_metric(suite.get("mean_processing_time_ms")),
                 frame=_format_metric(suite.get("frame_backed_ratio")),
                 linked=_format_metric(suite.get("linked_entity_backed_ratio")),
+                rerank=_format_rerank(suite.get("rerank")),
             )
         )
     lines.extend(["", "## Anti-Overfit View", ""])
@@ -504,6 +527,27 @@ def _empty_domain_lexicon_metadata() -> dict[str, Any]:
     }
 
 
+def _suite_rerank_metadata(
+    *,
+    enabled: bool,
+    observed: dict[str, Any] | None,
+    time_hint: str | None,
+    time_hint_field: str | None,
+) -> dict[str, Any]:
+    source = "query_text"
+    if time_hint_field:
+        source = f"csv:{time_hint_field}"
+    elif time_hint:
+        source = "suite:rerank_time_hint"
+
+    return {
+        "enabled": enabled,
+        "strategy": observed.get("strategy") if enabled and observed else None,
+        "weights": observed.get("weights") if enabled and observed else None,
+        "time_hint_source": source,
+    }
+
+
 def _format_domain_lexicon(value: Any) -> str:
     if not isinstance(value, dict) or not value.get("enabled"):
         return "off"
@@ -511,6 +555,13 @@ def _format_domain_lexicon(value: Any) -> str:
     if source_path:
         return f"on ({Path(str(source_path)).name})"
     return "on"
+
+
+def _format_rerank(value: Any) -> str:
+    if not isinstance(value, dict) or not value.get("enabled"):
+        return "off"
+    strategy = value.get("strategy")
+    return f"on ({strategy})" if strategy else "on"
 
 
 def _format_metric(value: Any) -> str:

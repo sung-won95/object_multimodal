@@ -22,6 +22,16 @@ class FakeClient:
         elif "bet size" in query.lower():
             hits = [
                 {
+                    "segment_id": "seg_local_0",
+                    "sample_id": "seg_local_0",
+                    "video_id": "local_video",
+                    "start_time": 58.0,
+                    "end_time": 62.0,
+                    "timestamp_center": 60.0,
+                    "transcript_text": "Introductory aside",
+                    "_rankingScore": 0.95,
+                },
+                {
                     "segment_id": "seg_local_1",
                     "sample_id": "seg_local_1",
                     "video_id": "local_video",
@@ -29,7 +39,7 @@ class FakeClient:
                     "end_time": 14.0,
                     "timestamp_center": 12.0,
                     "transcript_text": "Bet size is visible",
-                    "_rankingScore": 0.8,
+                    "_rankingScore": 0.4,
                 }
             ]
         else:
@@ -68,6 +78,18 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
     _write_jsonl(
         project_dir / "segments" / "lecture_segments_aligned.jsonl",
         [
+            {
+                "segment_id": "seg_local_0",
+                "project_id": "local_project",
+                "video_id": "local_video",
+                "sample_id": "seg_local_0",
+                "sample_index": 0,
+                "start_time": 58.0,
+                "end_time": 62.0,
+                "timestamp_center": 60.0,
+                "transcript_text": "Introductory aside",
+                "frame_refs": [],
+            },
             {
                 "segment_id": "seg_local_1",
                 "project_id": "local_project",
@@ -129,7 +151,7 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
     queries_path = tmp_path / "queries.csv"
     queries_path.write_text(
         "query_id,video_id,query_text,expected_topic,expected_time_hint,expected_visual_hint,notes\n"
-        "q1,local_video,bet size,bet sizing,10-14s,bet size text,safe\n",
+        "q1,local_video,bet size 10-14s,bet sizing,10-14s,bet size text,safe\n",
         encoding="utf-8",
     )
 
@@ -158,6 +180,7 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
                         "index": "local_index",
                         "domain_lexicon": "domain_lexicon.json",
                         "limit": 3,
+                        "rerank": True,
                     },
                 ],
             }
@@ -177,12 +200,23 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
     )
     assert local_metrics["frame_backed_ratio"] == 1.0
     assert local_metrics["linked_entity_backed_ratio"] == 1.0
+    assert local_metrics["top1_mean_abs_error"] == 0.0
+    assert local_metrics["rerank"]["enabled"] is True
+    assert local_metrics["rerank"]["strategy"] == "deterministic_evidence_v1"
     assert local_metrics["domain_lexicon"]["enabled"] is True
     assert local_metrics["domain_lexicon"]["source_path"] == str(
         (project_dir / "domain_lexicon.json").resolve()
     )
+    query_rows = [
+        json.loads(line)
+        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+    ]
+    local_row = next(row for row in query_rows if row["suite_id"] == "local_suite")
+    assert local_row["top_candidate"]["segment_id"] == "seg_local_1"
+    assert local_row["top_rerank"]["original_rank"] == 2
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "| local_suite | local_project | local_pilot | on (domain_lexicon.json) |" in summary
+    assert "on (deterministic_evidence_v1)" in summary
     assert "Anti-Overfit View" in summary
 
 

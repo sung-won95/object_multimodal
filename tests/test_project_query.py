@@ -233,6 +233,105 @@ def test_query_project_expands_query_when_domain_lexicon_exists(tmp_path: Path) 
     }
 
 
+def test_query_project_rerank_reorders_bundles_and_records_breakdown(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_1", 1, 58.0, 62.0, "Introductory aside", []),
+            _segment("seg_2", 2, 10.0, 14.0, "Bet size appears on the board", ["frame_000012"]),
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000012", "timestamp": 12.0, "frame_path": "/tmp/f12.jpg"}],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "entity_board",
+                "project_id": "project",
+                "frame_id": "frame_000012",
+                "timestamp": 12.0,
+                "frame_path": "/tmp/f12.jpg",
+                "bbox": None,
+                "text": "bet size board",
+                "entity_type": "ocr_text",
+                "confidence": 0.91,
+                "source": "test",
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "entity_links.jsonl",
+        [
+            {
+                "link_id": "link_seg_2_entity_board",
+                "project_id": "project",
+                "segment_id": "seg_2",
+                "entity_id": "entity_board",
+                "frame_id": "frame_000012",
+                "link_type": "time_overlap+lexical_match",
+                "score": 1.2,
+                "evidence": ["time_overlap", "lexical_match"],
+                "time_overlap": True,
+                "lexical_match": ["bet", "size", "board"],
+                "mention_candidate": [],
+            }
+        ],
+    )
+
+    response = query_project(
+        client=FakeClient(
+            hits=[
+                {
+                    "segment_id": "seg_1",
+                    "sample_id": "seg_1",
+                    "video_id": "video",
+                    "start_time": 58.0,
+                    "end_time": 62.0,
+                    "timestamp_center": 60.0,
+                    "transcript_text": "Introductory aside",
+                    "_rankingScore": 0.95,
+                },
+                {
+                    "segment_id": "seg_2",
+                    "sample_id": "seg_2",
+                    "video_id": "video",
+                    "start_time": 10.0,
+                    "end_time": 14.0,
+                    "timestamp_center": 12.0,
+                    "transcript_text": "Bet size appears on the board",
+                    "_rankingScore": 0.4,
+                },
+            ]
+        ),
+        index_uid="local_segments",
+        project_dir=project_dir,
+        query="bet size board 10-14s",
+        neighbor_count=0,
+        rerank=True,
+    )
+
+    assert response["retrieval_context"]["rerank"]["enabled"] is True
+    assert [bundle["candidate"]["segment_id"] for bundle in response["bundles"]] == [
+        "seg_2",
+        "seg_1",
+    ]
+    top = response["bundles"][0]
+    assert top["rank"] == 1
+    assert top["candidate"]["rank"] == 2
+    assert top["rerank"]["original_rank"] == 2
+    assert top["rerank"]["breakdown"]["signals"]["query_overlap"]["matched_terms"] == [
+        "bet",
+        "board",
+        "size",
+    ]
+    assert "#1 (orig #2) video @10.0-14.0s" in response["summary_lines"][0]
+    assert "rerank_score=" in response["summary_lines"][0]
+
+
 def test_query_project_cli_prints_summary_and_writes_output(tmp_path: Path, monkeypatch, capsys) -> None:
     project_dir = tmp_path / "project"
     _write_jsonl(
@@ -254,6 +353,9 @@ def test_query_project_cli_prints_summary_and_writes_output(tmp_path: Path, monk
             str(project_dir),
             "--query",
             "shown",
+            "--rerank",
+            "--rerank-time-hint",
+            "1-3s",
             "--output",
             "query-result.json",
         ]
@@ -284,6 +386,10 @@ def test_query_project_cli_prints_summary_and_writes_output(tmp_path: Path, monk
     output_path = project_dir / "query-result.json"
     assert output_path.exists()
     written = json.loads(output_path.read_text(encoding="utf-8"))
+    assert written["retrieval_context"]["rerank"]["enabled"] is True
+    assert written["bundles"][0]["rerank"]["breakdown"]["signals"]["timestamp_proximity"][
+        "distance_seconds"
+    ] == 0.0
     assert written["bundles"][0]["candidate"]["segment_id"] == "seg_1"
 
 
