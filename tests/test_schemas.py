@@ -1,4 +1,4 @@
-from oarag.schemas import EntityLink, LectureSegment, VisualEntity, mention_candidates
+from oarag.schemas import EntityLink, EvidenceWindow, LectureSegment, VisualEntity, mention_candidates
 
 
 def test_mention_candidates_do_not_match_korean_character_substrings() -> None:
@@ -69,3 +69,19 @@ def test_local_transcript_segment_id_is_meili_safe() -> None:
     )
 
     assert segment.segment_id == "seg_10_Deviating_From_The_Charts_000001"
+
+
+def test_evidence_window_keeps_additive_fields_optional() -> None:
+    window = EvidenceWindow(
+        target_segment_id="seg_1",
+        project_id="project",
+        video_id="video",
+        start_time=0.0,
+        end_time=1.0,
+        transcript_segments=[],
+        frame_refs=[],
+    )
+
+    assert window.to_dict()["target_segment"] == {}
+    assert window.to_dict()["neighbor_segments"] == []
+    assert window.to_dict()["window_config"] == {}

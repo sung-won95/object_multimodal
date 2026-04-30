@@ -280,6 +280,26 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="Neighboring segments to include on each side when --window-seconds is omitted.",
     )
+    evidence.add_argument(
+        "--previous-neighbor-count",
+        type=int,
+        help="Neighboring segments to include before the target when using neighbor mode.",
+    )
+    evidence.add_argument(
+        "--next-neighbor-count",
+        type=int,
+        help="Neighboring segments to include after the target when using neighbor mode.",
+    )
+    evidence.add_argument(
+        "--window-before-seconds",
+        type=float,
+        help="Seconds to include before the target when using time-window mode.",
+    )
+    evidence.add_argument(
+        "--window-after-seconds",
+        type=float,
+        help="Seconds to include after the target when using time-window mode.",
+    )
     evidence.add_argument("--output", type=Path, help="Optional JSON output path.")
     evidence.set_defaults(func=cmd_evidence_window)
 
@@ -402,6 +422,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Neighboring segments to include on each side when --window-seconds is omitted.",
+    )
+    query_project.add_argument(
+        "--previous-neighbor-count",
+        type=int,
+        help="Neighboring segments to include before the target when using neighbor mode.",
+    )
+    query_project.add_argument(
+        "--next-neighbor-count",
+        type=int,
+        help="Neighboring segments to include after the target when using neighbor mode.",
+    )
+    query_project.add_argument(
+        "--window-before-seconds",
+        type=float,
+        help="Seconds to include before the target when using time-window mode.",
+    )
+    query_project.add_argument(
+        "--window-after-seconds",
+        type=float,
+        help="Seconds to include after the target when using time-window mode.",
     )
     query_project.add_argument("--output", type=Path, help="Optional JSON output path.")
     query_project.set_defaults(func=cmd_query_project)
@@ -569,6 +609,10 @@ def cmd_evidence_window(args: argparse.Namespace) -> None:
         frames_manifest_path=args.frames_manifest,
         window_seconds=args.window_seconds,
         neighbor_count=args.neighbor_count,
+        previous_neighbor_count=args.previous_neighbor_count,
+        next_neighbor_count=args.next_neighbor_count,
+        window_before_seconds=args.window_before_seconds,
+        window_after_seconds=args.window_after_seconds,
     )
     if args.output is not None:
         output_path = args.output
@@ -641,6 +685,10 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         domain_lexicon_path=args.domain_lexicon,
         window_seconds=args.window_seconds,
         neighbor_count=args.neighbor_count,
+        previous_neighbor_count=args.previous_neighbor_count,
+        next_neighbor_count=args.next_neighbor_count,
+        window_before_seconds=args.window_before_seconds,
+        window_after_seconds=args.window_after_seconds,
     )
     if args.output is not None:
         output_path = args.output

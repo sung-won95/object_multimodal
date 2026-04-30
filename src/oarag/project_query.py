@@ -11,6 +11,7 @@ from .evidence import (
     optional_float,
     read_jsonl,
     resolve_project_path,
+    resolve_window_config,
     select_window_segments,
 )
 from .meili import MeiliClient
@@ -32,6 +33,10 @@ def query_project(
     domain_lexicon_path: Path | None = None,
     window_seconds: float | None = None,
     neighbor_count: int = 1,
+    previous_neighbor_count: int | None = None,
+    next_neighbor_count: int | None = None,
+    window_before_seconds: float | None = None,
+    window_after_seconds: float | None = None,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     domain_lexicon = load_domain_lexicon(
@@ -62,6 +67,14 @@ def query_project(
 
     segment_lookup = {str(segment.get("segment_id")): segment for segment in segments}
     frame_lookup = {frame_id(frame): frame for frame in frames}
+    window_config = resolve_window_config(
+        window_seconds=window_seconds,
+        neighbor_count=neighbor_count,
+        previous_neighbor_count=previous_neighbor_count,
+        next_neighbor_count=next_neighbor_count,
+        window_before_seconds=window_before_seconds,
+        window_after_seconds=window_after_seconds,
+    )
     entity_lookup = {entity.entity_id: entity for entity in visual_entities}
     links_by_segment: dict[str, list[EntityLink]] = defaultdict(list)
     for link in entity_links:
@@ -94,11 +107,16 @@ def query_project(
             target_segment_id=candidate.segment_id,
             window_seconds=window_seconds,
             neighbor_count=neighbor_count,
+            previous_neighbor_count=previous_neighbor_count,
+            next_neighbor_count=next_neighbor_count,
+            window_before_seconds=window_before_seconds,
+            window_after_seconds=window_after_seconds,
         )
         evidence_window = make_evidence_window(
             target=target,
             window_segments=window_segments,
             frame_lookup=frame_lookup,
+            window_config=window_config,
         ).to_dict()
         window_visual_entities = _window_visual_entities(
             evidence_window=evidence_window,
@@ -161,6 +179,9 @@ def query_project(
             "visual_entities": resolved_visual_entities_path.exists(),
             "entity_links": resolved_entity_links_path.exists(),
             "domain_lexicon": domain_lexicon.enabled,
+        },
+        "retrieval_context": {
+            "window_config": window_config,
         },
         "counts": {
             "search_hits": len(hits),

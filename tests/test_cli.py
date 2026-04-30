@@ -82,6 +82,14 @@ def test_evidence_window_cli_accepts_project_and_segment() -> None:
             "bet size",
             "--neighbor-count",
             "2",
+            "--previous-neighbor-count",
+            "1",
+            "--next-neighbor-count",
+            "3",
+            "--window-before-seconds",
+            "4.5",
+            "--window-after-seconds",
+            "6.5",
         ]
     )
 
@@ -90,6 +98,10 @@ def test_evidence_window_cli_accepts_project_and_segment() -> None:
     assert args.segment_id == ["seg_1", "seg_2"]
     assert args.query == "bet size"
     assert args.neighbor_count == 2
+    assert args.previous_neighbor_count == 1
+    assert args.next_neighbor_count == 3
+    assert args.window_before_seconds == 4.5
+    assert args.window_after_seconds == 6.5
 
 
 def test_extract_visual_entities_cli_defaults() -> None:
@@ -137,6 +149,10 @@ def test_query_project_cli_defaults() -> None:
     assert args.domain_lexicon is None
     assert args.window_seconds is None
     assert args.neighbor_count == 1
+    assert args.previous_neighbor_count is None
+    assert args.next_neighbor_count is None
+    assert args.window_before_seconds is None
+    assert args.window_after_seconds is None
     assert args.output is None
 
 
