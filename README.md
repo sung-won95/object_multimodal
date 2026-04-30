@@ -61,6 +61,47 @@ python -m pytest
 
 The pytest configuration adds `src` to the test import path, so `PYTHONPATH=src` is not required for tests.
 
+## Retrieval Benchmark
+
+Run cross-domain retrieval benchmarks from a JSON manifest:
+
+```bash
+PYTHONPATH=src python -m oarag benchmark-retrieval \
+  --manifest benchmarks/retrieval_benchmark.json
+```
+
+Manifest shape:
+
+```json
+{
+  "run_id": "baseline_001",
+  "output_dir": "reports/perf_runs/baseline_001",
+  "deltas": [5, 10, 15],
+  "suites": [
+    {
+      "suite_id": "eduvidqa_test",
+      "type": "eduvidqa",
+      "domain": "public_eduvidqa",
+      "input": "../data/normalized_links/mathsc_timestamp_test.jsonl",
+      "index": "eduvidqa_mathsc_test_segments",
+      "limit": 5
+    },
+    {
+      "suite_id": "pilot_matrices",
+      "type": "local_project",
+      "domain": "local_pilot",
+      "project_id": "pilot_issue8_matrices_safe",
+      "queries": "reports/pilot_smoke/pilot_queries.csv",
+      "index": "pilot_issue8_matrices_segments_safe",
+      "video_id": "2_Matrices",
+      "limit": 3
+    }
+  ]
+}
+```
+
+The command writes `metrics.json`, `query_results.jsonl`, and `summary.md`. Reports include per-domain metrics so retrieval changes can be checked for overfitting instead of only improving one pilot video.
+
 ## Local Video Ingest
 
 For a local video with a sibling `.srt` file:
