@@ -153,7 +153,29 @@ def test_query_project_cli_defaults() -> None:
     assert args.next_neighbor_count is None
     assert args.window_before_seconds is None
     assert args.window_after_seconds is None
+    assert args.rerank is False
+    assert args.rerank_time_hint is None
     assert args.output is None
+
+
+def test_query_project_cli_accepts_rerank_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "query-project",
+            "--index",
+            "sample_segments",
+            "--project-id",
+            "sample_project",
+            "--query",
+            "bet size",
+            "--rerank",
+            "--rerank-time-hint",
+            "10-14s",
+        ]
+    )
+
+    assert args.rerank is True
+    assert args.rerank_time_hint == "10-14s"
 
 
 def test_batch_ingest_cli_defaults() -> None:
