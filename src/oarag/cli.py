@@ -92,6 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=120,
         help="Frame cap for smoke tests. Use 0 for no cap.",
     )
+    ingest.add_argument(
+        "--frame-sampling",
+        choices=["uniform", "prefix"],
+        default="uniform",
+        help="How to apply --max-frames. uniform spreads capped frames across the video.",
+    )
     ingest.add_argument("--skip-frames", action="store_true")
     ingest.add_argument(
         "--copy-source",
@@ -148,6 +154,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=120,
         help="Frame cap for smoke tests. Use 0 for no cap.",
+    )
+    batch_ingest.add_argument(
+        "--frame-sampling",
+        choices=["uniform", "prefix"],
+        default="uniform",
+        help="How to apply --max-frames. uniform spreads capped frames across each video.",
     )
     batch_ingest.add_argument("--skip-frames", action="store_true")
     batch_ingest.add_argument(
@@ -444,6 +456,7 @@ def cmd_ingest_video(args: argparse.Namespace) -> None:
             srt_path=args.srt,
             frame_rate=args.frame_rate,
             max_frames=max_frames,
+            frame_sampling=args.frame_sampling,
             skip_frames=args.skip_frames,
             copy_source=args.copy_source,
             transcript_source=args.transcript_source,
@@ -467,6 +480,7 @@ def cmd_batch_ingest(args: argparse.Namespace) -> None:
             output_root=output_root,
             frame_rate=args.frame_rate,
             max_frames=max_frames,
+            frame_sampling=args.frame_sampling,
             skip_frames=args.skip_frames,
             copy_source=args.copy_source,
             transcript_source=args.transcript_source,

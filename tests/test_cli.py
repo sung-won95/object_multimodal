@@ -143,10 +143,27 @@ def test_batch_ingest_cli_defaults() -> None:
 
     assert str(args.root) == "lectures"
     assert args.output_root.as_posix() == "artifacts/projects"
+    assert args.frame_sampling == "uniform"
     assert args.transcript_source == "auto"
     assert args.force is False
     assert args.strict is False
     assert args.dry_run is False
+
+
+def test_ingest_video_cli_accepts_prefix_frame_sampling() -> None:
+    args = build_parser().parse_args(
+        [
+            "ingest-video",
+            "--video",
+            "sample.mp4",
+            "--project-id",
+            "sample",
+            "--frame-sampling",
+            "prefix",
+        ]
+    )
+
+    assert args.frame_sampling == "prefix"
 
 
 def test_ingest_folder_alias_maps_to_batch_ingest() -> None:

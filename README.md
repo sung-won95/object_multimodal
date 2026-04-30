@@ -73,6 +73,13 @@ The command writes:
 
 By default the source video is symlinked, not copied. Use `--copy-source` only when you really want a duplicate video file.
 
+Frame cap behavior:
+
+- `--frame-sampling uniform` is the default and spreads capped frames across the full video duration.
+- `--frame-sampling prefix` preserves the older front-loaded smoke-test behavior.
+- `--max-frames 0` disables the cap and samples at `--frame-rate` through the whole video.
+- `project_manifest.json` records `frame_sampling`, including selected frame count, timestamp span, and temporal coverage ratio.
+
 Ingest an entire local lecture folder recursively:
 
 ```bash
@@ -80,6 +87,7 @@ PYTHONPATH=src python -m oarag batch-ingest \
   --root "../data/업스윙 포커" \
   --project-prefix upswing \
   --frame-rate 0.5 \
+  --frame-sampling uniform \
   --max-frames 120 \
   --summary-json artifacts/upswing_batch_summary.json \
   --summary-jsonl artifacts/upswing_batch_results.jsonl \

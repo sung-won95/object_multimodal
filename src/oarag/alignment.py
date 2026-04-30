@@ -61,8 +61,13 @@ def align_segments_to_frames(
         "segments_total": len(segments),
         "segments_with_frames": segments_with_frames,
         "segments_without_frames": len(segments) - segments_with_frames,
+        "segment_frame_coverage_ratio": (
+            round(segments_with_frames / len(segments), 4) if segments else None
+        ),
         "frame_refs_total": total_frame_refs,
         "unique_frames_referenced": len(referenced_frames),
+        "available_frames": len(frames),
+        "available_frame_time_span_sec": _frame_time_span(frames),
     }
     _update_project_manifest(
         manifest_path=resolved_manifest_path,
@@ -125,6 +130,17 @@ def _frame_id_from_path(value: Any) -> str:
     if value is None:
         return ""
     return Path(str(value)).stem
+
+
+def _frame_time_span(frames: list[dict[str, Any]]) -> float | None:
+    timestamps = [
+        timestamp
+        for timestamp in (_optional_float(frame.get("timestamp")) for frame in frames)
+        if timestamp is not None
+    ]
+    if not timestamps:
+        return None
+    return round(max(timestamps) - min(timestamps), 3)
 
 
 def _update_project_manifest(

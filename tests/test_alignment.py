@@ -47,8 +47,11 @@ def test_align_segments_to_frames_with_overlap_and_margin(tmp_path: Path) -> Non
         "segments_total": 2,
         "segments_with_frames": 2,
         "segments_without_frames": 0,
+        "segment_frame_coverage_ratio": 1.0,
         "frame_refs_total": 5,
         "unique_frames_referenced": 5,
+        "available_frames": 5,
+        "available_frame_time_span_sec": 20.69,
     }
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
