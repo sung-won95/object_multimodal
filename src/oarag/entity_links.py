@@ -10,6 +10,71 @@ from .project_index import segment_artifact_path
 from .schemas import EntityLink, VisualEntity, mention_candidates, slugify
 
 
+DOMAIN_TERM_ALIASES = {
+    "bet": {"bet", "betsize", "betting", "벳", "베팅", "배팅"},
+    "size": {"size", "sizing", "사이즈", "크기"},
+    "board": {"board", "보드", "화면", "판"},
+    "stack": {"stack", "스택"},
+    "matrix": {"matrix", "matrices", "매트릭스", "행렬"},
+    "range": {"range", "ranges", "레인지"},
+    "position": {"position", "positions", "포지션", "위치"},
+    "equity": {"equity", "에퀴티"},
+    "offsuit": {"offsuit", "offsuited", "off", "오프수딧", "오프슈트"},
+    "suited": {"suited", "수딧", "슈트"},
+    "hand": {"hand", "hands", "핸드"},
+    "card": {"card", "cards", "카드"},
+    "chart": {"chart", "charts", "차트"},
+    "button": {"button", "btn", "버튼"},
+    "utg": {"utg"},
+    "hj": {"hj"},
+    "co": {"co"},
+    "ajo": {"ajo", "aj"},
+}
+ALIAS_TO_CANONICAL = {
+    alias.casefold(): canonical
+    for canonical, aliases in DOMAIN_TERM_ALIASES.items()
+    for alias in aliases | {canonical}
+}
+KOREAN_PARTICLE_SUFFIXES = (
+    "으로",
+    "에서",
+    "에게",
+    "부터",
+    "까지",
+    "은",
+    "는",
+    "이",
+    "가",
+    "을",
+    "를",
+    "에",
+    "와",
+    "과",
+    "도",
+    "만",
+    "의",
+)
+STOP_TERMS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "for",
+    "in",
+    "is",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "this",
+    "to",
+    "with",
+}
+
+
 def link_entities(
     *,
     project_dir: Path,
@@ -74,6 +139,8 @@ def link_entities(
                 )
             )
 
+    evidence_type_counts = _evidence_type_counts(links)
+
     write_jsonl(resolved_output_path, [link.to_dict() for link in links])
     _update_project_manifest(
         manifest_path=resolved_manifest_path,
@@ -81,6 +148,7 @@ def link_entities(
         segments_total=len(segments),
         visual_entities_total=len(entities),
         links=links,
+        evidence_type_counts=evidence_type_counts,
     )
 
     return {
@@ -101,6 +169,7 @@ def link_entities(
             "timestamp_only_links": sum(
                 1 for link in links if not link.lexical_match and not link.mention_candidate
             ),
+            "evidence_type_counts": evidence_type_counts,
         },
     }
 
@@ -151,27 +220,56 @@ def _has_time_overlap(segment: dict[str, Any], entity: VisualEntity) -> bool:
 
 
 def _lexical_match(segment: dict[str, Any], entity: VisualEntity) -> list[str]:
-    transcript_terms = _terms(str(segment.get("transcript_text", "")))
-    entity_terms = _terms(entity.text)
-    return sorted(term for term in transcript_terms & entity_terms if len(term) >= 3)
+    transcript_terms = _expanded_terms(str(segment.get("transcript_text", "")))
+    entity_terms = _expanded_terms(entity.text)
+    return sorted(term for term in transcript_terms & entity_terms if _informative_term(term))
 
 
 def _mention_match(segment: dict[str, Any], entity: VisualEntity) -> list[str]:
     entity_text = entity.text.casefold()
+    transcript_text = str(segment.get("transcript_text", ""))
     candidates = segment.get("mention_candidates")
     if not isinstance(candidates, list):
-        candidates = mention_candidates(str(segment.get("transcript_text", "")))
-    return sorted(
-        {
-            str(candidate)
-            for candidate in candidates
-            if str(candidate).strip() and str(candidate).casefold() in entity_text
-        }
-    )
+        candidates = []
+    all_candidates = [str(candidate) for candidate in candidates]
+    all_candidates.extend(mention_candidates(transcript_text))
+
+    direct_matches = {
+        candidate.strip()
+        for candidate in all_candidates
+        if candidate.strip() and candidate.strip().casefold() in entity_text
+    }
+    candidate_terms: set[str] = set()
+    for candidate in all_candidates:
+        candidate_terms.update(_expanded_terms(candidate))
+
+    entity_terms = _expanded_terms(entity.text)
+    alias_matches = {term for term in candidate_terms & entity_terms if _informative_term(term)}
+    return sorted(direct_matches | alias_matches)
 
 
 def _terms(text: str) -> set[str]:
-    return {match.group(0) for match in re.finditer(r"[a-z0-9]+", text.casefold())}
+    return {match.group(0) for match in re.finditer(r"[0-9a-zA-Z가-힣]+", text.casefold())}
+
+
+def _expanded_terms(text: str) -> set[str]:
+    return {_canonical_term(term) for term in _terms(text)}
+
+
+def _canonical_term(term: str) -> str:
+    normalized = term.casefold().strip()
+    if normalized in ALIAS_TO_CANONICAL:
+        return ALIAS_TO_CANONICAL[normalized]
+    for suffix in KOREAN_PARTICLE_SUFFIXES:
+        if normalized.endswith(suffix) and len(normalized) > len(suffix):
+            stem = normalized[: -len(suffix)]
+            if stem in ALIAS_TO_CANONICAL:
+                return ALIAS_TO_CANONICAL[stem]
+    return normalized
+
+
+def _informative_term(term: str) -> bool:
+    return len(term) >= 2 and not term.isdigit() and term not in STOP_TERMS
 
 
 def _link_type(*, lexical_match: list[str], mention_match: list[str]) -> str:
@@ -185,12 +283,23 @@ def _link_type(*, lexical_match: list[str], mention_match: list[str]) -> str:
 
 
 def _score(*, lexical_match: list[str], mention_match: list[str]) -> float:
-    score = 1.0
+    score = 0.4
     if lexical_match:
-        score += 0.2 + (0.05 * len(lexical_match))
+        score += 0.35 + (0.05 * len(lexical_match))
     if mention_match:
-        score += 0.1 + (0.05 * len(mention_match))
+        score += 0.2 + (0.05 * len(mention_match))
     return round(score, 3)
+
+
+def _evidence_type_counts(links: list[EntityLink]) -> dict[str, int]:
+    return {
+        "time_overlap": sum(1 for link in links if link.time_overlap),
+        "lexical_match": sum(1 for link in links if link.lexical_match),
+        "mention_candidate": sum(1 for link in links if link.mention_candidate),
+        "timestamp_only": sum(
+            1 for link in links if not link.lexical_match and not link.mention_candidate
+        ),
+    }
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -234,6 +343,7 @@ def _update_project_manifest(
     segments_total: int,
     visual_entities_total: int,
     links: list[EntityLink],
+    evidence_type_counts: dict[str, int],
 ) -> None:
     payload: dict[str, Any]
     if manifest_path.exists():
@@ -263,6 +373,7 @@ def _update_project_manifest(
         "timestamp_only_links": sum(
             1 for link in links if not link.lexical_match and not link.mention_candidate
         ),
+        "evidence_type_counts": evidence_type_counts,
     }
     write_json(manifest_path, payload)
 

@@ -54,6 +54,12 @@ def test_link_entities_writes_timestamp_only_links_and_updates_manifest(tmp_path
     rows = _read_jsonl(output_path)
     assert summary["counts"]["entity_links"] == 1
     assert summary["counts"]["timestamp_only_links"] == 1
+    assert summary["counts"]["evidence_type_counts"] == {
+        "time_overlap": 1,
+        "lexical_match": 0,
+        "mention_candidate": 0,
+        "timestamp_only": 1,
+    }
     assert rows[0]["link_type"] == "time_overlap"
     assert rows[0]["lexical_match"] == []
     assert rows[0]["mention_candidate"] == []
@@ -153,6 +159,53 @@ def test_link_entities_adds_lexical_and_mention_evidence(tmp_path: Path) -> None
     assert rows[0]["link_type"] == "time_overlap+lexical_match+mention_candidate"
     assert rows[0]["lexical_match"] == ["board", "size", "stack"]
     assert rows[0]["mention_candidate"] == ["board", "stack"]
+    assert rows[0]["score"] == 1.2
+
+
+def test_link_entities_matches_korean_transcript_to_english_ocr_aliases(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            {
+                "segment_id": "seg_1",
+                "project_id": "sample_project",
+                "video_id": "video",
+                "start_time": 20.0,
+                "end_time": 22.0,
+                "timestamp_center": 21.0,
+                "transcript_text": "여기 보이는 벳 사이즈는 보드에 따라 달라집니다",
+                "mention_candidates": ["여기", "벳", "사이즈", "보드"],
+                "frame_refs": ["frame_000020"],
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "ent_1",
+                "project_id": "sample_project",
+                "frame_id": "frame_000020",
+                "timestamp": 21.0,
+                "frame_path": "/tmp/frame_000020.jpg",
+                "bbox": None,
+                "text": "BET SIZE BOARD",
+                "entity_type": "ocr_text",
+                "confidence": 0.9,
+                "source": "ocr:tesseract",
+            }
+        ],
+    )
+
+    summary = link_entities(project_dir=project_dir)
+
+    rows = _read_jsonl(project_dir / "manifests" / "entity_links.jsonl")
+    assert summary["counts"]["entity_links"] == 1
+    assert summary["counts"]["evidence_type_counts"]["lexical_match"] == 1
+    assert summary["counts"]["evidence_type_counts"]["mention_candidate"] == 1
+    assert rows[0]["lexical_match"] == ["bet", "board", "size"]
+    assert rows[0]["mention_candidate"] == ["bet", "board", "size"]
 
 
 def test_link_entities_skips_non_overlapping_entities(tmp_path: Path) -> None:
