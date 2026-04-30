@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from oarag.schemas import VisualEntity
-from oarag.visual_entities import FrameRecord, TesseractVisualEntityExtractor, extract_visual_entities
+from oarag.visual_entities import (
+    FrameRecord,
+    TesseractVisualEntityExtractor,
+    extract_visual_entities,
+    filter_visual_entities,
+)
 
 
 def test_extract_visual_entities_stub_writes_empty_jsonl_and_updates_manifest(tmp_path: Path) -> None:
@@ -41,12 +46,16 @@ def test_extract_visual_entities_stub_writes_empty_jsonl_and_updates_manifest(tm
     assert output_path.exists()
     assert output_path.read_text(encoding="utf-8") == ""
     assert summary["backend"] == "stub"
-    assert summary["counts"] == {"frames_total": 2, "visual_entities": 0}
+    assert summary["counts"]["frames_total"] == 2
+    assert summary["counts"]["raw_visual_entities"] == 0
+    assert summary["counts"]["visual_entities"] == 0
+    assert summary["counts"]["dropped_visual_entities"] == 0
 
     manifest = json.loads(project_manifest.read_text(encoding="utf-8"))
     assert manifest["artifacts"]["visual_entities"] == str(output_path)
     assert manifest["counts"]["visual_entities"] == 0
     assert manifest["visual_entity_extraction"]["backend"] == "stub"
+    assert manifest["visual_entity_extraction"]["raw_visual_entities"] == 0
 
 
 def test_extract_visual_entities_rejects_entity_with_mismatched_frame_reference(
@@ -117,6 +126,97 @@ def test_tesseract_language_option_is_placed_before_tsv_config(
 
     assert captured == [["tesseract", "/tmp/frame.jpg", "stdout", "-l", "eng", "tsv"]]
     assert [entity.text for entity in entities] == ["STACK"]
+
+
+def test_filter_visual_entities_drops_noise_and_duplicates() -> None:
+    base = {
+        "project_id": "sample_project",
+        "frame_id": "frame_000001",
+        "timestamp": 1.0,
+        "frame_path": "/tmp/frame.jpg",
+        "bbox": {"left": 10.0, "top": 20.0, "width": 30.0, "height": 40.0},
+        "entity_type": "ocr_text",
+        "source": "ocr:tesseract",
+    }
+    entities = [
+        VisualEntity(entity_id="keep", text="STACK", confidence=0.91, **base),
+        VisualEntity(entity_id="low_conf", text="CALL", confidence=0.32, **base),
+        VisualEntity(entity_id="punct", text="---", confidence=0.99, **base),
+        VisualEntity(entity_id="short", text="x", confidence=0.70, **base),
+        VisualEntity(entity_id="short_high_conf", text="A", confidence=0.96, **base),
+        VisualEntity(entity_id="duplicate", text="STACK", confidence=0.92, **base),
+    ]
+
+    filtered, summary = filter_visual_entities(entities)
+
+    assert [entity.entity_id for entity in filtered] == ["keep", "short_high_conf"]
+    assert summary["raw_visual_entities"] == 6
+    assert summary["visual_entities"] == 2
+    assert summary["dropped_visual_entities"] == 4
+    assert summary["filter_reasons"] == {
+        "empty_text": 0,
+        "low_confidence": 1,
+        "no_alnum": 1,
+        "short_low_confidence": 1,
+        "duplicate": 1,
+    }
+
+
+def test_extract_visual_entities_records_filter_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "filtered_project"
+    frame_path = project_dir / "frames" / "frame_000001.jpg"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000001", "frame_path": str(frame_path), "timestamp": 0.0}],
+    )
+
+    class NoisyExtractor:
+        backend = "noisy-test"
+
+        def extract(self, *, project_id: str, frame) -> list[VisualEntity]:
+            return [
+                VisualEntity(
+                    entity_id="ent_good",
+                    project_id=project_id,
+                    frame_id=frame.frame_id,
+                    timestamp=frame.timestamp,
+                    frame_path=frame.frame_path,
+                    bbox=None,
+                    text="Matrix",
+                    entity_type="ocr_text",
+                    confidence=0.88,
+                    source="test",
+                ),
+                VisualEntity(
+                    entity_id="ent_noise",
+                    project_id=project_id,
+                    frame_id=frame.frame_id,
+                    timestamp=frame.timestamp,
+                    frame_path=frame.frame_path,
+                    bbox=None,
+                    text=".",
+                    entity_type="ocr_text",
+                    confidence=0.90,
+                    source="test",
+                ),
+            ]
+
+    monkeypatch.setattr("oarag.visual_entities.make_extractor", lambda **_: NoisyExtractor())
+
+    summary = extract_visual_entities(project_dir=project_dir, backend="stub")
+
+    assert summary["counts"]["raw_visual_entities"] == 2
+    assert summary["counts"]["visual_entities"] == 1
+    assert summary["counts"]["dropped_visual_entities"] == 1
+    assert summary["counts"]["filter_reasons"]["no_alnum"] == 1
+
+    manifest = json.loads(
+        (project_dir / "manifests" / "project_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["visual_entity_extraction"]["raw_visual_entities"] == 2
+    assert manifest["visual_entity_extraction"]["dropped_visual_entities"] == 1
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
