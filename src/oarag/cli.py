@@ -454,6 +454,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="Seconds to include after the target when using time-window mode.",
     )
+    query_project.add_argument(
+        "--rerank",
+        action="store_true",
+        help="Reorder evidence bundles with deterministic domain-agnostic evidence signals.",
+    )
+    query_project.add_argument(
+        "--rerank-time-hint",
+        help="Optional timestamp hint for reranking, for example '10-14s'.",
+    )
     query_project.add_argument("--output", type=Path, help="Optional JSON output path.")
     query_project.set_defaults(func=cmd_query_project)
 
@@ -701,6 +710,8 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         next_neighbor_count=args.next_neighbor_count,
         window_before_seconds=args.window_before_seconds,
         window_after_seconds=args.window_after_seconds,
+        rerank=args.rerank,
+        rerank_time_hint=args.rerank_time_hint,
     )
     if args.output is not None:
         output_path = args.output

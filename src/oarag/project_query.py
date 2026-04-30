@@ -16,6 +16,7 @@ from .evidence import (
 )
 from .meili import MeiliClient
 from .project_index import segment_artifact_path
+from .rerank import rerank_bundles, rerank_metadata
 from .schemas import EntityLink, SearchCandidate, VisualEntity
 
 
@@ -37,6 +38,8 @@ def query_project(
     next_neighbor_count: int | None = None,
     window_before_seconds: float | None = None,
     window_after_seconds: float | None = None,
+    rerank: bool = False,
+    rerank_time_hint: str | None = None,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     domain_lexicon = load_domain_lexicon(
@@ -159,6 +162,15 @@ def query_project(
         bundled_entity_total += len(window_visual_entities)
         bundled_link_total += len(linked_entities)
 
+    rerank_context = rerank_metadata(enabled=False, query=query, timestamp_hint=rerank_time_hint)
+    if rerank:
+        bundles, rerank_context = rerank_bundles(
+            bundles=bundles,
+            query=query,
+            timestamp_hint=rerank_time_hint,
+        )
+        summary_lines = _refresh_bundle_summaries(bundles)
+
     return {
         "query": query,
         "index": index_uid,
@@ -182,6 +194,7 @@ def query_project(
         },
         "retrieval_context": {
             "window_config": window_config,
+            "rerank": rerank_context,
         },
         "counts": {
             "search_hits": len(hits),
@@ -286,6 +299,22 @@ def _bundle_summary(
     candidate: SearchCandidate,
     evidence_window: dict[str, Any],
     linked_entities: list[dict[str, Any]],
+    display_rank: int | None = None,
+) -> dict[str, Any]:
+    return _bundle_summary_from_dict(
+        candidate=candidate.to_dict(),
+        evidence_window=evidence_window,
+        linked_entities=linked_entities,
+        display_rank=display_rank,
+    )
+
+
+def _bundle_summary_from_dict(
+    *,
+    candidate: dict[str, Any],
+    evidence_window: dict[str, Any],
+    linked_entities: list[dict[str, Any]],
+    display_rank: int | None = None,
 ) -> dict[str, Any]:
     frame_paths = [
         str(frame_ref.get("frame_path", ""))
@@ -297,11 +326,19 @@ def _bundle_summary(
         for linked_entity in linked_entities
         if _linked_entity_label(linked_entity) is not None
     ]
-    transcript_excerpt = candidate.transcript_excerpt
-    time_label = _time_label(candidate.start_time, candidate.end_time)
+    transcript_excerpt = str(candidate.get("transcript_excerpt", ""))
+    time_label = _time_label(
+        optional_float(candidate.get("start_time")),
+        optional_float(candidate.get("end_time")),
+    )
+    original_rank = _optional_int(candidate.get("rank"))
+    rank = display_rank or original_rank or 0
+    rank_label = f"#{rank}"
+    if display_rank is not None and original_rank is not None and display_rank != original_rank:
+        rank_label = f"#{display_rank} (orig #{original_rank})"
 
     summary_text = (
-        f"#{candidate.rank} {candidate.video_id} {time_label}: "
+        f"{rank_label} {candidate.get('video_id')} {time_label}: "
         f"{transcript_excerpt or '(empty transcript)'} | "
         f"frames={len(evidence_window.get('frame_refs') or [])} | "
         f"linked_entities={', '.join(linked_entity_labels[:3]) or 'none'}"
@@ -312,6 +349,33 @@ def _bundle_summary(
         "linked_entity_labels": linked_entity_labels,
         "transcript_excerpt": transcript_excerpt,
     }
+
+
+def _refresh_bundle_summaries(bundles: list[dict[str, Any]]) -> list[str]:
+    summary_lines: list[str] = []
+    for display_rank, bundle in enumerate(bundles, start=1):
+        candidate = bundle.get("candidate") if isinstance(bundle.get("candidate"), dict) else {}
+        evidence_window = (
+            bundle.get("evidence_window") if isinstance(bundle.get("evidence_window"), dict) else {}
+        )
+        linked_entities = (
+            bundle.get("linked_entities") if isinstance(bundle.get("linked_entities"), list) else []
+        )
+        summary = _bundle_summary_from_dict(
+            candidate=candidate,
+            evidence_window=evidence_window,
+            linked_entities=linked_entities,
+            display_rank=display_rank,
+        )
+        rerank_info = bundle.get("rerank")
+        if isinstance(rerank_info, dict):
+            score = rerank_info.get("score")
+            original_rank = rerank_info.get("original_rank")
+            summary["text"] += f" | rerank_score={score} | original_rank={original_rank}"
+            summary["rerank_explanation"] = rerank_info.get("explanation")
+        bundle["summary"] = summary
+        summary_lines.append(summary["text"])
+    return summary_lines
 
 
 def _time_label(start_time: float | None, end_time: float | None) -> str:
@@ -368,3 +432,12 @@ def _project_id(*, segments: list[dict[str, Any]], project_dir: Path) -> str:
     if segments and segments[0].get("project_id") is not None:
         return str(segments[0]["project_id"])
     return project_dir.name
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
