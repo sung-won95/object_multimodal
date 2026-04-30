@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from .stt import (
 
 TRANSCRIPT_SOURCES = {"auto", "srt", "stt", "none"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
+FRAME_SAMPLING_STRATEGIES = {"prefix", "uniform"}
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,7 @@ class VideoIngestConfig:
     srt_path: Path | None = None
     frame_rate: float = 1.0
     max_frames: int | None = 120
+    frame_sampling: str = "uniform"
     skip_frames: bool = False
     copy_source: bool = False
     transcript_source: str = "auto"
@@ -48,6 +51,7 @@ class BatchIngestConfig:
     output_root: Path
     frame_rate: float = 1.0
     max_frames: int | None = 120
+    frame_sampling: str = "uniform"
     skip_frames: bool = False
     copy_source: bool = False
     transcript_source: str = "auto"
@@ -67,6 +71,8 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
         raise FileNotFoundError(f"Video not found: {video_path}")
     if config.transcript_source not in TRANSCRIPT_SOURCES:
         raise ValueError(f"transcript_source must be one of {sorted(TRANSCRIPT_SOURCES)}")
+    if config.frame_sampling not in FRAME_SAMPLING_STRATEGIES:
+        raise ValueError(f"frame_sampling must be one of {sorted(FRAME_SAMPLING_STRATEGIES)}")
 
     srt_path = resolve_srt(video_path, config.srt_path)
     project_dir = config.output_root / config.project_id
@@ -92,22 +98,31 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
     )
 
     frame_count = 0
+    frame_sampling_summary = _empty_frame_sampling_summary(
+        frame_rate=config.frame_rate,
+        max_frames=config.max_frames,
+        frame_sampling=config.frame_sampling,
+        duration_sec=probe.get("duration_sec"),
+        skipped=config.skip_frames,
+    )
     frames_manifest_path = manifests_dir / "frames_manifest.jsonl"
     if config.skip_frames:
         write_jsonl(frames_manifest_path, [])
     else:
-        frame_count = sample_frames(
+        frame_result = sample_frames(
             video_path=video_path,
             frames_dir=frames_dir,
             frame_rate=config.frame_rate,
             max_frames=config.max_frames,
+            duration_sec=probe.get("duration_sec"),
+            frame_sampling=config.frame_sampling,
         )
+        frame_count = len(frame_result["frames"])
         write_frames_manifest(
             frames_manifest_path,
-            frames_dir=frames_dir,
-            frame_rate=config.frame_rate,
-            frame_count=frame_count,
+            frame_result["frames"],
         )
+        frame_sampling_summary = frame_result["summary"]
 
     manifest = {
         "project_id": config.project_id,
@@ -126,6 +141,7 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
             ),
         },
         "probe": probe,
+        "frame_sampling": frame_sampling_summary,
         "artifacts": {
             "lecture_segments": str(segments_path),
             "audio": transcript_artifacts.get("audio_path"),
@@ -272,43 +288,218 @@ def sample_frames(
     frames_dir: Path,
     frame_rate: float,
     max_frames: int | None,
-) -> int:
+    *,
+    duration_sec: float | None = None,
+    frame_sampling: str = "uniform",
+) -> dict[str, Any]:
+    if frame_rate <= 0:
+        raise ValueError("frame_rate must be greater than 0")
+    if frame_sampling not in FRAME_SAMPLING_STRATEGIES:
+        raise ValueError(f"frame_sampling must be one of {sorted(FRAME_SAMPLING_STRATEGIES)}")
+
     frames_dir.mkdir(parents=True, exist_ok=True)
-    output_pattern = frames_dir / "frame_%06d.jpg"
-    command = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        str(video_path),
-        "-vf",
-        f"fps={frame_rate}",
+    for existing in frames_dir.glob("frame_*.jpg"):
+        existing.unlink()
+
+    selected_timestamps = select_frame_timestamps(
+        duration_sec=duration_sec,
+        frame_rate=frame_rate,
+        max_frames=max_frames,
+        frame_sampling=frame_sampling,
+    )
+
+    if selected_timestamps is None:
+        output_pattern = frames_dir / "frame_%06d.jpg"
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(video_path),
+            "-vf",
+            f"fps={frame_rate}",
+        ]
+        command.append(str(output_pattern))
+        run(command)
+        frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
+        frames = [
+            {
+                "frame_id": path.stem,
+                "frame_path": str(path),
+                "timestamp": round(index / frame_rate, 3),
+            }
+            for index, path in enumerate(frame_paths)
+        ]
+    elif frame_sampling == "prefix":
+        output_pattern = frames_dir / "frame_%06d.jpg"
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(video_path),
+            "-vf",
+            f"fps={frame_rate}",
+            "-frames:v",
+            str(len(selected_timestamps)),
+            str(output_pattern),
+        ]
+        run(command)
+        frame_paths = sorted(frames_dir.glob("frame_*.jpg"))
+        frames = [
+            {
+                "frame_id": path.stem,
+                "frame_path": str(path),
+                "timestamp": selected_timestamps[index],
+            }
+            for index, path in enumerate(frame_paths)
+            if index < len(selected_timestamps)
+        ]
+    else:
+        frames = []
+        for index, timestamp in enumerate(selected_timestamps, start=1):
+            frame_path = frames_dir / f"frame_{index:06d}.jpg"
+            command = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                f"{timestamp:.3f}",
+                "-i",
+                str(video_path),
+                "-frames:v",
+                "1",
+                str(frame_path),
+            ]
+            run(command)
+            frames.append(
+                {
+                    "frame_id": f"frame_{index:06d}",
+                    "frame_path": str(frame_path),
+                    "timestamp": timestamp,
+                }
+            )
+
+    return {
+        "frames": frames,
+        "summary": summarize_frame_sampling(
+            frames=frames,
+            duration_sec=duration_sec,
+            frame_rate=frame_rate,
+            max_frames=max_frames,
+            frame_sampling=frame_sampling,
+        ),
+    }
+
+
+def select_frame_timestamps(
+    *,
+    duration_sec: float | None,
+    frame_rate: float,
+    max_frames: int | None,
+    frame_sampling: str,
+) -> list[float] | None:
+    if max_frames is None:
+        return None
+    if max_frames <= 0:
+        return None
+    if frame_rate <= 0:
+        raise ValueError("frame_rate must be greater than 0")
+    if duration_sec is None or duration_sec <= 0:
+        return [round(index / frame_rate, 3) for index in range(max_frames)]
+
+    candidate_count = max(1, math.ceil(duration_sec * frame_rate))
+    candidate_timestamps = [round(index / frame_rate, 3) for index in range(candidate_count)]
+    if len(candidate_timestamps) <= max_frames or frame_sampling == "prefix":
+        return candidate_timestamps[:max_frames]
+
+    if max_frames == 1:
+        return [candidate_timestamps[0]]
+
+    max_index = len(candidate_timestamps) - 1
+    selected_indices = [
+        round(position * max_index / (max_frames - 1)) for position in range(max_frames)
     ]
-    if max_frames is not None and max_frames > 0:
-        command.extend(["-frames:v", str(max_frames)])
-    command.append(str(output_pattern))
-    run(command)
-    return len(sorted(frames_dir.glob("frame_*.jpg")))
+    deduped_indices = sorted(dict.fromkeys(int(index) for index in selected_indices))
+    return [candidate_timestamps[index] for index in deduped_indices]
 
 
 def write_frames_manifest(
     path: Path,
-    frames_dir: Path,
-    frame_rate: float,
-    frame_count: int,
+    frames: list[dict[str, Any]],
 ) -> None:
-    rows = []
-    for index in range(1, frame_count + 1):
-        rows.append(
-            {
-                "frame_id": f"frame_{index:06d}",
-                "frame_path": str(frames_dir / f"frame_{index:06d}.jpg"),
-                "timestamp": round((index - 1) / frame_rate, 3) if frame_rate > 0 else None,
-            }
-        )
-    write_jsonl(path, rows)
+    write_jsonl(path, frames)
+
+
+def summarize_frame_sampling(
+    *,
+    frames: list[dict[str, Any]],
+    duration_sec: float | None,
+    frame_rate: float,
+    max_frames: int | None,
+    frame_sampling: str,
+) -> dict[str, Any]:
+    timestamps = [
+        timestamp
+        for timestamp in (_optional_float(frame.get("timestamp")) for frame in frames)
+        if timestamp is not None
+    ]
+    first_timestamp = min(timestamps) if timestamps else None
+    last_timestamp = max(timestamps) if timestamps else None
+    timestamp_span = (
+        round(last_timestamp - first_timestamp, 3)
+        if first_timestamp is not None and last_timestamp is not None
+        else None
+    )
+    covered_until = None
+    coverage_ratio = None
+    if duration_sec is not None and duration_sec > 0 and last_timestamp is not None:
+        covered_until = round(min(duration_sec, last_timestamp + (1 / frame_rate)), 3)
+        coverage_ratio = round(min(1.0, covered_until / duration_sec), 4)
+    candidate_count = (
+        math.ceil(duration_sec * frame_rate) if duration_sec and duration_sec > 0 else None
+    )
+    cap = max_frames if max_frames is not None and max_frames > 0 else None
+    return {
+        "strategy": frame_sampling,
+        "frame_rate": frame_rate,
+        "max_frames": cap,
+        "duration_sec": duration_sec,
+        "candidate_frame_count": candidate_count,
+        "selected_frame_count": len(frames),
+        "capped": bool(cap is not None and candidate_count is not None and candidate_count > cap),
+        "first_timestamp": first_timestamp,
+        "last_timestamp": last_timestamp,
+        "covered_until_sec": covered_until,
+        "timestamp_span_sec": timestamp_span,
+        "temporal_coverage_ratio": coverage_ratio,
+        "skipped": False,
+    }
+
+
+def _empty_frame_sampling_summary(
+    *,
+    frame_rate: float,
+    max_frames: int | None,
+    frame_sampling: str,
+    duration_sec: float | None,
+    skipped: bool,
+) -> dict[str, Any]:
+    summary = summarize_frame_sampling(
+        frames=[],
+        duration_sec=duration_sec,
+        frame_rate=frame_rate,
+        max_frames=max_frames,
+        frame_sampling=frame_sampling,
+    )
+    summary["skipped"] = skipped
+    return summary
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -414,6 +605,7 @@ def batch_ingest_videos(
                     output_root=resolved_output_root,
                     frame_rate=config.frame_rate,
                     max_frames=config.max_frames,
+                    frame_sampling=config.frame_sampling,
                     skip_frames=config.skip_frames,
                     copy_source=config.copy_source,
                     transcript_source=config.transcript_source,

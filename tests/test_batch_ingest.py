@@ -7,6 +7,8 @@ from oarag.ingest import (
     batch_ingest_videos,
     discover_video_files,
     make_project_id_for_video,
+    select_frame_timestamps,
+    summarize_frame_sampling,
     write_batch_summary_csv,
     write_batch_summary_json,
     write_batch_summary_jsonl,
@@ -42,6 +44,48 @@ def test_make_project_id_for_video_is_stable_and_distinct(tmp_path: Path) -> Non
     assert project_id_a_1 == project_id_a_2
     assert project_id_a_1 != project_id_b
     assert project_id_a_1.startswith("pilot__")
+
+
+def test_uniform_frame_sampling_spreads_cap_across_duration() -> None:
+    timestamps = select_frame_timestamps(
+        duration_sec=300.0,
+        frame_rate=1.0,
+        max_frames=4,
+        frame_sampling="uniform",
+    )
+
+    assert timestamps == [0.0, 100.0, 199.0, 299.0]
+
+
+def test_prefix_frame_sampling_keeps_existing_front_loaded_behavior() -> None:
+    timestamps = select_frame_timestamps(
+        duration_sec=300.0,
+        frame_rate=1.0,
+        max_frames=4,
+        frame_sampling="prefix",
+    )
+
+    assert timestamps == [0.0, 1.0, 2.0, 3.0]
+
+
+def test_frame_sampling_summary_reports_temporal_coverage() -> None:
+    summary = summarize_frame_sampling(
+        frames=[
+            {"frame_id": "frame_000001", "timestamp": 0.0},
+            {"frame_id": "frame_000002", "timestamp": 299.0},
+        ],
+        duration_sec=300.0,
+        frame_rate=1.0,
+        max_frames=2,
+        frame_sampling="uniform",
+    )
+
+    assert summary["selected_frame_count"] == 2
+    assert summary["candidate_frame_count"] == 300
+    assert summary["capped"] is True
+    assert summary["covered_until_sec"] == 300.0
+    assert summary["timestamp_span_sec"] == 299.0
+    assert summary["temporal_coverage_ratio"] == 1.0
 
 
 def test_batch_ingest_skips_existing_by_default_and_force_reingests(tmp_path: Path) -> None:
