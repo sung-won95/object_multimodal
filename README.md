@@ -188,6 +188,14 @@ Backends:
 - `--backend local-ocr` uses local `tesseract` command and emits `ocr_text` entities.
 - `--backend auto` uses `local-ocr` when `tesseract` is available, otherwise `stub`.
 
+OCR output is filtered before it is written:
+
+- low-confidence text below `0.40` is dropped
+- punctuation-only text is dropped
+- single-character text is kept only when confidence is high enough
+- exact duplicate text at the same frame/bounding box is removed
+- `visual_entity_extraction` records raw, dropped, final, and reason-by-reason counts
+
 Optional local OCR language hint:
 
 ```bash

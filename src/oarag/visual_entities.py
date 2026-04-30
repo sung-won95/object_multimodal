@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -10,6 +11,10 @@ from typing import Any, Protocol
 
 from .io import write_json, write_jsonl
 from .schemas import VisualEntity, slugify
+
+
+OCR_MIN_CONFIDENCE = 0.40
+OCR_SHORT_TEXT_MIN_CONFIDENCE = 0.85
 
 
 @dataclass(frozen=True)
@@ -114,12 +119,14 @@ def extract_visual_entities(
     project_id = _project_id_from_manifest_or_dir(resolved_manifest_path, resolved_project_dir)
     extractor = make_extractor(backend=backend, ocr_language=ocr_language)
 
-    entities: list[VisualEntity] = []
+    raw_entities: list[VisualEntity] = []
     for frame in frames:
         extracted = extractor.extract(project_id=project_id, frame=frame)
         for entity in extracted:
             _validate_entity_frame_consistency(entity=entity, frame=frame)
-        entities.extend(extracted)
+        raw_entities.extend(extracted)
+
+    entities, filter_summary = filter_visual_entities(raw_entities)
 
     write_jsonl(resolved_output_path, [entity.to_dict() for entity in entities])
     _update_project_manifest(
@@ -127,7 +134,9 @@ def extract_visual_entities(
         visual_entities_path=resolved_output_path,
         backend=extractor.backend,
         frames_total=len(frames),
+        raw_entities_total=len(raw_entities),
         entities_total=len(entities),
+        filter_summary=filter_summary,
     )
 
     return {
@@ -141,8 +150,46 @@ def extract_visual_entities(
         },
         "counts": {
             "frames_total": len(frames),
+            "raw_visual_entities": len(raw_entities),
             "visual_entities": len(entities),
+            "dropped_visual_entities": filter_summary["dropped_visual_entities"],
+            "filter_reasons": filter_summary["filter_reasons"],
         },
+    }
+
+
+def filter_visual_entities(
+    entities: list[VisualEntity],
+) -> tuple[list[VisualEntity], dict[str, Any]]:
+    filtered: list[VisualEntity] = []
+    seen: set[tuple[Any, ...]] = set()
+    reasons = {
+        "empty_text": 0,
+        "low_confidence": 0,
+        "no_alnum": 0,
+        "short_low_confidence": 0,
+        "duplicate": 0,
+    }
+
+    for entity in entities:
+        reason = _visual_entity_drop_reason(entity)
+        if reason is not None:
+            reasons[reason] += 1
+            continue
+
+        key = _entity_duplicate_key(entity)
+        if key in seen:
+            reasons["duplicate"] += 1
+            continue
+
+        seen.add(key)
+        filtered.append(entity)
+
+    return filtered, {
+        "raw_visual_entities": len(entities),
+        "visual_entities": len(filtered),
+        "dropped_visual_entities": len(entities) - len(filtered),
+        "filter_reasons": reasons,
     }
 
 
@@ -210,13 +257,46 @@ def _validate_entity_frame_consistency(*, entity: VisualEntity, frame: FrameReco
         )
 
 
+def _visual_entity_drop_reason(entity: VisualEntity) -> str | None:
+    normalized = _normalize_ocr_text(entity.text)
+    if not normalized:
+        return "empty_text"
+    confidence = entity.confidence
+    if confidence is not None and confidence < OCR_MIN_CONFIDENCE:
+        return "low_confidence"
+    alnum_count = sum(1 for char in normalized if char.isalnum())
+    if alnum_count == 0:
+        return "no_alnum"
+    if alnum_count == 1 and (confidence is None or confidence < OCR_SHORT_TEXT_MIN_CONFIDENCE):
+        return "short_low_confidence"
+    return None
+
+
+def _entity_duplicate_key(entity: VisualEntity) -> tuple[Any, ...]:
+    bbox = entity.bbox or {}
+    return (
+        entity.frame_id,
+        _normalize_ocr_text(entity.text).casefold(),
+        round(_optional_float(bbox.get("left")) or 0.0),
+        round(_optional_float(bbox.get("top")) or 0.0),
+        round(_optional_float(bbox.get("width")) or 0.0),
+        round(_optional_float(bbox.get("height")) or 0.0),
+    )
+
+
+def _normalize_ocr_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip())
+
+
 def _update_project_manifest(
     *,
     manifest_path: Path,
     visual_entities_path: Path,
     backend: str,
     frames_total: int,
+    raw_entities_total: int,
     entities_total: int,
+    filter_summary: dict[str, Any],
 ) -> None:
     payload: dict[str, Any]
     if manifest_path.exists():
@@ -240,7 +320,10 @@ def _update_project_manifest(
     payload["visual_entity_extraction"] = {
         "backend": backend,
         "frames_total": frames_total,
+        "raw_visual_entities": raw_entities_total,
         "visual_entities": entities_total,
+        "dropped_visual_entities": filter_summary["dropped_visual_entities"],
+        "filter_reasons": filter_summary["filter_reasons"],
     }
     write_json(manifest_path, payload)
 
