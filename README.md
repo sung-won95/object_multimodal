@@ -128,8 +128,13 @@ Frame cap behavior:
 
 - `--frame-sampling uniform` is the default and spreads capped frames across the full video duration.
 - `--frame-sampling prefix` preserves the older front-loaded smoke-test behavior.
+- `--frame-selection none` is the default and keeps all sampled frames.
+- `--frame-selection representative` post-processes sampled frames with domain-agnostic
+  image-diff and low-information checks to reduce near-duplicate or blank frames before OCR.
 - `--max-frames 0` disables the cap and samples at `--frame-rate` through the whole video.
 - `project_manifest.json` records `frame_sampling`, including selected frame count, timestamp span, and temporal coverage ratio.
+- `project_manifest.json` also records `frame_selection`, including dropped-frame reasons,
+  quality signals, and the estimated OCR cost/recall tradeoff.
 
 Ingest an entire local lecture folder recursively:
 

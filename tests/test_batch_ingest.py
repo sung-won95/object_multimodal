@@ -165,6 +165,31 @@ def test_batch_ingest_non_strict_continues_after_failure(tmp_path: Path) -> None
     assert len(summary["results"]) == 2
 
 
+def test_batch_ingest_passes_frame_selection_to_video_ingest(tmp_path: Path) -> None:
+    root = tmp_path / "lectures"
+    output_root = tmp_path / "artifacts" / "projects"
+    video = root / "lesson.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+    seen_frame_selection = None
+
+    def fake_ingest(video_config) -> dict:
+        nonlocal seen_frame_selection
+        seen_frame_selection = video_config.frame_selection
+        return {"transcript_source": "none", "counts": {"lecture_segments": 0, "frames": 1}}
+
+    batch_ingest_videos(
+        BatchIngestConfig(
+            root_dir=root,
+            output_root=output_root,
+            frame_selection="representative",
+        ),
+        ingest_fn=fake_ingest,
+    )
+
+    assert seen_frame_selection == "representative"
+
+
 def test_batch_ingest_strict_stops_after_first_failure(tmp_path: Path) -> None:
     root = tmp_path / "lectures"
     output_root = tmp_path / "artifacts" / "projects"
