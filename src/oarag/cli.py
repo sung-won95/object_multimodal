@@ -332,6 +332,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Project manifest JSON path. Relative paths are resolved from project dir.",
     )
+    entity_links.add_argument(
+        "--domain-lexicon",
+        type=Path,
+        help="Optional domain_lexicon.json path. Relative paths are resolved from project dir.",
+    )
     entity_links.set_defaults(func=cmd_link_entities)
 
     query = subparsers.add_parser("query", help="Search one query")
@@ -369,6 +374,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--entity-links",
         type=Path,
         help="Optional entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    query_project.add_argument(
+        "--domain-lexicon",
+        type=Path,
+        help="Optional domain_lexicon.json path. Relative paths are resolved from project dir.",
     )
     query_project.add_argument(
         "--window-seconds",
@@ -575,6 +585,7 @@ def cmd_link_entities(args: argparse.Namespace) -> None:
         visual_entities_path=args.visual_entities,
         output_path=args.output,
         manifest_path=args.manifest,
+        domain_lexicon_path=args.domain_lexicon,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -613,6 +624,7 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         frames_manifest_path=args.frames_manifest,
         visual_entities_path=args.visual_entities,
         entity_links_path=args.entity_links,
+        domain_lexicon_path=args.domain_lexicon,
         window_seconds=args.window_seconds,
         neighbor_count=args.neighbor_count,
     )

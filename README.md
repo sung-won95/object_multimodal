@@ -279,9 +279,39 @@ Current linking behavior:
 
 - Requires segment/entity time overlap (or matching `frame_refs`) to create a weak link.
 - Adds `lexical_match` evidence when normalized transcript terms overlap OCR text.
-- Normalizes a small domain alias set across Korean/English terms such as `벳`/`bet`, `사이즈`/`size`, `보드`/`board`, `레인지`/`range`, and `매트릭스`/`matrix`.
-- Adds `mention_candidate` evidence when transcript mention hooks or their aliases match visual text.
+- Keeps domain aliases off by default. Core linking only uses direct normalized term overlap unless a project lexicon is configured.
+- Adds `mention_candidate` evidence when transcript mention hooks or configured aliases match visual text.
 - Records evidence type counts in `entity_linking.evidence_type_counts`.
+
+Optional project domain lexicon:
+
+```json
+{
+  "aliases": {
+    "canonical_term": ["alias one", "alias two"]
+  }
+}
+```
+
+Save the file as `artifacts/projects/{project_id}/domain_lexicon.json` to enable it for that project. You can also pass an explicit path:
+
+```bash
+PYTHONPATH=src python -m oarag link-entities \
+  --project-id upswing_matrices \
+  --domain-lexicon domain_lexicon.json
+```
+
+The same project lexicon is used by `query-project` for query expansion when present:
+
+```bash
+PYTHONPATH=src python -m oarag query-project \
+  --project-id upswing_matrices \
+  --index upswing_matrices_segments \
+  --query "alias-heavy question" \
+  --domain-lexicon domain_lexicon.json
+```
+
+Project manifests and query/benchmark outputs record sanitized lexicon metadata (`enabled`, `source_path`, and counts), but do not copy the alias terms into metadata. To compare lexicon on/off with the retrieval benchmark, run matching `local_project` suites or runs: one without `domain_lexicon.json`, and one with the project file or a suite field such as `"domain_lexicon": "domain_lexicon.json"`. The benchmark summary marks the suite lexicon state, while `metrics.json` keeps the source path for reproducibility.
 
 ## Index Local Project Segments
 

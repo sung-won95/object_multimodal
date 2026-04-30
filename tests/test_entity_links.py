@@ -67,6 +67,13 @@ def test_link_entities_writes_timestamp_only_links_and_updates_manifest(tmp_path
     manifest = json.loads(project_manifest.read_text(encoding="utf-8"))
     assert manifest["artifacts"]["entity_links"] == str(output_path)
     assert manifest["counts"]["entity_links"] == 1
+    assert manifest["entity_linking"]["domain_lexicon"] == {
+        "enabled": False,
+        "source_path": None,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0,
+    }
 
 
 def test_link_entities_is_idempotent_for_repeated_runs(tmp_path: Path) -> None:
@@ -162,7 +169,7 @@ def test_link_entities_adds_lexical_and_mention_evidence(tmp_path: Path) -> None
     assert rows[0]["score"] == 1.2
 
 
-def test_link_entities_matches_korean_transcript_to_english_ocr_aliases(tmp_path: Path) -> None:
+def test_link_entities_keeps_domain_aliases_off_without_project_lexicon(tmp_path: Path) -> None:
     project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
     _write_jsonl(
         project_dir / "segments" / "lecture_segments_aligned.jsonl",
@@ -201,6 +208,68 @@ def test_link_entities_matches_korean_transcript_to_english_ocr_aliases(tmp_path
     summary = link_entities(project_dir=project_dir)
 
     rows = _read_jsonl(project_dir / "manifests" / "entity_links.jsonl")
+    assert summary["counts"]["entity_links"] == 1
+    assert summary["domain_lexicon"]["enabled"] is False
+    assert summary["counts"]["evidence_type_counts"]["lexical_match"] == 0
+    assert summary["counts"]["evidence_type_counts"]["mention_candidate"] == 0
+    assert rows[0]["link_type"] == "time_overlap"
+    assert rows[0]["lexical_match"] == []
+    assert rows[0]["mention_candidate"] == []
+
+
+def test_link_entities_uses_project_domain_lexicon_for_aliases(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            {
+                "segment_id": "seg_1",
+                "project_id": "sample_project",
+                "video_id": "video",
+                "start_time": 20.0,
+                "end_time": 22.0,
+                "timestamp_center": 21.0,
+                "transcript_text": "여기 보이는 벳 사이즈는 보드에 따라 달라집니다",
+                "mention_candidates": ["여기", "벳", "사이즈", "보드"],
+                "frame_refs": ["frame_000020"],
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "ent_1",
+                "project_id": "sample_project",
+                "frame_id": "frame_000020",
+                "timestamp": 21.0,
+                "frame_path": "/tmp/frame_000020.jpg",
+                "bbox": None,
+                "text": "BET SIZE BOARD",
+                "entity_type": "ocr_text",
+                "confidence": 0.9,
+                "source": "ocr:tesseract",
+            }
+        ],
+    )
+    (project_dir / "domain_lexicon.json").write_text(
+        json.dumps(
+            {
+                "aliases": {
+                    "bet": ["벳"],
+                    "size": ["사이즈"],
+                    "board": ["보드"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = link_entities(project_dir=project_dir)
+
+    rows = _read_jsonl(project_dir / "manifests" / "entity_links.jsonl")
+    assert summary["domain_lexicon"]["enabled"] is True
+    assert summary["domain_lexicon"]["canonical_term_count"] == 3
     assert summary["counts"]["entity_links"] == 1
     assert summary["counts"]["evidence_type_counts"]["lexical_match"] == 1
     assert summary["counts"]["evidence_type_counts"]["mention_candidate"] == 1
