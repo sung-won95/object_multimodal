@@ -5,6 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from oarag.meili import (
+    LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+    LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+    lecture_segment_settings_hash,
+)
 from oarag.project_index import index_project_segments, segment_artifact_path
 
 
@@ -91,13 +96,43 @@ def test_index_project_segments_batches_documents(tmp_path: Path) -> None:
     )
 
     add_calls = [call for call in client.calls if call[0] == "add_documents"]
+    settings_call = next(call for call in client.calls if call[0] == "update_settings")
     assert len(add_calls) == 2
     assert add_calls[0][1] == "local_segments"
     assert add_calls[0][2] == rows[:2]
     assert add_calls[1][2] == rows[2:]
+    assert settings_call[1] == "local_segments"
     assert ("delete_index", "local_segments") in client.calls
     assert summary["index"] == "local_segments"
     assert summary["indexed_documents"] == 3
     assert summary["indexed_batches"] == 2
     assert summary["segments_path"] == str(segments_path)
+    assert summary["settings_profile"] == LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE
+    assert summary["settings_hash"] == lecture_segment_settings_hash(settings_call[2])
+    assert summary["settings_snapshot"] == {
+        "profile": LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+        "hash": summary["settings_hash"],
+        "settings": settings_call[2],
+    }
 
+
+def test_index_project_segments_can_use_legacy_settings_profile(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(segments_path, [{"segment_id": "s1", "transcript_text": "alpha"}])
+    client = FakeMeiliClient()
+
+    summary = index_project_segments(
+        client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        settings_profile=LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+    )
+
+    settings_call = next(call for call in client.calls if call[0] == "update_settings")
+    assert settings_call[2]["displayedAttributes"] == ["*"]
+    assert summary["settings_profile"] == LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
+    assert summary["settings_hash"] == lecture_segment_settings_hash(
+        settings_call[2],
+        profile=LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+    )
