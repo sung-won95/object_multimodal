@@ -1,4 +1,11 @@
-from oarag.cli import build_parser
+import json
+from pathlib import Path
+
+from oarag.cli import build_parser, cmd_index_project
+from oarag.meili import (
+    LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+    LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+)
 
 
 def test_stt_language_defaults_to_env(monkeypatch) -> None:
@@ -56,16 +63,66 @@ def test_index_project_accepts_project_id() -> None:
     assert args.project_id == "sample"
     assert args.project_dir is None
     assert args.batch_size == 100
+    assert args.settings_profile == LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE
 
 
 def test_index_project_accepts_project_dir() -> None:
     args = build_parser().parse_args(
-        ["index-project", "--index", "local_segments", "--project-dir", "artifacts/projects/sample"]
+        [
+            "index-project",
+            "--index",
+            "local_segments",
+            "--project-dir",
+            "artifacts/projects/sample",
+            "--settings-profile",
+            LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+        ]
     )
 
     assert args.index == "local_segments"
     assert str(args.project_dir) == "artifacts/projects/sample"
     assert args.project_id is None
+    assert args.settings_profile == LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
+
+
+def test_cmd_index_project_forwards_settings_profile(monkeypatch, capsys) -> None:
+    calls = {}
+    fake_client = object()
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_index_project_segments(client, **kwargs):
+        calls["client"] = client
+        calls["index_kwargs"] = kwargs
+        return {"settings_profile": kwargs["settings_profile"]}
+
+    monkeypatch.setattr("oarag.cli.client_from_args", lambda args: fake_client)
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr("oarag.cli.index_project_segments", fake_index_project_segments)
+
+    args = build_parser().parse_args(
+        [
+            "index-project",
+            "--index",
+            "local_segments",
+            "--project-dir",
+            str(project_dir),
+            "--settings-profile",
+            LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+        ]
+    )
+
+    cmd_index_project(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["client"] is fake_client
+    assert calls["index_kwargs"]["settings_profile"] == LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
+    assert json.loads(capsys.readouterr().out)["settings_profile"] == (
+        LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
+    )
 
 
 def test_evidence_window_cli_accepts_project_and_segment() -> None:
