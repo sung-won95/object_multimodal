@@ -99,6 +99,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="uniform",
         help="How to apply --max-frames. uniform spreads capped frames across the video.",
     )
+    ingest.add_argument(
+        "--frame-selection",
+        choices=["none", "representative"],
+        default="none",
+        help="Optional post-sampling selector that removes near-duplicate or low-information frames.",
+    )
     ingest.add_argument("--skip-frames", action="store_true")
     ingest.add_argument(
         "--copy-source",
@@ -161,6 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["uniform", "prefix"],
         default="uniform",
         help="How to apply --max-frames. uniform spreads capped frames across each video.",
+    )
+    batch_ingest.add_argument(
+        "--frame-selection",
+        choices=["none", "representative"],
+        default="none",
+        help="Optional post-sampling selector that removes near-duplicate or low-information frames.",
     )
     batch_ingest.add_argument("--skip-frames", action="store_true")
     batch_ingest.add_argument(
@@ -480,6 +492,7 @@ def cmd_ingest_video(args: argparse.Namespace) -> None:
             frame_rate=args.frame_rate,
             max_frames=max_frames,
             frame_sampling=args.frame_sampling,
+            frame_selection=args.frame_selection,
             skip_frames=args.skip_frames,
             copy_source=args.copy_source,
             transcript_source=args.transcript_source,
@@ -504,6 +517,7 @@ def cmd_batch_ingest(args: argparse.Namespace) -> None:
             frame_rate=args.frame_rate,
             max_frames=max_frames,
             frame_sampling=args.frame_sampling,
+            frame_selection=args.frame_selection,
             skip_frames=args.skip_frames,
             copy_source=args.copy_source,
             transcript_source=args.transcript_source,
