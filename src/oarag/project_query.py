@@ -304,11 +304,11 @@ def _linked_entity_label(linked_entity: dict[str, Any]) -> str | None:
 
 
 def _link_explanation(link: EntityLink) -> str:
-    parts = ["time overlap"]
+    parts = [f"time overlap evidence (score={link.score:.2f})"]
     if link.lexical_match:
-        parts.append(f"lexical match: {', '.join(link.lexical_match)}")
+        parts.append(f"shared terms: {', '.join(link.lexical_match)}")
     if link.mention_candidate:
-        parts.append(f"mention candidate: {', '.join(link.mention_candidate)}")
+        parts.append(f"mention/entity hint: {', '.join(link.mention_candidate)}")
     return "; ".join(parts)
 
 

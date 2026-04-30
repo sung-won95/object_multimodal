@@ -117,7 +117,8 @@ def test_query_project_returns_multimodal_bundle(tmp_path: Path) -> None:
     ]
     assert bundle["visual_entities"][0]["entity_id"] == "entity_board"
     assert bundle["linked_entities"][0]["entity"]["text"] == "bet size board"
-    assert "lexical match: bet, board, size" in bundle["linked_entities"][0]["explanation"]
+    assert "shared terms: bet, board, size" in bundle["linked_entities"][0]["explanation"]
+    assert "mention/entity hint: board" in bundle["linked_entities"][0]["explanation"]
     assert bundle["summary"]["frame_paths"] == ["/tmp/f1.jpg", "/tmp/f6.jpg", "/tmp/f8.jpg", "/tmp/f12.jpg"]
     assert "bet size board" in response["summary_lines"][0]
 

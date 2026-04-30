@@ -227,8 +227,10 @@ Defaults:
 Current linking behavior:
 
 - Requires segment/entity time overlap (or matching `frame_refs`) to create a weak link.
-- Adds `lexical_match` evidence when transcript terms overlap OCR text.
-- Adds `mention_candidate` evidence when transcript mention hooks such as `this`, `board`, `stack`, or `bet size` appear in the OCR text.
+- Adds `lexical_match` evidence when normalized transcript terms overlap OCR text.
+- Normalizes a small domain alias set across Korean/English terms such as `벳`/`bet`, `사이즈`/`size`, `보드`/`board`, `레인지`/`range`, and `매트릭스`/`matrix`.
+- Adds `mention_candidate` evidence when transcript mention hooks or their aliases match visual text.
+- Records evidence type counts in `entity_linking.evidence_type_counts`.
 
 ## Index Local Project Segments
 
