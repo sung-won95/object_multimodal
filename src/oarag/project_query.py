@@ -4,6 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from .domain_lexicon import load_domain_lexicon
 from .evidence import (
     frame_id,
     make_evidence_window,
@@ -28,10 +29,15 @@ def query_project(
     frames_manifest_path: Path | None = None,
     visual_entities_path: Path | None = None,
     entity_links_path: Path | None = None,
+    domain_lexicon_path: Path | None = None,
     window_seconds: float | None = None,
     neighbor_count: int = 1,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
+    domain_lexicon = load_domain_lexicon(
+        project_dir=resolved_project_dir,
+        domain_lexicon_path=domain_lexicon_path,
+    )
     resolved_segments_path = segment_artifact_path(resolved_project_dir, segments=segments_path)
     resolved_frames_manifest_path = resolve_project_path(
         resolved_project_dir,
@@ -61,7 +67,8 @@ def query_project(
     for link in entity_links:
         links_by_segment[link.segment_id].append(link)
 
-    search_response = client.search(index_uid, query, limit=limit)
+    search_query = domain_lexicon.expand_query(query)
+    search_response = client.search(index_uid, search_query, limit=limit)
     hits = search_response.get("hits", [])
 
     bundles: list[dict[str, Any]] = []
@@ -145,11 +152,15 @@ def query_project(
             "frames_manifest": str(resolved_frames_manifest_path),
             "visual_entities": str(resolved_visual_entities_path),
             "entity_links": str(resolved_entity_links_path),
+            "domain_lexicon": domain_lexicon.metadata()["source_path"],
         },
+        "domain_lexicon": domain_lexicon.metadata(),
+        "query_expansion": domain_lexicon.query_expansion_metadata(query),
         "artifact_availability": {
             "frames_manifest": resolved_frames_manifest_path.exists(),
             "visual_entities": resolved_visual_entities_path.exists(),
             "entity_links": resolved_entity_links_path.exists(),
+            "domain_lexicon": domain_lexicon.enabled,
         },
         "counts": {
             "search_hits": len(hits),

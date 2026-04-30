@@ -117,6 +117,7 @@ def test_link_entities_cli_defaults() -> None:
     assert args.visual_entities is None
     assert args.output is None
     assert args.manifest is None
+    assert args.domain_lexicon is None
 
 
 def test_query_project_cli_defaults() -> None:
@@ -133,6 +134,7 @@ def test_query_project_cli_defaults() -> None:
     assert args.frames_manifest is None
     assert args.visual_entities is None
     assert args.entity_links is None
+    assert args.domain_lexicon is None
     assert args.window_seconds is None
     assert args.neighbor_count == 1
     assert args.output is None

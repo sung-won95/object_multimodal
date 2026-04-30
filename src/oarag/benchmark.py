@@ -194,9 +194,13 @@ def run_local_project_suite(
     suite_id = str(suite.get("suite_id") or project_dir.name)
     domain = str(suite.get("domain") or "local_project")
     video_filter = str(suite["video_id"]) if suite.get("video_id") is not None else None
+    domain_lexicon_path = (
+        Path(str(suite["domain_lexicon"])) if suite.get("domain_lexicon") is not None else None
+    )
 
     rows: list[dict[str, Any]] = []
     latencies = []
+    domain_lexicon_metadata: dict[str, Any] | None = None
     for query_row in _read_query_csv(queries_path):
         if video_filter and str(query_row.get("video_id")) != video_filter:
             continue
@@ -208,7 +212,11 @@ def run_local_project_suite(
             query=str(query_row["query_text"]),
             limit=limit,
             neighbor_count=neighbor_count,
+            domain_lexicon_path=domain_lexicon_path,
         )
+        if domain_lexicon_metadata is None:
+            loaded_metadata = response.get("domain_lexicon")
+            domain_lexicon_metadata = loaded_metadata if isinstance(loaded_metadata, dict) else None
         elapsed_ms = (time.perf_counter() - started) * 1000
         processing_time_ms = response.get("processing_time_ms")
         latencies.append(_optional_float(processing_time_ms) or elapsed_ms)
@@ -244,6 +252,8 @@ def run_local_project_suite(
                 "top_candidate": top_candidate,
                 "frame_backed": frame_backed,
                 "linked_entity_backed": linked_backed,
+                "domain_lexicon": response.get("domain_lexicon"),
+                "query_expansion": response.get("query_expansion"),
                 "processing_time_ms": processing_time_ms,
                 "elapsed_time_ms": round(elapsed_ms, 4),
             }
@@ -256,6 +266,7 @@ def run_local_project_suite(
         "index": index_uid,
         "limit": limit,
         "query_count": len(rows),
+        "domain_lexicon": domain_lexicon_metadata or _empty_domain_lexicon_metadata(),
         "mean_abs_error": round(
             _mean(row["best_abs_error"] for row in rows if row["best_abs_error"] is not None), 4
         )
@@ -452,15 +463,18 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
         "",
         "## Suites",
         "",
-        "| suite | type | domain | queries | Hit@10s | MRR | latency ms | frame-backed | linked-backed |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| suite | type | domain | lexicon | queries | Hit@10s | MRR | latency ms | "
+        "frame-backed | linked-backed |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for suite in metrics["suites"]:
         lines.append(
-            "| {suite_id} | {suite_type} | {domain} | {query_count} | {hit10} | {mrr} | {latency} | {frame} | {linked} |".format(
+            "| {suite_id} | {suite_type} | {domain} | {lexicon} | {query_count} | "
+            "{hit10} | {mrr} | {latency} | {frame} | {linked} |".format(
                 suite_id=suite.get("suite_id"),
                 suite_type=suite.get("suite_type"),
                 domain=suite.get("domain"),
+                lexicon=_format_domain_lexicon(suite.get("domain_lexicon")),
                 query_count=suite.get("query_count") or suite.get("count") or 0,
                 hit10=_format_metric(suite.get("hit_at_10s")),
                 mrr=_format_metric(suite.get("mrr_at_max_delta")),
@@ -478,6 +492,25 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
         )
     lines.append("")
     return "\n".join(lines)
+
+
+def _empty_domain_lexicon_metadata() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "source_path": None,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0,
+    }
+
+
+def _format_domain_lexicon(value: Any) -> str:
+    if not isinstance(value, dict) or not value.get("enabled"):
+        return "off"
+    source_path = value.get("source_path")
+    if source_path:
+        return f"on ({Path(str(source_path)).name})"
+    return "on"
 
 
 def _format_metric(value: Any) -> str:

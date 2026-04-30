@@ -5,55 +5,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .domain_lexicon import DomainLexicon, load_domain_lexicon
 from .io import write_json, write_jsonl
 from .project_index import segment_artifact_path
 from .schemas import EntityLink, VisualEntity, mention_candidates, slugify
 
-
-DOMAIN_TERM_ALIASES = {
-    "bet": {"bet", "betsize", "betting", "벳", "베팅", "배팅"},
-    "size": {"size", "sizing", "사이즈", "크기"},
-    "board": {"board", "보드", "화면", "판"},
-    "stack": {"stack", "스택"},
-    "matrix": {"matrix", "matrices", "매트릭스", "행렬"},
-    "range": {"range", "ranges", "레인지"},
-    "position": {"position", "positions", "포지션", "위치"},
-    "equity": {"equity", "에퀴티"},
-    "offsuit": {"offsuit", "offsuited", "off", "오프수딧", "오프슈트"},
-    "suited": {"suited", "수딧", "슈트"},
-    "hand": {"hand", "hands", "핸드"},
-    "card": {"card", "cards", "카드"},
-    "chart": {"chart", "charts", "차트"},
-    "button": {"button", "btn", "버튼"},
-    "utg": {"utg"},
-    "hj": {"hj"},
-    "co": {"co"},
-    "ajo": {"ajo", "aj"},
-}
-ALIAS_TO_CANONICAL = {
-    alias.casefold(): canonical
-    for canonical, aliases in DOMAIN_TERM_ALIASES.items()
-    for alias in aliases | {canonical}
-}
-KOREAN_PARTICLE_SUFFIXES = (
-    "으로",
-    "에서",
-    "에게",
-    "부터",
-    "까지",
-    "은",
-    "는",
-    "이",
-    "가",
-    "을",
-    "를",
-    "에",
-    "와",
-    "과",
-    "도",
-    "만",
-    "의",
-)
 STOP_TERMS = {
     "a",
     "an",
@@ -82,11 +38,16 @@ def link_entities(
     visual_entities_path: Path | None = None,
     output_path: Path | None = None,
     manifest_path: Path | None = None,
+    domain_lexicon_path: Path | None = None,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     if not resolved_project_dir.exists():
         raise FileNotFoundError(f"Project directory not found: {resolved_project_dir}")
 
+    domain_lexicon = load_domain_lexicon(
+        project_dir=resolved_project_dir,
+        domain_lexicon_path=domain_lexicon_path,
+    )
     resolved_segments_path = segment_artifact_path(resolved_project_dir, segments=segments_path)
     resolved_visual_entities_path = _resolve_path(
         project_dir=resolved_project_dir,
@@ -115,8 +76,8 @@ def link_entities(
             if not time_overlap:
                 continue
 
-            lexical_match = _lexical_match(segment, entity)
-            mention_match = _mention_match(segment, entity)
+            lexical_match = _lexical_match(segment, entity, domain_lexicon=domain_lexicon)
+            mention_match = _mention_match(segment, entity, domain_lexicon=domain_lexicon)
             evidence = ["time_overlap"]
             if lexical_match:
                 evidence.append("lexical_match")
@@ -149,6 +110,7 @@ def link_entities(
         visual_entities_total=len(entities),
         links=links,
         evidence_type_counts=evidence_type_counts,
+        domain_lexicon_metadata=domain_lexicon.metadata(),
     )
 
     return {
@@ -159,7 +121,9 @@ def link_entities(
             "visual_entities": str(resolved_visual_entities_path),
             "entity_links": str(resolved_output_path),
             "project_manifest": str(resolved_manifest_path),
+            "domain_lexicon": domain_lexicon.metadata()["source_path"],
         },
+        "domain_lexicon": domain_lexicon.metadata(),
         "counts": {
             "segments_total": len(segments),
             "visual_entities_total": len(entities),
@@ -219,13 +183,26 @@ def _has_time_overlap(segment: dict[str, Any], entity: VisualEntity) -> bool:
     return min(start, end) <= entity_time <= max(start, end)
 
 
-def _lexical_match(segment: dict[str, Any], entity: VisualEntity) -> list[str]:
-    transcript_terms = _expanded_terms(str(segment.get("transcript_text", "")))
-    entity_terms = _expanded_terms(entity.text)
+def _lexical_match(
+    segment: dict[str, Any],
+    entity: VisualEntity,
+    *,
+    domain_lexicon: DomainLexicon,
+) -> list[str]:
+    transcript_terms = _expanded_terms(
+        str(segment.get("transcript_text", "")),
+        domain_lexicon=domain_lexicon,
+    )
+    entity_terms = _expanded_terms(entity.text, domain_lexicon=domain_lexicon)
     return sorted(term for term in transcript_terms & entity_terms if _informative_term(term))
 
 
-def _mention_match(segment: dict[str, Any], entity: VisualEntity) -> list[str]:
+def _mention_match(
+    segment: dict[str, Any],
+    entity: VisualEntity,
+    *,
+    domain_lexicon: DomainLexicon,
+) -> list[str]:
     entity_text = entity.text.casefold()
     transcript_text = str(segment.get("transcript_text", ""))
     candidates = segment.get("mention_candidates")
@@ -241,9 +218,9 @@ def _mention_match(segment: dict[str, Any], entity: VisualEntity) -> list[str]:
     }
     candidate_terms: set[str] = set()
     for candidate in all_candidates:
-        candidate_terms.update(_expanded_terms(candidate))
+        candidate_terms.update(_expanded_terms(candidate, domain_lexicon=domain_lexicon))
 
-    entity_terms = _expanded_terms(entity.text)
+    entity_terms = _expanded_terms(entity.text, domain_lexicon=domain_lexicon)
     alias_matches = {term for term in candidate_terms & entity_terms if _informative_term(term)}
     return sorted(direct_matches | alias_matches)
 
@@ -252,20 +229,8 @@ def _terms(text: str) -> set[str]:
     return {match.group(0) for match in re.finditer(r"[0-9a-zA-Z가-힣]+", text.casefold())}
 
 
-def _expanded_terms(text: str) -> set[str]:
-    return {_canonical_term(term) for term in _terms(text)}
-
-
-def _canonical_term(term: str) -> str:
-    normalized = term.casefold().strip()
-    if normalized in ALIAS_TO_CANONICAL:
-        return ALIAS_TO_CANONICAL[normalized]
-    for suffix in KOREAN_PARTICLE_SUFFIXES:
-        if normalized.endswith(suffix) and len(normalized) > len(suffix):
-            stem = normalized[: -len(suffix)]
-            if stem in ALIAS_TO_CANONICAL:
-                return ALIAS_TO_CANONICAL[stem]
-    return normalized
+def _expanded_terms(text: str, *, domain_lexicon: DomainLexicon) -> set[str]:
+    return {domain_lexicon.canonicalize(term) for term in _terms(text)}
 
 
 def _informative_term(term: str) -> bool:
@@ -344,6 +309,7 @@ def _update_project_manifest(
     visual_entities_total: int,
     links: list[EntityLink],
     evidence_type_counts: dict[str, int],
+    domain_lexicon_metadata: dict[str, Any],
 ) -> None:
     payload: dict[str, Any]
     if manifest_path.exists():
@@ -374,6 +340,7 @@ def _update_project_manifest(
             1 for link in links if not link.lexical_match and not link.mention_candidate
         ),
         "evidence_type_counts": evidence_type_counts,
+        "domain_lexicon": domain_lexicon_metadata,
     }
     write_json(manifest_path, payload)
 

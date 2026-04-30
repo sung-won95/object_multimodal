@@ -9,8 +9,10 @@ class FakeClient:
     def __init__(self, hits: list[dict], processing_time_ms: int = 7) -> None:
         self.hits = hits
         self.processing_time_ms = processing_time_ms
+        self.queries: list[str] = []
 
     def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+        self.queries.append(query)
         return {
             "hits": self.hits[:limit],
             "processingTimeMs": self.processing_time_ms,
@@ -99,6 +101,7 @@ def test_query_project_returns_multimodal_bundle(tmp_path: Path) -> None:
         "frames_manifest": True,
         "visual_entities": True,
         "entity_links": True,
+        "domain_lexicon": False,
     }
     assert response["counts"]["search_hits"] == 1
     assert response["counts"]["bundles"] == 1
@@ -158,6 +161,7 @@ def test_query_project_without_visual_artifacts_falls_back_to_transcript_and_fra
         "frames_manifest": True,
         "visual_entities": False,
         "entity_links": False,
+        "domain_lexicon": False,
     }
     assert response["warnings"] == []
     bundle = response["bundles"][0]
@@ -167,6 +171,55 @@ def test_query_project_without_visual_artifacts_falls_back_to_transcript_and_fra
         {"frame_id": "frame_000001", "timestamp": 0.0, "frame_path": "/tmp/f1.jpg"}
     ]
     assert "linked_entities=none" in bundle["summary"]["text"]
+
+
+def test_query_project_expands_query_when_domain_lexicon_exists(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [_segment("seg_1", 1, 0.0, 2.0, "Wager sizing", ["frame_000001"])],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000001", "timestamp": 0.0, "frame_path": "/tmp/f1.jpg"}],
+    )
+    (project_dir / "domain_lexicon.json").write_text(
+        json.dumps({"aliases": {"bet": ["wager"], "size": ["sizing"]}}),
+        encoding="utf-8",
+    )
+    client = FakeClient(
+        hits=[
+            {
+                "segment_id": "seg_1",
+                "sample_id": "seg_1",
+                "video_id": "video",
+                "start_time": 0.0,
+                "end_time": 2.0,
+                "timestamp_center": 1.0,
+                "transcript_text": "Wager sizing",
+            }
+        ]
+    )
+
+    response = query_project(
+        client=client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        query="wager sizing",
+        neighbor_count=0,
+    )
+
+    assert client.queries == ["wager sizing size bet"]
+    assert response["query"] == "wager sizing"
+    assert response["domain_lexicon"]["enabled"] is True
+    assert response["domain_lexicon"]["source_path"] == str(
+        (project_dir / "domain_lexicon.json").resolve()
+    )
+    assert response["query_expansion"] == {
+        "enabled": True,
+        "applied": True,
+        "added_term_count": 2,
+    }
 
 
 def test_query_project_cli_prints_summary_and_writes_output(tmp_path: Path, monkeypatch, capsys) -> None:

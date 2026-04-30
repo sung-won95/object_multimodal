@@ -121,6 +121,10 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
             }
         ],
     )
+    (project_dir / "domain_lexicon.json").write_text(
+        json.dumps({"aliases": {"bet": ["wager"], "size": ["sizing"]}}),
+        encoding="utf-8",
+    )
 
     queries_path = tmp_path / "queries.csv"
     queries_path.write_text(
@@ -152,6 +156,7 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
                         "project_dir": str(project_dir),
                         "queries": str(queries_path),
                         "index": "local_index",
+                        "domain_lexicon": "domain_lexicon.json",
                         "limit": 3,
                     },
                 ],
@@ -172,7 +177,13 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
     )
     assert local_metrics["frame_backed_ratio"] == 1.0
     assert local_metrics["linked_entity_backed_ratio"] == 1.0
-    assert "Anti-Overfit View" in run.summary_path.read_text(encoding="utf-8")
+    assert local_metrics["domain_lexicon"]["enabled"] is True
+    assert local_metrics["domain_lexicon"]["source_path"] == str(
+        (project_dir / "domain_lexicon.json").resolve()
+    )
+    summary = run.summary_path.read_text(encoding="utf-8")
+    assert "| local_suite | local_project | local_pilot | on (domain_lexicon.json) |" in summary
+    assert "Anti-Overfit View" in summary
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
