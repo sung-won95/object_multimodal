@@ -34,14 +34,26 @@ def test_build_evidence_response_with_neighbor_segments_and_frames(tmp_path: Pat
     )
 
     assert response["query"] == "bet size"
+    assert response["window_config"] == {
+        "mode": "neighbors",
+        "neighbor_count": 1,
+        "previous_neighbor_count": 1,
+        "next_neighbor_count": 1,
+    }
     assert response["top_segments"][0]["segment_id"] == "seg_2"
     window = response["evidence_windows"][0]
     assert window["target_segment_id"] == "seg_2"
+    assert window["target_segment"]["segment_id"] == "seg_2"
+    assert window["target_segment"]["window_role"] == "target"
+    assert window["target_segment"]["target_distance"] == 0
+    assert [segment["segment_id"] for segment in window["neighbor_segments"]] == ["seg_1", "seg_3"]
+    assert [segment["window_role"] for segment in window["neighbor_segments"]] == ["previous", "next"]
     assert [segment["segment_id"] for segment in window["transcript_segments"]] == [
         "seg_1",
         "seg_2",
         "seg_3",
     ]
+    assert [segment["target_distance"] for segment in window["transcript_segments"]] == [-1, 0, 1]
     assert [frame["frame_id"] for frame in window["frame_refs"]] == [
         "frame_000001",
         "frame_000006",
@@ -68,6 +80,46 @@ def test_select_window_segments_by_time_overlap() -> None:
     )
 
     assert [segment["segment_id"] for segment in selected] == ["seg_1", "seg_2", "seg_3"]
+
+
+def test_select_window_segments_with_asymmetric_neighbors() -> None:
+    segments = [
+        _segment("seg_1", 1, 0.0, 2.0, []),
+        _segment("seg_2", 2, 3.0, 5.0, []),
+        _segment("seg_3", 3, 8.0, 10.0, []),
+        _segment("seg_4", 4, 11.0, 13.0, []),
+    ]
+
+    selected = select_window_segments(
+        segments,
+        target_segment_id="seg_2",
+        window_seconds=None,
+        neighbor_count=1,
+        previous_neighbor_count=0,
+        next_neighbor_count=2,
+    )
+
+    assert [segment["segment_id"] for segment in selected] == ["seg_2", "seg_3", "seg_4"]
+
+
+def test_select_window_segments_with_asymmetric_time_window() -> None:
+    segments = [
+        _segment("seg_1", 1, 0.0, 2.0, []),
+        _segment("seg_2", 2, 5.0, 6.0, []),
+        _segment("seg_3", 3, 8.0, 9.0, []),
+        _segment("seg_4", 4, 12.0, 13.0, []),
+    ]
+
+    selected = select_window_segments(
+        segments,
+        target_segment_id="seg_2",
+        window_seconds=None,
+        neighbor_count=0,
+        window_before_seconds=1.0,
+        window_after_seconds=3.0,
+    )
+
+    assert [segment["segment_id"] for segment in selected] == ["seg_2", "seg_3"]
 
 
 def test_build_evidence_response_at_start_boundary(tmp_path: Path) -> None:

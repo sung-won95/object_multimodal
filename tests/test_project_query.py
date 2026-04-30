@@ -105,8 +105,19 @@ def test_query_project_returns_multimodal_bundle(tmp_path: Path) -> None:
     }
     assert response["counts"]["search_hits"] == 1
     assert response["counts"]["bundles"] == 1
+    assert response["retrieval_context"]["window_config"] == {
+        "mode": "neighbors",
+        "neighbor_count": 1,
+        "previous_neighbor_count": 1,
+        "next_neighbor_count": 1,
+    }
     bundle = response["bundles"][0]
     assert bundle["candidate"]["segment_id"] == "seg_2"
+    assert bundle["evidence_window"]["target_segment"]["segment_id"] == "seg_2"
+    assert [segment["segment_id"] for segment in bundle["evidence_window"]["neighbor_segments"]] == [
+        "seg_1",
+        "seg_3",
+    ]
     assert [segment["segment_id"] for segment in bundle["evidence_window"]["transcript_segments"]] == [
         "seg_1",
         "seg_2",

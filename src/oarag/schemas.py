@@ -326,6 +326,9 @@ class EvidenceWindow:
     end_time: float | None
     transcript_segments: list[dict[str, Any]]
     frame_refs: list[dict[str, Any]]
+    target_segment: dict[str, Any] = field(default_factory=dict)
+    neighbor_segments: list[dict[str, Any]] = field(default_factory=list)
+    window_config: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
