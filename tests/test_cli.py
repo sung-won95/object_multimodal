@@ -162,6 +162,7 @@ def test_batch_ingest_cli_defaults() -> None:
     assert str(args.root) == "lectures"
     assert args.output_root.as_posix() == "artifacts/projects"
     assert args.frame_sampling == "uniform"
+    assert args.frame_selection == "none"
     assert args.transcript_source == "auto"
     assert args.force is False
     assert args.strict is False
@@ -182,6 +183,22 @@ def test_ingest_video_cli_accepts_prefix_frame_sampling() -> None:
     )
 
     assert args.frame_sampling == "prefix"
+
+
+def test_ingest_video_cli_accepts_representative_frame_selection() -> None:
+    args = build_parser().parse_args(
+        [
+            "ingest-video",
+            "--video",
+            "sample.mp4",
+            "--project-id",
+            "sample",
+            "--frame-selection",
+            "representative",
+        ]
+    )
+
+    assert args.frame_selection == "representative"
 
 
 def test_ingest_folder_alias_maps_to_batch_ingest() -> None:

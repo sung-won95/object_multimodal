@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .frame_selection import (
+    FRAME_SELECTION_STRATEGIES,
+    FrameSelectionConfig,
+    select_representative_frames,
+)
 from .io import write_json, write_jsonl
 from .schemas import LectureSegment, slugify
 from .srt import iter_srt_cues
@@ -36,6 +41,7 @@ class VideoIngestConfig:
     frame_rate: float = 1.0
     max_frames: int | None = 120
     frame_sampling: str = "uniform"
+    frame_selection: str = "none"
     skip_frames: bool = False
     copy_source: bool = False
     transcript_source: str = "auto"
@@ -52,6 +58,7 @@ class BatchIngestConfig:
     frame_rate: float = 1.0
     max_frames: int | None = 120
     frame_sampling: str = "uniform"
+    frame_selection: str = "none"
     skip_frames: bool = False
     copy_source: bool = False
     transcript_source: str = "auto"
@@ -73,6 +80,8 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
         raise ValueError(f"transcript_source must be one of {sorted(TRANSCRIPT_SOURCES)}")
     if config.frame_sampling not in FRAME_SAMPLING_STRATEGIES:
         raise ValueError(f"frame_sampling must be one of {sorted(FRAME_SAMPLING_STRATEGIES)}")
+    if config.frame_selection not in FRAME_SELECTION_STRATEGIES:
+        raise ValueError(f"frame_selection must be one of {sorted(FRAME_SELECTION_STRATEGIES)}")
 
     srt_path = resolve_srt(video_path, config.srt_path)
     project_dir = config.output_root / config.project_id
@@ -105,6 +114,10 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
         duration_sec=probe.get("duration_sec"),
         skipped=config.skip_frames,
     )
+    frame_selection_summary = _empty_frame_selection_summary(
+        frame_selection=config.frame_selection,
+        skipped=config.skip_frames,
+    )
     frames_manifest_path = manifests_dir / "frames_manifest.jsonl"
     if config.skip_frames:
         write_jsonl(frames_manifest_path, [])
@@ -116,6 +129,7 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
             max_frames=config.max_frames,
             duration_sec=probe.get("duration_sec"),
             frame_sampling=config.frame_sampling,
+            frame_selection=config.frame_selection,
         )
         frame_count = len(frame_result["frames"])
         write_frames_manifest(
@@ -123,6 +137,7 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
             frame_result["frames"],
         )
         frame_sampling_summary = frame_result["summary"]
+        frame_selection_summary = frame_result["selection_summary"]
 
     manifest = {
         "project_id": config.project_id,
@@ -142,6 +157,7 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
         },
         "probe": probe,
         "frame_sampling": frame_sampling_summary,
+        "frame_selection": frame_selection_summary,
         "artifacts": {
             "lecture_segments": str(segments_path),
             "audio": transcript_artifacts.get("audio_path"),
@@ -291,11 +307,14 @@ def sample_frames(
     *,
     duration_sec: float | None = None,
     frame_sampling: str = "uniform",
+    frame_selection: str = "none",
 ) -> dict[str, Any]:
     if frame_rate <= 0:
         raise ValueError("frame_rate must be greater than 0")
     if frame_sampling not in FRAME_SAMPLING_STRATEGIES:
         raise ValueError(f"frame_sampling must be one of {sorted(FRAME_SAMPLING_STRATEGIES)}")
+    if frame_selection not in FRAME_SELECTION_STRATEGIES:
+        raise ValueError(f"frame_selection must be one of {sorted(FRAME_SELECTION_STRATEGIES)}")
 
     frames_dir.mkdir(parents=True, exist_ok=True)
     for existing in frames_dir.glob("frame_*.jpg"):
@@ -386,6 +405,16 @@ def sample_frames(
                 }
             )
 
+    selection_result = select_representative_frames(
+        frames,
+        config=FrameSelectionConfig(strategy=frame_selection),
+    )
+    frames = selection_result["frames"]
+    selection_summary = dict(selection_result["summary"])
+    selection_summary["skipped"] = False
+    for dropped_frame_path in selection_result["dropped_frame_paths"]:
+        Path(dropped_frame_path).unlink(missing_ok=True)
+
     return {
         "frames": frames,
         "summary": summarize_frame_sampling(
@@ -395,6 +424,7 @@ def sample_frames(
             max_frames=max_frames,
             frame_sampling=frame_sampling,
         ),
+        "selection_summary": selection_summary,
     }
 
 
@@ -502,6 +532,17 @@ def _empty_frame_sampling_summary(
     return summary
 
 
+def _empty_frame_selection_summary(*, frame_selection: str, skipped: bool) -> dict[str, Any]:
+    summary = select_representative_frames(
+        [],
+        config=FrameSelectionConfig(strategy=frame_selection),
+    )["summary"]
+    summary["skipped"] = skipped
+    if skipped:
+        summary["status"] = "skipped"
+    return summary
+
+
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(command, check=True, capture_output=True, text=True)
@@ -606,6 +647,7 @@ def batch_ingest_videos(
                     frame_rate=config.frame_rate,
                     max_frames=config.max_frames,
                     frame_sampling=config.frame_sampling,
+                    frame_selection=config.frame_selection,
                     skip_frames=config.skip_frames,
                     copy_source=config.copy_source,
                     transcript_source=config.transcript_source,
