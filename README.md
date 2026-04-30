@@ -51,6 +51,16 @@ PYTHONPATH=src python -m oarag eval-eduvidqa \
   --output artifacts/eduvidqa_test_eval.jsonl
 ```
 
+## Development
+
+Run tests:
+
+```bash
+python -m pytest
+```
+
+The pytest configuration adds `src` to the test import path, so `PYTHONPATH=src` is not required for tests.
+
 ## Local Video Ingest
 
 For a local video with a sibling `.srt` file:
