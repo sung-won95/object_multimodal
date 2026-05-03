@@ -18,6 +18,11 @@ def test_visual_entity_from_dict_to_dict_roundtrip() -> None:
         "entity_type": "ocr_text",
         "confidence": "0.91",
         "source": "ocr:tesseract",
+        "visual_description": "Matrix A in the upper-left slide area",
+        "position": {"region": "upper-left", "x": 0.1},
+        "relations": [{"type": "inside", "target": "slide"}],
+        "parser_version": "vlm-jsonl-v1",
+        "source_model": "stub-vlm",
     }
 
     entity = VisualEntity.from_dict(payload)
@@ -34,7 +39,33 @@ def test_visual_entity_from_dict_to_dict_roundtrip() -> None:
         "entity_type": "ocr_text",
         "confidence": 0.91,
         "source": "ocr:tesseract",
+        "visual_description": "Matrix A in the upper-left slide area",
+        "position": {"region": "upper-left", "x": 0.1},
+        "relations": [{"type": "inside", "target": "slide"}],
+        "parser_version": "vlm-jsonl-v1",
+        "source_model": "stub-vlm",
     }
+
+
+def test_visual_entity_from_dict_defaults_vlm_metadata() -> None:
+    entity = VisualEntity.from_dict(
+        {
+            "entity_id": "ent_frame_1_0001",
+            "project_id": "sample_project",
+            "frame_id": "frame_000001",
+            "timestamp": 12.34,
+            "frame_path": "/tmp/frame_000001.jpg",
+            "text": "Matrix A",
+            "entity_type": "ocr_text",
+            "source": "ocr:tesseract",
+        }
+    )
+
+    assert entity.visual_description is None
+    assert entity.position is None
+    assert entity.relations == []
+    assert entity.parser_version is None
+    assert entity.source_model is None
 
 
 def test_entity_link_from_dict_to_dict_roundtrip() -> None:

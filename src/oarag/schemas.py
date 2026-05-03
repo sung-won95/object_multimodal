@@ -220,6 +220,11 @@ class VisualEntity:
     entity_type: str
     confidence: float | None
     source: str
+    visual_description: str | None = None
+    position: dict[str, Any] | None = None
+    relations: list[dict[str, Any]] = field(default_factory=list)
+    parser_version: str | None = None
+    source_model: str | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "VisualEntity":
@@ -234,6 +239,18 @@ class VisualEntity:
             if not bbox:
                 bbox = None
 
+        raw_position = payload.get("position")
+        position = dict(raw_position) if isinstance(raw_position, dict) else None
+
+        raw_relations = payload.get("relations")
+        relations: list[dict[str, Any]] = []
+        if isinstance(raw_relations, list):
+            relations = [dict(item) for item in raw_relations if isinstance(item, dict)]
+
+        visual_description = payload.get("visual_description")
+        parser_version = payload.get("parser_version")
+        source_model = payload.get("source_model")
+
         return cls(
             entity_id=str(payload.get("entity_id", "")),
             project_id=str(payload.get("project_id", "")),
@@ -245,6 +262,13 @@ class VisualEntity:
             entity_type=str(payload.get("entity_type", "")),
             confidence=_optional_float(payload.get("confidence")),
             source=str(payload.get("source", "")),
+            visual_description=(
+                str(visual_description) if visual_description is not None else None
+            ),
+            position=position,
+            relations=relations,
+            parser_version=str(parser_version) if parser_version is not None else None,
+            source_model=str(source_model) if source_model is not None else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
