@@ -316,16 +316,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     extract_visual = subparsers.add_parser(
         "extract-visual-entities",
-        help="Extract OCR-first visual entities from sampled frames",
+        help="Extract visual entities from sampled frames",
     )
     location = extract_visual.add_mutually_exclusive_group(required=True)
     location.add_argument("--project-id", help="Project ID under artifacts/projects/")
     location.add_argument("--project-dir", type=Path, help="Project artifact directory")
     extract_visual.add_argument(
         "--backend",
-        choices=["auto", "stub", "local-ocr"],
+        choices=["auto", "stub", "local-ocr", "vlm-jsonl"],
         default="auto",
-        help="auto uses local OCR when available, otherwise stub.",
+        help="auto uses local OCR when available, otherwise stub. vlm-jsonl loads structured parser output.",
+    )
+    extract_visual.add_argument(
+        "--vlm-jsonl",
+        type=Path,
+        help=(
+            "Structured VLM parser output JSONL for --backend vlm-jsonl. "
+            "Relative paths are resolved from project dir."
+        ),
     )
     extract_visual.add_argument(
         "--frames-manifest",
@@ -652,6 +660,7 @@ def cmd_extract_visual_entities(args: argparse.Namespace) -> None:
         output_path=args.output,
         manifest_path=args.manifest,
         ocr_language=args.ocr_language,
+        vlm_jsonl_path=args.vlm_jsonl,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

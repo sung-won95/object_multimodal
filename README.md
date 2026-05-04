@@ -219,7 +219,7 @@ Defaults:
   - `alignment` summary counts
   - `counts.lecture_segments_aligned`
 
-## Visual Entity Extraction (OCR-first)
+## Visual Entity Extraction
 
 Extract frame-level visual entities from sampled frames:
 
@@ -241,10 +241,47 @@ Defaults:
 Backends:
 
 - `--backend stub` always emits zero entities (safe test/default fallback).
-- `--backend local-ocr` uses local `tesseract` command and emits `ocr_text` entities.
+- `--backend local-ocr` uses local `tesseract` command and emits `ocr_text` entities. This is the OCR-only baseline/fallback.
+- `--backend vlm-jsonl` loads deterministic, precomputed VLM/MLLM parser output from JSONL. It does not call an external model.
 - `--backend auto` uses `local-ocr` when `tesseract` is available, otherwise `stub`.
 
-OCR output is filtered before it is written:
+`vlm-jsonl` expects one JSON object per frame with a `frame_id` and an `entities` array. The parser output is validated against the frame manifest and converted into the shared `VisualEntity` schema:
+
+```json
+{
+  "frame_id": "frame_000001",
+  "parser_version": "vlm-jsonl-v1",
+  "source_model": "stub-vlm",
+  "entities": [
+    {
+      "visual_description": "A blue matrix diagram with one highlighted row",
+      "entity_type": "diagram",
+      "confidence": 0.93,
+      "position": {"region": "center", "x": 0.5, "y": 0.45},
+      "relations": [{"type": "points_to", "target": "row_label"}]
+    }
+  ]
+}
+```
+
+Run it with an explicit JSONL path:
+
+```bash
+PYTHONPATH=src python -m oarag extract-visual-entities \
+  --project-id upswing_matrices \
+  --backend vlm-jsonl \
+  --vlm-jsonl manifests/vlm_parser_output.jsonl
+```
+
+`VisualEntity` records can now carry VLM-first metadata:
+
+- `visual_description`
+- `position`
+- `relations`
+- `parser_version`
+- `source_model`
+
+Visual entity output is filtered before it is written:
 
 - low-confidence text below `0.40` is dropped
 - punctuation-only text is dropped

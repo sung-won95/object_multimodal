@@ -169,10 +169,28 @@ def test_extract_visual_entities_cli_defaults() -> None:
     assert args.project_id == "sample_project"
     assert args.project_dir is None
     assert args.backend == "auto"
+    assert args.vlm_jsonl is None
     assert args.frames_manifest is None
     assert args.output is None
     assert args.manifest is None
     assert args.ocr_language is None
+
+
+def test_extract_visual_entities_cli_accepts_vlm_jsonl_backend() -> None:
+    args = build_parser().parse_args(
+        [
+            "extract-visual-entities",
+            "--project-id",
+            "sample_project",
+            "--backend",
+            "vlm-jsonl",
+            "--vlm-jsonl",
+            "manifests/vlm_parser_output.jsonl",
+        ]
+    )
+
+    assert args.backend == "vlm-jsonl"
+    assert args.vlm_jsonl.as_posix() == "manifests/vlm_parser_output.jsonl"
 
 
 def test_link_entities_cli_defaults() -> None:

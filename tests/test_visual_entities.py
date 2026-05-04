@@ -219,6 +219,164 @@ def test_extract_visual_entities_records_filter_summary(
     assert manifest["visual_entity_extraction"]["dropped_visual_entities"] == 1
 
 
+def test_extract_visual_entities_vlm_jsonl_loads_structured_parser_output(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "vlm_project"
+    frame_path = project_dir / "frames" / "frame_000001.jpg"
+    frames_manifest = project_dir / "manifests" / "frames_manifest.jsonl"
+    vlm_jsonl = project_dir / "manifests" / "vlm_parser_output.jsonl"
+    _write_jsonl(
+        frames_manifest,
+        [{"frame_id": "frame_000001", "frame_path": str(frame_path), "timestamp": 3.5}],
+    )
+    _write_jsonl(
+        vlm_jsonl,
+        [
+            {
+                "frame_id": "frame_000001",
+                "parser_version": "vlm-jsonl-v1",
+                "source_model": "stub-vlm",
+                "entities": [
+                    {
+                        "visual_description": "A blue matrix diagram with highlighted row",
+                        "entity_type": "diagram",
+                        "confidence": 0.93,
+                        "position": {"region": "center", "x": 0.5, "y": 0.45},
+                        "relations": [{"type": "points_to", "target": "row_label"}],
+                    }
+                ],
+            }
+        ],
+    )
+
+    summary = extract_visual_entities(
+        project_dir=project_dir,
+        backend="vlm-jsonl",
+        vlm_jsonl_path=vlm_jsonl,
+    )
+
+    output_path = project_dir / "manifests" / "visual_entities.jsonl"
+    rows = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert summary["backend"] == "vlm-jsonl"
+    assert summary["counts"]["visual_entities"] == 1
+    assert rows == [
+        {
+            "entity_id": "ent_frame_000001_0001",
+            "project_id": "vlm_project",
+            "frame_id": "frame_000001",
+            "timestamp": 3.5,
+            "frame_path": str(frame_path),
+            "bbox": None,
+            "text": "A blue matrix diagram with highlighted row",
+            "entity_type": "diagram",
+            "confidence": 0.93,
+            "source": "vlm:stub-vlm",
+            "visual_description": "A blue matrix diagram with highlighted row",
+            "position": {"region": "center", "x": 0.5, "y": 0.45},
+            "relations": [{"type": "points_to", "target": "row_label"}],
+            "parser_version": "vlm-jsonl-v1",
+            "source_model": "stub-vlm",
+        }
+    ]
+
+    manifest = json.loads(
+        (project_dir / "manifests" / "project_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["visual_entity_extraction"]["backend"] == "vlm-jsonl"
+
+
+def test_vlm_jsonl_backend_requires_valid_frame_scoped_entities(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "bad_vlm_project"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": str(project_dir / "frames" / "frame_000001.jpg"),
+                "timestamp": 0.0,
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "vlm_parser_output.jsonl",
+        [
+            {
+                "frame_id": "frame_000001",
+                "entities": [{"frame_id": "frame_000002", "visual_description": "bad"}],
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Entity frame_id mismatch"):
+        extract_visual_entities(
+            project_dir=project_dir,
+            backend="vlm-jsonl",
+            vlm_jsonl_path=project_dir / "manifests" / "vlm_parser_output.jsonl",
+        )
+
+
+def test_vlm_jsonl_backend_rejects_unknown_frame_id(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "unknown_vlm_project"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": str(project_dir / "frames" / "frame_000001.jpg"),
+                "timestamp": 0.0,
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "vlm_parser_output.jsonl",
+        [
+            {
+                "frame_id": "frame_000999",
+                "entities": [{"visual_description": "unknown frame"}],
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="not present in frames manifest"):
+        extract_visual_entities(
+            project_dir=project_dir,
+            backend="vlm-jsonl",
+            vlm_jsonl_path=project_dir / "manifests" / "vlm_parser_output.jsonl",
+        )
+
+
+def test_filter_visual_entities_keeps_vlm_description_without_text() -> None:
+    entity = VisualEntity(
+        entity_id="ent_vlm",
+        project_id="sample_project",
+        frame_id="frame_000001",
+        timestamp=1.0,
+        frame_path="/tmp/frame.jpg",
+        bbox=None,
+        text="",
+        entity_type="diagram",
+        confidence=0.91,
+        source="vlm:stub-vlm",
+        visual_description="A labeled matrix diagram",
+        position={"region": "center"},
+        relations=[],
+        parser_version="vlm-jsonl-v1",
+        source_model="stub-vlm",
+    )
+
+    filtered, summary = filter_visual_entities([entity])
+
+    assert filtered == [entity]
+    assert summary["visual_entities"] == 1
+    assert summary["dropped_visual_entities"] == 0
+
+
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")

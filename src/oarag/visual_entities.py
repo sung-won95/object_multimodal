@@ -5,7 +5,7 @@ import json
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -86,6 +86,69 @@ class TesseractVisualEntityExtractor:
         return entities
 
 
+@dataclass(frozen=True)
+class VlmJsonlVisualEntityExtractor:
+    jsonl_path: Path
+    backend: str = "vlm-jsonl"
+    _records_by_frame_id: dict[str, list[dict[str, Any]]] = field(
+        init=False, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "_records_by_frame_id",
+            _read_vlm_jsonl_records(self.jsonl_path),
+        )
+
+    def extract(self, *, project_id: str, frame: FrameRecord) -> list[VisualEntity]:
+        records = self._records_by_frame_id.get(frame.frame_id, [])
+        entities: list[VisualEntity] = []
+        for entity_index, record in enumerate(records, start=1):
+            entity_payload = record["entity"]
+            parser_version = _optional_str(
+                entity_payload.get("parser_version")
+            ) or record.get("parser_version")
+            source_model = _optional_str(entity_payload.get("source_model")) or record.get(
+                "source_model"
+            )
+            visual_description = _optional_str(
+                entity_payload.get("visual_description")
+            ) or _optional_str(entity_payload.get("description"))
+            text = _optional_str(entity_payload.get("text"))
+            if text is None:
+                text = visual_description or _optional_str(entity_payload.get("label")) or ""
+            entity_id = _optional_str(entity_payload.get("entity_id"))
+            if entity_id is None:
+                entity_id = f"ent_{slugify(frame.frame_id)}_{entity_index:04d}"
+            source = _optional_str(entity_payload.get("source"))
+            if source is None:
+                source = f"vlm:{source_model}" if source_model else "vlm-jsonl"
+            entity = VisualEntity(
+                entity_id=entity_id,
+                project_id=project_id,
+                frame_id=frame.frame_id,
+                timestamp=frame.timestamp,
+                frame_path=frame.frame_path,
+                bbox=_coerce_bbox(entity_payload.get("bbox")),
+                text=text,
+                entity_type=_optional_str(entity_payload.get("entity_type")) or "visual_object",
+                confidence=_optional_float(entity_payload.get("confidence")),
+                source=source,
+                visual_description=visual_description,
+                position=_coerce_mapping(entity_payload.get("position")),
+                relations=_coerce_relations(entity_payload.get("relations")),
+                parser_version=parser_version,
+                source_model=source_model,
+            )
+            entities.append(entity)
+        return entities
+
+    @property
+    def frame_ids(self) -> set[str]:
+        return set(self._records_by_frame_id)
+
+
 def extract_visual_entities(
     *,
     project_dir: Path,
@@ -94,6 +157,7 @@ def extract_visual_entities(
     output_path: Path | None = None,
     manifest_path: Path | None = None,
     ocr_language: str | None = None,
+    vlm_jsonl_path: Path | None = None,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     if not resolved_project_dir.exists():
@@ -117,7 +181,26 @@ def extract_visual_entities(
 
     frames = _read_frames_manifest(resolved_frames_manifest_path)
     project_id = _project_id_from_manifest_or_dir(resolved_manifest_path, resolved_project_dir)
-    extractor = make_extractor(backend=backend, ocr_language=ocr_language)
+    resolved_vlm_jsonl_path = (
+        _resolve_path(
+            project_dir=resolved_project_dir,
+            candidate=vlm_jsonl_path,
+            default=resolved_project_dir / "manifests" / "vlm_parser_output.jsonl",
+        )
+        if vlm_jsonl_path is not None
+        else None
+    )
+    extractor = make_extractor(
+        backend=backend,
+        ocr_language=ocr_language,
+        vlm_jsonl_path=resolved_vlm_jsonl_path,
+    )
+    if isinstance(extractor, VlmJsonlVisualEntityExtractor):
+        manifest_frame_ids = {frame.frame_id for frame in frames}
+        unknown_frame_ids = sorted(extractor.frame_ids - manifest_frame_ids)
+        if unknown_frame_ids:
+            preview = ", ".join(unknown_frame_ids[:5])
+            raise ValueError(f"VLM JSONL contains frame_id not present in frames manifest: {preview}")
 
     raw_entities: list[VisualEntity] = []
     for frame in frames:
@@ -147,6 +230,11 @@ def extract_visual_entities(
             "frames_manifest": str(resolved_frames_manifest_path),
             "visual_entities": str(resolved_output_path),
             "project_manifest": str(resolved_manifest_path),
+            **(
+                {"vlm_jsonl": str(resolved_vlm_jsonl_path)}
+                if resolved_vlm_jsonl_path is not None
+                else {}
+            ),
         },
         "counts": {
             "frames_total": len(frames),
@@ -193,10 +281,19 @@ def filter_visual_entities(
     }
 
 
-def make_extractor(*, backend: str, ocr_language: str | None = None) -> VisualEntityExtractor:
+def make_extractor(
+    *,
+    backend: str,
+    ocr_language: str | None = None,
+    vlm_jsonl_path: Path | None = None,
+) -> VisualEntityExtractor:
     normalized = backend.strip().lower()
     if normalized == "stub":
         return StubVisualEntityExtractor()
+    if normalized == "vlm-jsonl":
+        if vlm_jsonl_path is None:
+            raise ValueError("Backend vlm-jsonl requires --vlm-jsonl")
+        return VlmJsonlVisualEntityExtractor(jsonl_path=vlm_jsonl_path)
     if normalized == "local-ocr":
         if shutil.which("tesseract") is None:
             raise RuntimeError("Backend local-ocr requested, but `tesseract` command is not available")
@@ -258,7 +355,7 @@ def _validate_entity_frame_consistency(*, entity: VisualEntity, frame: FrameReco
 
 
 def _visual_entity_drop_reason(entity: VisualEntity) -> str | None:
-    normalized = _normalize_ocr_text(entity.text)
+    normalized = _normalize_visual_entity_text(entity)
     if not normalized:
         return "empty_text"
     confidence = entity.confidence
@@ -276,7 +373,7 @@ def _entity_duplicate_key(entity: VisualEntity) -> tuple[Any, ...]:
     bbox = entity.bbox or {}
     return (
         entity.frame_id,
-        _normalize_ocr_text(entity.text).casefold(),
+        _normalize_visual_entity_text(entity).casefold(),
         round(_optional_float(bbox.get("left")) or 0.0),
         round(_optional_float(bbox.get("top")) or 0.0),
         round(_optional_float(bbox.get("width")) or 0.0),
@@ -284,8 +381,78 @@ def _entity_duplicate_key(entity: VisualEntity) -> tuple[Any, ...]:
     )
 
 
+def _normalize_visual_entity_text(entity: VisualEntity) -> str:
+    return _normalize_ocr_text(entity.text or entity.visual_description or "")
+
+
 def _normalize_ocr_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
+
+
+def _read_vlm_jsonl_records(path: Path) -> dict[str, list[dict[str, Any]]]:
+    resolved = path.expanduser().resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"VLM JSONL input not found: {resolved}")
+
+    records_by_frame_id: dict[str, list[dict[str, Any]]] = {}
+    with resolved.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            payload = json.loads(stripped)
+            if not isinstance(payload, dict):
+                raise ValueError(f"Expected JSON object row in {resolved}:{line_number}")
+            frame_id = _optional_str(payload.get("frame_id"))
+            if frame_id is None:
+                raise ValueError(f"Missing frame_id in {resolved}:{line_number}")
+            raw_entities = payload.get("entities")
+            if raw_entities is None:
+                raw_entities = payload.get("visual_entities")
+            if not isinstance(raw_entities, list):
+                raise ValueError(
+                    f"Expected entities list for frame_id={frame_id} in {resolved}:{line_number}"
+                )
+            for entity in raw_entities:
+                if not isinstance(entity, dict):
+                    raise ValueError(
+                        f"Expected entity object for frame_id={frame_id} in {resolved}:{line_number}"
+                    )
+                entity_frame_id = _optional_str(entity.get("frame_id"))
+                if entity_frame_id is not None and entity_frame_id != frame_id:
+                    raise ValueError(
+                        f"Entity frame_id mismatch in {resolved}:{line_number}: "
+                        f"{entity_frame_id} != {frame_id}"
+                    )
+                records_by_frame_id.setdefault(frame_id, []).append(
+                    {
+                        "parser_version": _optional_str(payload.get("parser_version")),
+                        "source_model": _optional_str(payload.get("source_model")),
+                        "entity": entity,
+                    }
+                )
+    return records_by_frame_id
+
+
+def _coerce_bbox(value: Any) -> dict[str, float] | None:
+    if not isinstance(value, dict):
+        return None
+    bbox: dict[str, float] = {}
+    for key, raw in value.items():
+        parsed = _optional_float(raw)
+        if parsed is not None:
+            bbox[str(key)] = parsed
+    return bbox or None
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any] | None:
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _coerce_relations(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
 
 
 def _update_project_manifest(
@@ -361,3 +528,10 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
