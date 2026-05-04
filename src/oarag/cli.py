@@ -35,10 +35,25 @@ from .schemas import SearchCandidate
 from .stt import DEFAULT_MLX_WHISPER_MODEL
 from .visual_entities import extract_visual_entities
 from .vlm import DEFAULT_VLM_BACKEND, run_vlm
+from .audio_visual_consistency import AudioVisualConsistencyConfig
+from .vlm_alignment_pipeline import VLMAlignmentPipelineConfig, run_vlm_alignment_pipeline
+from .vlm_frame_candidates import VLMFrameCandidateConfig
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def main_run_vlm_alignment(argv: list[str] | None = None) -> None:
+    parser = build_vlm_alignment_parser()
     args = parser.parse_args(argv)
     try:
         args.func(args)
@@ -406,6 +421,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     vlm.set_defaults(func=cmd_run_vlm)
 
+    vlm_alignment = subparsers.add_parser(
+        "run-vlm-alignment",
+        help="Run VLM frame candidate selection, visual observations, and audio-visual consistency",
+    )
+    add_vlm_alignment_arguments(vlm_alignment)
+    vlm_alignment.set_defaults(func=cmd_run_vlm_alignment)
+
     entity_links = subparsers.add_parser(
         "link-entities",
         help="Link transcript segments to nearby visual entities with weak evidence",
@@ -546,6 +568,151 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.set_defaults(func=cmd_benchmark_retrieval)
 
     return parser
+
+
+def build_vlm_alignment_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="run-vlm-alignment",
+        description=(
+            "Run VLM frame candidate selection, visual observations, "
+            "and audio-visual consistency"
+        ),
+    )
+    add_vlm_alignment_arguments(parser)
+    parser.set_defaults(func=cmd_run_vlm_alignment)
+    return parser
+
+
+def add_vlm_alignment_arguments(parser: argparse.ArgumentParser) -> None:
+    candidate_defaults = VLMFrameCandidateConfig()
+    consistency_defaults = AudioVisualConsistencyConfig()
+    location = parser.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    parser.add_argument(
+        "--vlm-backend",
+        default=DEFAULT_VLM_BACKEND,
+        help="VLM backend to run. Built-in options include deterministic and command.",
+    )
+    parser.add_argument(
+        "--vlm-model",
+        required=True,
+        help="VLM model identifier recorded as source_model in VLM artifacts.",
+    )
+    parser.add_argument("--vlm-device", help="Optional device hint recorded in run metadata.")
+    parser.add_argument(
+        "--vlm-options",
+        help="Backend options as a JSON object or comma-separated key=value pairs.",
+    )
+    parser.add_argument(
+        "--max-vlm-frames",
+        type=int,
+        default=candidate_defaults.max_candidates,
+        help="Maximum candidate frames to send to the VLM.",
+    )
+    parser.add_argument(
+        "--candidate-max-per-segment",
+        type=int,
+        default=candidate_defaults.max_per_segment,
+        help="Maximum VLM candidate frames selected per transcript segment.",
+    )
+    parser.add_argument(
+        "--candidate-window-seconds",
+        type=float,
+        default=candidate_defaults.window_seconds,
+        help="Temporal window size used by candidate selection.",
+    )
+    parser.add_argument(
+        "--candidate-max-per-window",
+        type=int,
+        default=candidate_defaults.max_per_window,
+        help="Maximum candidate frames selected per temporal window.",
+    )
+    parser.add_argument(
+        "--candidate-min-time-gap-seconds",
+        type=float,
+        default=candidate_defaults.min_time_gap_seconds,
+        help="Minimum timestamp gap between selected candidate frames.",
+    )
+    parser.add_argument(
+        "--candidate-segment-margin-seconds",
+        type=float,
+        default=candidate_defaults.segment_margin_seconds,
+        help="Margin added to segment windows before selecting candidates.",
+    )
+    parser.add_argument(
+        "--candidate-duplicate-timestamp-epsilon-seconds",
+        type=float,
+        default=candidate_defaults.duplicate_timestamp_epsilon_seconds,
+        help="Timestamp epsilon used to suppress duplicate candidate frames.",
+    )
+    parser.add_argument(
+        "--candidate-duplicate-distance-threshold",
+        type=float,
+        default=candidate_defaults.duplicate_distance_threshold,
+        help="Nearest-selected distance threshold used to suppress duplicate frames.",
+    )
+    parser.add_argument(
+        "--candidate-low-information-min-contrast",
+        type=float,
+        default=candidate_defaults.low_information_min_contrast,
+        help="Minimum frame contrast accepted by candidate selection.",
+    )
+    parser.add_argument(
+        "--candidate-low-information-min-detail-score",
+        type=float,
+        default=candidate_defaults.low_information_min_detail_score,
+        help="Minimum frame detail score accepted by candidate selection.",
+    )
+    parser.add_argument(
+        "--consistency-window-margin-seconds",
+        type=float,
+        default=consistency_defaults.window_margin_seconds,
+        help="Margin used when matching visual observations to transcript segment windows.",
+    )
+    parser.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Input frames manifest JSONL. Relative paths are resolved from project dir.",
+    )
+    parser.add_argument(
+        "--segments",
+        type=Path,
+        help="Input segment JSONL path. Relative paths are resolved from project dir.",
+    )
+    parser.add_argument(
+        "--vlm-frame-candidates",
+        type=Path,
+        help="Output VLM frame candidate JSONL. Relative paths are resolved from project dir.",
+    )
+    parser.add_argument(
+        "--vlm-visual-observations",
+        type=Path,
+        help="Output VLM visual observations JSONL. Relative paths are resolved from project dir.",
+    )
+    parser.add_argument(
+        "--audio-visual-consistency",
+        type=Path,
+        help="Output audio-visual consistency JSONL. Relative paths are resolved from project dir.",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="Project manifest JSON path. Relative paths are resolved from project dir.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Reuse existing candidate artifacts and pass resume through to VLM visual "
+            "observation generation."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Plan candidate frames and artifact paths without writing artifacts.",
+    )
 
 
 def client_from_args(args: argparse.Namespace) -> MeiliClient:
@@ -728,6 +895,47 @@ def cmd_run_vlm(args: argparse.Namespace) -> None:
         output_path=args.output,
         manifest_path=args.manifest,
         resume=args.resume,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_run_vlm_alignment(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = run_vlm_alignment_pipeline(
+        VLMAlignmentPipelineConfig(
+            project_dir=project_dir,
+            vlm_backend=args.vlm_backend,
+            vlm_model=args.vlm_model,
+            vlm_device=args.vlm_device,
+            vlm_options=parse_vlm_options(args.vlm_options),
+            frames_manifest_path=args.frames_manifest,
+            segments_path=args.segments,
+            frame_candidates_path=args.vlm_frame_candidates,
+            visual_observations_path=args.vlm_visual_observations,
+            audio_visual_consistency_path=args.audio_visual_consistency,
+            manifest_path=args.manifest,
+            candidate_config=VLMFrameCandidateConfig(
+                max_candidates=args.max_vlm_frames,
+                max_per_segment=args.candidate_max_per_segment,
+                window_seconds=args.candidate_window_seconds,
+                max_per_window=args.candidate_max_per_window,
+                min_time_gap_seconds=args.candidate_min_time_gap_seconds,
+                segment_margin_seconds=args.candidate_segment_margin_seconds,
+                duplicate_timestamp_epsilon_seconds=(
+                    args.candidate_duplicate_timestamp_epsilon_seconds
+                ),
+                duplicate_distance_threshold=args.candidate_duplicate_distance_threshold,
+                low_information_min_contrast=args.candidate_low_information_min_contrast,
+                low_information_min_detail_score=(
+                    args.candidate_low_information_min_detail_score
+                ),
+            ),
+            consistency_config=AudioVisualConsistencyConfig(
+                window_margin_seconds=args.consistency_window_margin_seconds
+            ),
+            resume=args.resume,
+            dry_run=args.dry_run,
+        )
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

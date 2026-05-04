@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
-from oarag.cli import build_parser, cmd_index_project, parse_vlm_options
+from oarag.cli import (
+    build_parser,
+    build_vlm_alignment_parser,
+    cmd_index_project,
+    parse_vlm_options,
+)
 from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
@@ -220,6 +225,67 @@ def test_run_vlm_cli_accepts_backend_model_and_options() -> None:
     assert args.vlm_options == "confidence=0.8,detected_text=Matrix A"
     assert args.vlm_frame_candidates.as_posix() == "manifests/vlm_frame_candidates.jsonl"
     assert args.resume is True
+
+
+def test_run_vlm_alignment_cli_accepts_pipeline_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "run-vlm-alignment",
+            "--project-id",
+            "sample_project",
+            "--vlm-backend",
+            "deterministic",
+            "--vlm-model",
+            "stub-vlm",
+            "--vlm-options",
+            "confidence=0.8,detected_text=Matrix A",
+            "--max-vlm-frames",
+            "12",
+            "--candidate-max-per-segment",
+            "3",
+            "--candidate-window-seconds",
+            "45",
+            "--candidate-max-per-window",
+            "5",
+            "--candidate-min-time-gap-seconds",
+            "1.5",
+            "--consistency-window-margin-seconds",
+            "0.25",
+            "--resume",
+            "--dry-run",
+        ]
+    )
+
+    assert args.project_id == "sample_project"
+    assert args.vlm_backend == "deterministic"
+    assert args.vlm_model == "stub-vlm"
+    assert args.vlm_options == "confidence=0.8,detected_text=Matrix A"
+    assert args.max_vlm_frames == 12
+    assert args.candidate_max_per_segment == 3
+    assert args.candidate_window_seconds == 45
+    assert args.candidate_max_per_window == 5
+    assert args.candidate_min_time_gap_seconds == 1.5
+    assert args.consistency_window_margin_seconds == 0.25
+    assert args.resume is True
+    assert args.dry_run is True
+
+
+def test_run_vlm_alignment_script_parser_accepts_options_without_subcommand() -> None:
+    args = build_vlm_alignment_parser().parse_args(
+        [
+            "--project-dir",
+            "artifacts/projects/sample_project",
+            "--vlm-model",
+            "stub-vlm",
+            "--max-vlm-frames",
+            "2",
+        ]
+    )
+
+    assert args.project_id is None
+    assert args.project_dir.as_posix() == "artifacts/projects/sample_project"
+    assert args.vlm_model == "stub-vlm"
+    assert args.max_vlm_frames == 2
 
 
 def test_parse_vlm_options_accepts_json_and_key_value_pairs() -> None:
