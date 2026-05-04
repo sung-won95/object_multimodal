@@ -209,6 +209,7 @@ def test_run_vlm_cli_accepts_backend_model_and_options() -> None:
             "confidence=0.8,detected_text=Matrix A",
             "--vlm-frame-candidates",
             "manifests/vlm_frame_candidates.jsonl",
+            "--resume",
         ]
     )
 
@@ -218,6 +219,7 @@ def test_run_vlm_cli_accepts_backend_model_and_options() -> None:
     assert args.vlm_device == "cpu"
     assert args.vlm_options == "confidence=0.8,detected_text=Matrix A"
     assert args.vlm_frame_candidates.as_posix() == "manifests/vlm_frame_candidates.jsonl"
+    assert args.resume is True
 
 
 def test_parse_vlm_options_accepts_json_and_key_value_pairs() -> None:

@@ -4,7 +4,8 @@ import json
 import shlex
 import subprocess
 import time
-from dataclasses import dataclass, field
+from collections import Counter
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
@@ -21,6 +22,14 @@ from .schemas import (
 
 
 DEFAULT_VLM_BACKEND = "deterministic"
+VLM_SUCCESS_STATUS = "success"
+VLM_SKIPPED_RESUMED_STATUS = "skipped_resumed"
+VLM_BACKEND_FAILURE_STATUS = "backend_failure"
+VLM_PARSE_FAILURE_STATUS = "parse_failure"
+
+
+class VLMParseError(ValueError):
+    """Raised when a backend response cannot be converted into observation records."""
 
 
 @dataclass(frozen=True)
@@ -79,9 +88,25 @@ class DeterministicVLMBackend:
             config.options.get("description_prefix") or "Deterministic VLM observation"
         )
         detected_text = _optional_str(config.options.get("detected_text"))
+        backend_failure_frame_ids = _option_str_set(
+            config.options.get("backend_fail_frame_ids") or config.options.get("fail_frame_ids")
+        )
+        parse_failure_frame_ids = _option_str_set(
+            config.options.get("parse_fail_frame_ids")
+            or config.options.get("parse_failure_frame_ids")
+        )
 
         observations: list[VLMVisualObservation] = []
         for frame in frames:
+            if frame.frame_id in parse_failure_frame_ids:
+                raise VLMParseError(
+                    f"Deterministic parse failure requested for frame_id={frame.frame_id}"
+                )
+            if frame.frame_id in backend_failure_frame_ids:
+                raise RuntimeError(
+                    f"Deterministic backend failure requested for frame_id={frame.frame_id}"
+                )
+
             timestamp_text = "unknown" if frame.timestamp is None else f"{frame.timestamp:.3f}s"
             observations.append(
                 VLMVisualObservation(
@@ -95,7 +120,7 @@ class DeterministicVLMBackend:
                     source_model=config.model,
                     model_version=config.model_version,
                     confidence=confidence,
-                    status="completed",
+                    status=VLM_SUCCESS_STATUS,
                     observation_type=observation_type,
                     visual_description=(
                         f"{description_prefix}: {frame.frame_id} at {timestamp_text}"
@@ -175,6 +200,7 @@ def run_vlm(
     frame_candidates_path: Path | None = None,
     output_path: Path | None = None,
     manifest_path: Path | None = None,
+    resume: bool = False,
 ) -> dict[str, Any]:
     resolved_model = _validate_model(model)
     resolved_project_dir = project_dir.expanduser().resolve()
@@ -191,13 +217,16 @@ def run_vlm(
         candidate=frames_manifest_path,
         default=resolved_project_dir / "manifests" / "frames_manifest.jsonl",
     )
+    default_frame_candidates_path = (
+        resolved_project_dir / "manifests" / "vlm_frame_candidates.jsonl"
+    )
     resolved_frame_candidates_path = (
         _resolve_path(
             project_dir=resolved_project_dir,
             candidate=frame_candidates_path,
-            default=resolved_project_dir / "manifests" / "vlm_frame_candidates.jsonl",
+            default=default_frame_candidates_path,
         )
-        if frame_candidates_path is not None
+        if frame_candidates_path is not None or default_frame_candidates_path.exists()
         else None
     )
     resolved_output_path = _resolve_path(
@@ -224,25 +253,65 @@ def run_vlm(
         options=dict(options or {}),
     )
 
-    try:
-        observations = runner.run(frames=frames, config=config)
-    except Exception as exc:
-        _update_project_manifest(
-            manifest_path=resolved_manifest_path,
-            backend=runner.backend,
-            model=resolved_model,
-            model_version=config.model_version,
-            status="failed",
-            device=config.device,
-            options=config.options,
-            run_id=config.run_id,
-            output_path=resolved_output_path,
-            frame_candidates_path=resolved_frame_candidates_path,
-            frame_candidate_count=len(frames) if resolved_frame_candidates_path else 0,
-            observation_count=0,
-            failures={"count": 1, "reasons": {"backend_error": 1}, "last_error": str(exc)},
-        )
-        raise
+    started_at = time.perf_counter()
+    existing_observations = (
+        _read_existing_observations(resolved_output_path) if resume else []
+    )
+    existing_frame_ids = {observation.frame_id for observation in existing_observations}
+    new_observations: list[VLMVisualObservation] = []
+    frame_statuses: Counter[str] = Counter()
+    frame_latencies: list[float] = []
+
+    for frame in frames:
+        if frame.frame_id in existing_frame_ids:
+            frame_statuses[VLM_SKIPPED_RESUMED_STATUS] += 1
+            continue
+
+        frame_started_at = time.perf_counter()
+        try:
+            frame_observations = _normalize_success_observations(
+                runner.run(frames=[frame], config=config)
+            )
+        except VLMParseError as exc:
+            frame_observations = [
+                _failure_observation(
+                    frame=frame,
+                    config=config,
+                    backend=runner.backend,
+                    status=VLM_PARSE_FAILURE_STATUS,
+                    reason=str(exc),
+                )
+            ]
+            frame_statuses[VLM_PARSE_FAILURE_STATUS] += 1
+        except Exception as exc:
+            frame_observations = [
+                _failure_observation(
+                    frame=frame,
+                    config=config,
+                    backend=runner.backend,
+                    status=VLM_BACKEND_FAILURE_STATUS,
+                    reason=str(exc),
+                )
+            ]
+            frame_statuses[VLM_BACKEND_FAILURE_STATUS] += 1
+        else:
+            frame_statuses[VLM_SUCCESS_STATUS] += 1
+
+        frame_latencies.append(time.perf_counter() - frame_started_at)
+        new_observations.extend(frame_observations)
+
+    observations = existing_observations + new_observations
+    elapsed_seconds = round(time.perf_counter() - started_at, 4)
+    average_frame_latency_seconds = (
+        round(sum(frame_latencies) / len(frame_latencies), 4) if frame_latencies else None
+    )
+    failure_reasons = {
+        VLM_BACKEND_FAILURE_STATUS: frame_statuses[VLM_BACKEND_FAILURE_STATUS],
+        VLM_PARSE_FAILURE_STATUS: frame_statuses[VLM_PARSE_FAILURE_STATUS],
+    }
+    failure_count = sum(failure_reasons.values())
+    skipped_count = frame_statuses[VLM_SKIPPED_RESUMED_STATUS]
+    manifest_status = "completed_with_errors" if failure_count else "completed"
 
     write_jsonl(resolved_output_path, [observation.to_dict() for observation in observations])
     _update_project_manifest(
@@ -250,7 +319,7 @@ def run_vlm(
         backend=runner.backend,
         model=resolved_model,
         model_version=config.model_version,
-        status="completed",
+        status=manifest_status,
         device=config.device,
         options=config.options,
         run_id=config.run_id,
@@ -258,7 +327,11 @@ def run_vlm(
         frame_candidates_path=resolved_frame_candidates_path,
         frame_candidate_count=len(frames) if resolved_frame_candidates_path else 0,
         observation_count=len(observations),
-        failures=None,
+        failures={"count": failure_count, "reasons": failure_reasons},
+        skips={"count": skipped_count, "reasons": {"resume": skipped_count}},
+        frame_status_counts=dict(frame_statuses),
+        elapsed_seconds=elapsed_seconds,
+        average_frame_latency_seconds=average_frame_latency_seconds,
     )
 
     return {
@@ -269,7 +342,7 @@ def run_vlm(
         "model_version": config.model_version,
         "device": config.device,
         "run_id": config.run_id,
-        "status": "completed",
+        "status": manifest_status,
         "paths": {
             "project_dir": str(resolved_project_dir),
             "frames_manifest": str(resolved_frames_manifest_path),
@@ -283,8 +356,15 @@ def run_vlm(
         },
         "counts": {
             "frames_total": len(frames),
+            "frames_processed": len(frames) - skipped_count,
+            "frames_succeeded": frame_statuses[VLM_SUCCESS_STATUS],
+            "frames_failed": failure_count,
+            "frames_skipped_resumed": skipped_count,
             "vlm_visual_observations": len(observations),
         },
+        "frame_status_counts": dict(frame_statuses),
+        "elapsed_seconds": elapsed_seconds,
+        "average_frame_latency_seconds": average_frame_latency_seconds,
     }
 
 
@@ -366,6 +446,55 @@ def _read_frame_candidates(path: Path) -> list[VLMFrameCandidate]:
     return [VLMFrameCandidate.from_dict(row) for row in _read_jsonl(path)]
 
 
+def _read_existing_observations(path: Path) -> list[VLMVisualObservation]:
+    if not path.exists():
+        return []
+    return [VLMVisualObservation.from_dict(row) for row in _read_jsonl(path)]
+
+
+def _normalize_success_observations(
+    observations: list[VLMVisualObservation],
+) -> list[VLMVisualObservation]:
+    return [
+        replace(observation, status=VLM_SUCCESS_STATUS)
+        if observation.status in {"", "completed"}
+        else observation
+        for observation in observations
+    ]
+
+
+def _failure_observation(
+    *,
+    frame: VLMFrameInput,
+    config: VLMRunConfig,
+    backend: str,
+    status: str,
+    reason: str,
+) -> VLMVisualObservation:
+    return VLMVisualObservation(
+        observation_id=f"obs_{slugify(frame.frame_id)}_{status}",
+        project_id=frame.project_id,
+        video_id=frame.video_id,
+        frame_id=frame.frame_id,
+        timestamp=frame.timestamp,
+        segment_id=frame.segment_id,
+        backend=backend,
+        source_model=config.model,
+        model_version=config.model_version,
+        confidence=None,
+        status=status,
+        observation_type="frame_error",
+        visual_description="",
+        attributes={
+            "run_id": config.run_id,
+            "device": config.device,
+            "frame_path": frame.frame_path,
+            "rank": frame.rank,
+        },
+        metadata={"failure_reason": reason},
+    )
+
+
 def _observations_from_command_stdout(
     stdout: str,
     *,
@@ -379,7 +508,9 @@ def _observations_from_command_stdout(
     try:
         payload = json.loads(stripped)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"VLM command returned invalid JSON for frame_id={frame.frame_id}") from exc
+        raise VLMParseError(
+            f"VLM command returned invalid JSON for frame_id={frame.frame_id}"
+        ) from exc
 
     if isinstance(payload, dict) and isinstance(payload.get("observations"), list):
         raw_observations = payload["observations"]
@@ -391,10 +522,12 @@ def _observations_from_command_stdout(
     observations: list[VLMVisualObservation] = []
     for index, raw in enumerate(raw_observations, start=1):
         if not isinstance(raw, dict):
-            raise ValueError(f"VLM command returned non-object observation for {frame.frame_id}")
+            raise VLMParseError(
+                f"VLM command returned non-object observation for {frame.frame_id}"
+            )
         frame_id = _optional_str(raw.get("frame_id"))
         if frame_id is not None and frame_id != frame.frame_id:
-            raise ValueError(
+            raise VLMParseError(
                 f"VLM command frame_id mismatch for {frame.frame_id}: returned {frame_id}"
             )
         observations.append(
@@ -412,7 +545,7 @@ def _observations_from_command_stdout(
                 source_model=_optional_str(raw.get("source_model")) or config.model,
                 model_version=_optional_str(raw.get("model_version")) or config.model_version,
                 confidence=_optional_float(raw.get("confidence")),
-                status=_optional_str(raw.get("status")) or "completed",
+                status=_optional_str(raw.get("status")) or VLM_SUCCESS_STATUS,
                 observation_type=_optional_str(raw.get("observation_type")) or "frame_summary",
                 visual_description=str(raw.get("visual_description") or ""),
                 detected_text=_optional_str(raw.get("detected_text")),
@@ -489,6 +622,10 @@ def _update_project_manifest(
     frame_candidate_count: int,
     observation_count: int,
     failures: dict[str, Any] | None,
+    skips: dict[str, Any] | None,
+    frame_status_counts: dict[str, int],
+    elapsed_seconds: float,
+    average_frame_latency_seconds: float | None,
 ) -> None:
     payload = _read_json_object(manifest_path) if manifest_path.exists() else {}
     artifact_paths = {VLM_VISUAL_OBSERVATIONS_ARTIFACT: str(output_path)}
@@ -511,7 +648,12 @@ def _update_project_manifest(
             VLM_VISUAL_OBSERVATIONS_ARTIFACT: observation_count,
         },
         failures=failures,
+        skips=skips,
     )
+    section = vlm_fields[VLM_PROJECT_MANIFEST_SECTION]
+    section["frame_status_counts"] = frame_status_counts
+    section["elapsed_seconds"] = elapsed_seconds
+    section["average_frame_latency_seconds"] = average_frame_latency_seconds
 
     artifacts = payload.setdefault("artifacts", {})
     if not isinstance(artifacts, dict):
@@ -525,7 +667,7 @@ def _update_project_manifest(
         payload["counts"] = counts
     counts.update(vlm_fields["counts"])
 
-    payload[VLM_PROJECT_MANIFEST_SECTION] = vlm_fields[VLM_PROJECT_MANIFEST_SECTION]
+    payload[VLM_PROJECT_MANIFEST_SECTION] = section
     write_json(manifest_path, payload)
 
 
@@ -585,6 +727,16 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _option_str_set(value: Any) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        return {item.strip() for item in value.split(",") if item.strip()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item).strip() for item in value if str(item).strip()}
+    return {str(value).strip()} if str(value).strip() else set()
 
 
 def _mapping(value: Any) -> dict[str, Any]:
