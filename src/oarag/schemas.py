@@ -6,6 +6,76 @@ from statistics import mean
 from typing import Any
 
 
+VLM_SCHEMA_VERSION = "vlm-consistency-v1"
+VLM_PROJECT_MANIFEST_SECTION = "vlm_consistency"
+
+VLM_FRAME_CANDIDATES_ARTIFACT = "vlm_frame_candidates"
+VLM_VISUAL_OBSERVATIONS_ARTIFACT = "vlm_visual_observations"
+AUDIO_VISUAL_CONSISTENCY_ARTIFACT = "audio_visual_consistency"
+
+VLM_ARTIFACT_PATHS = {
+    VLM_FRAME_CANDIDATES_ARTIFACT: "manifests/vlm_frame_candidates.jsonl",
+    VLM_VISUAL_OBSERVATIONS_ARTIFACT: "manifests/vlm_visual_observations.jsonl",
+    AUDIO_VISUAL_CONSISTENCY_ARTIFACT: "manifests/audio_visual_consistency.jsonl",
+}
+
+VLM_COMMON_RECORD_FIELDS = (
+    "schema_version",
+    "project_id",
+    "video_id",
+    "frame_id",
+    "timestamp",
+    "segment_id",
+    "backend",
+    "source_model",
+    "model_version",
+    "confidence",
+    "status",
+)
+
+VLM_JSONL_ARTIFACT_CONTRACT = {
+    VLM_FRAME_CANDIDATES_ARTIFACT: {
+        "path": VLM_ARTIFACT_PATHS[VLM_FRAME_CANDIDATES_ARTIFACT],
+        "record_type": "VLMFrameCandidate",
+        "fields": (*VLM_COMMON_RECORD_FIELDS, "frame_path", "selection_reason", "rank"),
+    },
+    VLM_VISUAL_OBSERVATIONS_ARTIFACT: {
+        "path": VLM_ARTIFACT_PATHS[VLM_VISUAL_OBSERVATIONS_ARTIFACT],
+        "record_type": "VLMVisualObservation",
+        "fields": (
+            *VLM_COMMON_RECORD_FIELDS,
+            "observation_id",
+            "observation_type",
+            "visual_description",
+            "detected_text",
+            "bbox",
+            "position",
+            "attributes",
+            "relations",
+        ),
+    },
+    AUDIO_VISUAL_CONSISTENCY_ARTIFACT: {
+        "path": VLM_ARTIFACT_PATHS[AUDIO_VISUAL_CONSISTENCY_ARTIFACT],
+        "record_type": "AudioVisualConsistencyRecord",
+        "fields": (
+            *VLM_COMMON_RECORD_FIELDS,
+            "consistency_id",
+            "consistency",
+            "visual_observation_ids",
+            "evidence_refs",
+            "failure_reason",
+            "skip_reason",
+        ),
+    },
+}
+
+VLM_COUNT_FIELDS = (
+    VLM_FRAME_CANDIDATES_ARTIFACT,
+    VLM_VISUAL_OBSERVATIONS_ARTIFACT,
+    AUDIO_VISUAL_CONSISTENCY_ARTIFACT,
+)
+
+
 DEICTIC_HINTS = (
     "this",
     "that",
@@ -276,6 +346,148 @@ class VisualEntity:
 
 
 @dataclass(frozen=True)
+class VLMFrameCandidate:
+    project_id: str
+    video_id: str
+    frame_id: str
+    timestamp: float | None
+    segment_id: str | None
+    backend: str
+    source_model: str | None
+    model_version: str | None
+    confidence: float | None
+    status: str
+    frame_path: str | None = None
+    selection_reason: str | None = None
+    rank: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    schema_version: str = VLM_SCHEMA_VERSION
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "VLMFrameCandidate":
+        return cls(
+            project_id=str(payload.get("project_id", "")),
+            video_id=str(payload.get("video_id", "")),
+            frame_id=str(payload.get("frame_id", "")),
+            timestamp=_optional_float(payload.get("timestamp")),
+            segment_id=_optional_str(payload.get("segment_id")),
+            backend=str(payload.get("backend", "")),
+            source_model=_optional_str(payload.get("source_model")),
+            model_version=_optional_str(payload.get("model_version")),
+            confidence=_optional_float(payload.get("confidence")),
+            status=str(payload.get("status", "")),
+            frame_path=_optional_str(payload.get("frame_path")),
+            selection_reason=_optional_str(payload.get("selection_reason")),
+            rank=_optional_int(payload.get("rank")),
+            metadata=_mapping(payload.get("metadata")),
+            schema_version=str(payload.get("schema_version", VLM_SCHEMA_VERSION)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class VLMVisualObservation:
+    observation_id: str
+    project_id: str
+    video_id: str
+    frame_id: str
+    timestamp: float | None
+    segment_id: str | None
+    backend: str
+    source_model: str | None
+    model_version: str | None
+    confidence: float | None
+    status: str
+    observation_type: str
+    visual_description: str
+    detected_text: str | None = None
+    bbox: dict[str, float] | None = None
+    position: dict[str, Any] | None = None
+    attributes: dict[str, Any] = field(default_factory=dict)
+    relations: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    schema_version: str = VLM_SCHEMA_VERSION
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "VLMVisualObservation":
+        return cls(
+            observation_id=str(payload.get("observation_id", "")),
+            project_id=str(payload.get("project_id", "")),
+            video_id=str(payload.get("video_id", "")),
+            frame_id=str(payload.get("frame_id", "")),
+            timestamp=_optional_float(payload.get("timestamp")),
+            segment_id=_optional_str(payload.get("segment_id")),
+            backend=str(payload.get("backend", "")),
+            source_model=_optional_str(payload.get("source_model")),
+            model_version=_optional_str(payload.get("model_version")),
+            confidence=_optional_float(payload.get("confidence")),
+            status=str(payload.get("status", "")),
+            observation_type=str(payload.get("observation_type", "")),
+            visual_description=str(payload.get("visual_description", "")),
+            detected_text=_optional_str(payload.get("detected_text")),
+            bbox=_float_mapping_or_none(payload.get("bbox")),
+            position=_optional_mapping(payload.get("position")),
+            attributes=_mapping(payload.get("attributes")),
+            relations=_dict_list(payload.get("relations")),
+            metadata=_mapping(payload.get("metadata")),
+            schema_version=str(payload.get("schema_version", VLM_SCHEMA_VERSION)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AudioVisualConsistencyRecord:
+    consistency_id: str
+    project_id: str
+    video_id: str
+    frame_id: str
+    timestamp: float | None
+    segment_id: str | None
+    backend: str
+    source_model: str | None
+    model_version: str | None
+    confidence: float | None
+    status: str
+    consistency: str
+    visual_observation_ids: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    failure_reason: str | None = None
+    skip_reason: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    schema_version: str = VLM_SCHEMA_VERSION
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "AudioVisualConsistencyRecord":
+        return cls(
+            consistency_id=str(payload.get("consistency_id", "")),
+            project_id=str(payload.get("project_id", "")),
+            video_id=str(payload.get("video_id", "")),
+            frame_id=str(payload.get("frame_id", "")),
+            timestamp=_optional_float(payload.get("timestamp")),
+            segment_id=_optional_str(payload.get("segment_id")),
+            backend=str(payload.get("backend", "")),
+            source_model=_optional_str(payload.get("source_model")),
+            model_version=_optional_str(payload.get("model_version")),
+            confidence=_optional_float(payload.get("confidence")),
+            status=str(payload.get("status", "")),
+            consistency=str(payload.get("consistency", "")),
+            visual_observation_ids=_str_list(payload.get("visual_observation_ids")),
+            evidence_refs=_str_list(payload.get("evidence_refs")),
+            failure_reason=_optional_str(payload.get("failure_reason")),
+            skip_reason=_optional_str(payload.get("skip_reason")),
+            metadata=_mapping(payload.get("metadata")),
+            schema_version=str(payload.get("schema_version", VLM_SCHEMA_VERSION)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class EntityLink:
     link_id: str
     project_id: str
@@ -358,6 +570,45 @@ class EvidenceWindow:
         return asdict(self)
 
 
+def build_vlm_project_manifest_fields(
+    *,
+    backend: str,
+    source_model: str | None = None,
+    model_version: str | None = None,
+    status: str = "planned",
+    settings: dict[str, Any] | None = None,
+    artifact_paths: dict[str, str] | None = None,
+    counts: dict[str, int] | None = None,
+    failures: dict[str, Any] | None = None,
+    skips: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    artifacts = dict(VLM_ARTIFACT_PATHS)
+    if artifact_paths:
+        artifacts.update({str(key): str(value) for key, value in artifact_paths.items()})
+
+    resolved_counts = {key: 0 for key in VLM_COUNT_FIELDS}
+    if counts:
+        resolved_counts.update({str(key): int(value) for key, value in counts.items()})
+
+    section = {
+        "schema_version": VLM_SCHEMA_VERSION,
+        "status": status,
+        "backend": backend,
+        "source_model": source_model,
+        "model_version": model_version,
+        "settings": _mapping(settings),
+        "artifacts": artifacts,
+        "counts": resolved_counts,
+        "failures": _reason_summary(failures),
+        "skips": _reason_summary(skips),
+    }
+    return {
+        "artifacts": artifacts,
+        "counts": resolved_counts,
+        VLM_PROJECT_MANIFEST_SECTION: section,
+    }
+
+
 def _optional_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -365,3 +616,58 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _optional_mapping(value: Any) -> dict[str, Any] | None:
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _float_mapping_or_none(value: Any) -> dict[str, float] | None:
+    if not isinstance(value, dict):
+        return None
+    parsed: dict[str, float] = {}
+    for key, raw_value in value.items():
+        float_value = _optional_float(raw_value)
+        if float_value is not None:
+            parsed[str(key)] = float_value
+    return parsed or None
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _reason_summary(value: dict[str, Any] | None) -> dict[str, Any]:
+    payload = value if isinstance(value, dict) else {}
+    reasons = payload.get("reasons")
+    return {
+        "count": int(payload.get("count", 0) or 0),
+        "reasons": dict(reasons) if isinstance(reasons, dict) else {},
+    }
