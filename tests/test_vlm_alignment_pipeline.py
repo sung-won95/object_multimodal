@@ -31,6 +31,8 @@ def test_run_vlm_alignment_pipeline_dry_run_does_not_write_artifacts(tmp_path: P
     assert summary["status"] == "planned"
     assert summary["dry_run"] is True
     assert summary["counts"]["vlm_frame_candidates"] == 1
+    assert summary["smoke_metrics"]["selected_candidate_count"] == 1
+    assert summary["smoke_metrics"]["candidate_frame_reduction_ratio"] == 0.6667
     assert summary["stages"][PIPELINE_STAGE_CANDIDATES]["status"] == "would_generate"
     assert summary["stages"][PIPELINE_STAGE_VISUAL_OBSERVATIONS]["status"] == "would_run"
     assert not (project_dir / "manifests" / "vlm_frame_candidates.jsonl").exists()
@@ -68,6 +70,11 @@ def test_run_vlm_alignment_pipeline_generates_all_artifacts(tmp_path: Path) -> N
     assert summary["counts"]["vlm_frame_candidates"] == 3
     assert summary["counts"]["vlm_visual_observations"] == 3
     assert summary["counts"]["audio_visual_consistency"] == 3
+    assert summary["smoke_metrics"]["candidate_frame_reduction_ratio"] == 0.0
+    assert summary["smoke_metrics"]["selected_candidate_count"] == 3
+    assert summary["smoke_metrics"]["frames_processed"] == 3
+    assert summary["smoke_metrics"]["audio_visual_consistency_records"] == 3
+    assert summary["smoke_metrics"]["average_frame_latency_seconds"] is not None
     assert candidates[0]["status"] == "selected"
     assert observations[0]["status"] == "success"
     assert consistency[0]["consistency"] == "aligned"
@@ -116,6 +123,8 @@ def test_run_vlm_alignment_pipeline_resume_reuses_existing_candidates_and_observ
     assert second["stages"][PIPELINE_STAGE_VISUAL_OBSERVATIONS]["counts"][
         "frames_skipped_resumed"
     ] == 1
+    assert second["smoke_metrics"]["frames_processed"] == 0
+    assert second["smoke_metrics"]["frames_skipped"] == 1
     assert _count_jsonl(project_dir / "manifests" / "vlm_visual_observations.jsonl") == 1
 
 

@@ -23,6 +23,7 @@ from .vlm_frame_candidates import (
     generate_vlm_frame_candidates,
     select_vlm_frame_candidates,
 )
+from .vlm_pipeline_metrics import extract_vlm_smoke_metrics
 
 
 PIPELINE_STAGE_CANDIDATES = "frame_candidates"
@@ -101,7 +102,7 @@ def run_vlm_alignment_pipeline(config: VLMAlignmentPipelineConfig) -> dict[str, 
 
     elapsed_seconds = round(time.perf_counter() - started_at, 4)
     failure_by_stage = _failure_counts(stage_summaries)
-    return {
+    pipeline_summary = {
         "project_id": project_id,
         "video_id": video_id,
         "status": _pipeline_status(
@@ -119,6 +120,8 @@ def run_vlm_alignment_pipeline(config: VLMAlignmentPipelineConfig) -> dict[str, 
         },
         "stages": stage_summaries,
     }
+    pipeline_summary["smoke_metrics"] = extract_vlm_smoke_metrics(pipeline_summary)
+    return pipeline_summary
 
 
 def _run_frame_candidates(
@@ -190,6 +193,7 @@ def _run_visual_observations(
         "artifact_path": str(paths.vlm_visual_observations),
         "counts": summary["counts"],
         "frame_status_counts": summary["frame_status_counts"],
+        "average_frame_latency_seconds": summary["average_frame_latency_seconds"],
         "failures": {"count": failures},
     }
 

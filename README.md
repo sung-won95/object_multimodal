@@ -298,6 +298,62 @@ PYTHONPATH=src python -m oarag extract-visual-entities \
   --ocr-language eng
 ```
 
+## VLM Alignment Pipeline
+
+Run the end-to-end VLM smoke path after frame alignment:
+
+```bash
+PYTHONPATH=src python -m oarag run-vlm-alignment \
+  --project-id upswing_matrices \
+  --vlm-backend deterministic \
+  --vlm-model stub-vlm \
+  --max-vlm-frames 24 \
+  --candidate-max-per-segment 2 \
+  --resume
+```
+
+The deterministic backend is the safe default for CI and smoke reports. It emits stable
+visual observations without calling an external model, then runs audio-visual
+consistency checks over the aligned transcript windows.
+
+Defaults:
+
+- Reads `artifacts/projects/{project_id}/manifests/frames_manifest.jsonl`
+- Reads `artifacts/projects/{project_id}/segments/lecture_segments_aligned.jsonl`
+- Writes `artifacts/projects/{project_id}/manifests/vlm_frame_candidates.jsonl`
+- Writes `artifacts/projects/{project_id}/manifests/vlm_visual_observations.jsonl`
+- Writes `artifacts/projects/{project_id}/manifests/audio_visual_consistency.jsonl`
+- Updates `artifacts/projects/{project_id}/manifests/project_manifest.json`
+
+Use `--dry-run` to plan the VLM candidate count and output paths without writing
+artifacts:
+
+```bash
+PYTHONPATH=src python -m oarag run-vlm-alignment \
+  --project-id upswing_matrices \
+  --vlm-model stub-vlm \
+  --max-vlm-frames 24 \
+  --dry-run
+```
+
+The command prints a JSON summary with a compact `smoke_metrics` block for reporting:
+
+- candidate frame reduction ratio
+- selected candidate, processed, failed, and resumed frame counts
+- average visual-observation frame latency when frames were processed
+- audio-visual consistency status and label distributions
+
+For a local VLM adapter, use the `command` backend and pass a generic command template
+through `--vlm-options`:
+
+```bash
+PYTHONPATH=src python -m oarag run-vlm-alignment \
+  --project-id upswing_matrices \
+  --vlm-backend command \
+  --vlm-model local-vlm \
+  --vlm-options '{"command":["vlm-adapter","--frame","{frame_path}"]}'
+```
+
 ## Entity Linking
 
 Link transcript segments to nearby visual entities:
