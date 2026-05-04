@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from oarag.cli import build_parser, cmd_index_project
+from oarag.cli import build_parser, cmd_index_project, parse_vlm_options
 from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
@@ -191,6 +191,44 @@ def test_extract_visual_entities_cli_accepts_vlm_jsonl_backend() -> None:
 
     assert args.backend == "vlm-jsonl"
     assert args.vlm_jsonl.as_posix() == "manifests/vlm_parser_output.jsonl"
+
+
+def test_run_vlm_cli_accepts_backend_model_and_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "run-vlm",
+            "--project-id",
+            "sample_project",
+            "--vlm-backend",
+            "deterministic",
+            "--vlm-model",
+            "stub-vlm",
+            "--vlm-device",
+            "cpu",
+            "--vlm-options",
+            "confidence=0.8,detected_text=Matrix A",
+            "--vlm-frame-candidates",
+            "manifests/vlm_frame_candidates.jsonl",
+        ]
+    )
+
+    assert args.project_id == "sample_project"
+    assert args.vlm_backend == "deterministic"
+    assert args.vlm_model == "stub-vlm"
+    assert args.vlm_device == "cpu"
+    assert args.vlm_options == "confidence=0.8,detected_text=Matrix A"
+    assert args.vlm_frame_candidates.as_posix() == "manifests/vlm_frame_candidates.jsonl"
+
+
+def test_parse_vlm_options_accepts_json_and_key_value_pairs() -> None:
+    assert parse_vlm_options('{"confidence": 0.7, "detected_text": "Matrix A"}') == {
+        "confidence": 0.7,
+        "detected_text": "Matrix A",
+    }
+    assert parse_vlm_options("confidence=0.8,detected_text=Matrix A") == {
+        "confidence": 0.8,
+        "detected_text": "Matrix A",
+    }
 
 
 def test_link_entities_cli_defaults() -> None:
