@@ -34,6 +34,7 @@ from .project_index import index_project_segments, project_dir_from_args
 from .schemas import SearchCandidate
 from .stt import DEFAULT_MLX_WHISPER_MODEL
 from .visual_entities import extract_visual_entities
+from .vlm import DEFAULT_VLM_BACKEND, run_vlm
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -356,6 +357,50 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extract_visual.set_defaults(func=cmd_extract_visual_entities)
 
+    vlm = subparsers.add_parser(
+        "run-vlm",
+        help="Run a selectable VLM backend against project frames or frame candidates",
+    )
+    location = vlm.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    vlm.add_argument(
+        "--vlm-backend",
+        default=DEFAULT_VLM_BACKEND,
+        help="VLM backend to run. Built-in options include deterministic and command.",
+    )
+    vlm.add_argument(
+        "--vlm-model",
+        required=True,
+        help="VLM model identifier recorded as source_model in VLM artifacts.",
+    )
+    vlm.add_argument("--vlm-device", help="Optional device hint recorded in run metadata.")
+    vlm.add_argument(
+        "--vlm-options",
+        help="Backend options as a JSON object or comma-separated key=value pairs.",
+    )
+    vlm.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Input frames manifest JSONL. Relative paths are resolved from project dir.",
+    )
+    vlm.add_argument(
+        "--vlm-frame-candidates",
+        type=Path,
+        help="Optional VLM frame candidate JSONL. Relative paths are resolved from project dir.",
+    )
+    vlm.add_argument(
+        "--output",
+        type=Path,
+        help="Output VLM visual observations JSONL path. Relative paths resolve from project dir.",
+    )
+    vlm.add_argument(
+        "--manifest",
+        type=Path,
+        help="Project manifest JSON path. Relative paths are resolved from project dir.",
+    )
+    vlm.set_defaults(func=cmd_run_vlm)
+
     entity_links = subparsers.add_parser(
         "link-entities",
         help="Link transcript segments to nearby visual entities with weak evidence",
@@ -665,6 +710,22 @@ def cmd_extract_visual_entities(args: argparse.Namespace) -> None:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def cmd_run_vlm(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = run_vlm(
+        project_dir=project_dir,
+        backend=args.vlm_backend,
+        model=args.vlm_model,
+        device=args.vlm_device,
+        options=parse_vlm_options(args.vlm_options),
+        frames_manifest_path=args.frames_manifest,
+        frame_candidates_path=args.vlm_frame_candidates,
+        output_path=args.output,
+        manifest_path=args.manifest,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
 def cmd_link_entities(args: argparse.Namespace) -> None:
     project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
     summary = link_entities(
@@ -809,3 +870,39 @@ def parse_deltas(value: str) -> list[int]:
     if not deltas:
         raise ValueError("At least one delta must be provided")
     return deltas
+
+
+def parse_vlm_options(value: str | None) -> dict[str, object]:
+    if value is None:
+        return {}
+    stripped = value.strip()
+    if not stripped:
+        return {}
+    if stripped.startswith("{"):
+        parsed = json.loads(stripped)
+        if not isinstance(parsed, dict):
+            raise ValueError("--vlm-options JSON value must be an object")
+        return parsed
+
+    options: dict[str, object] = {}
+    for item in stripped.split(","):
+        pair = item.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise ValueError("--vlm-options must be a JSON object or comma-separated key=value pairs")
+        key, raw_value = pair.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError("--vlm-options contains an empty key")
+        options[key] = _parse_vlm_option_value(raw_value.strip())
+    return options
+
+
+def _parse_vlm_option_value(value: str) -> object:
+    if value == "":
+        return ""
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
