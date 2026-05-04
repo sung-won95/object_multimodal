@@ -71,7 +71,7 @@ def test_run_vlm_deterministic_backend_writes_observations_and_manifest(tmp_path
     assert manifest["vlm_consistency"]["settings"]["run_id"].startswith("vlm_")
 
 
-def test_run_vlm_uses_frame_candidates_when_provided(tmp_path: Path) -> None:
+def test_run_vlm_uses_default_frame_candidates_when_present(tmp_path: Path) -> None:
     project_dir = tmp_path / "artifacts" / "projects" / "candidate_project"
     frames_manifest = project_dir / "manifests" / "frames_manifest.jsonl"
     frame_candidates = project_dir / "manifests" / "vlm_frame_candidates.jsonl"
@@ -115,7 +115,6 @@ def test_run_vlm_uses_frame_candidates_when_provided(tmp_path: Path) -> None:
         project_dir=project_dir,
         backend="deterministic",
         model="stub-vlm",
-        frame_candidates_path=frame_candidates,
     )
 
     rows = _read_jsonl(project_dir / "manifests" / "vlm_visual_observations.jsonl")
@@ -124,6 +123,137 @@ def test_run_vlm_uses_frame_candidates_when_provided(tmp_path: Path) -> None:
     assert rows[0]["frame_id"] == "frame_000002"
     assert rows[0]["segment_id"] == "seg_0001"
     assert rows[0]["attributes"]["rank"] == 1
+
+
+def test_run_vlm_resume_skips_existing_frame_observations(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "resume_project"
+    frames_manifest = project_dir / "manifests" / "frames_manifest.jsonl"
+    output = project_dir / "manifests" / "vlm_visual_observations.jsonl"
+    _write_jsonl(
+        frames_manifest,
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": "frames/frame_000001.jpg",
+                "timestamp": 1.0,
+            },
+            {
+                "frame_id": "frame_000002",
+                "frame_path": "frames/frame_000002.jpg",
+                "timestamp": 2.0,
+            },
+        ],
+    )
+    _write_jsonl(
+        output,
+        [
+            {
+                "observation_id": "obs_existing",
+                "project_id": "resume_project",
+                "video_id": "resume_project",
+                "frame_id": "frame_000001",
+                "timestamp": 1.0,
+                "segment_id": None,
+                "backend": "deterministic",
+                "source_model": "stub-vlm",
+                "model_version": None,
+                "confidence": 1.0,
+                "status": "success",
+                "observation_type": "frame_summary",
+                "visual_description": "Existing observation",
+            }
+        ],
+    )
+
+    summary = run_vlm(
+        project_dir=project_dir,
+        backend="deterministic",
+        model="stub-vlm",
+        resume=True,
+    )
+
+    rows = _read_jsonl(output)
+    manifest = json.loads(
+        (project_dir / "manifests" / "project_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert summary["counts"]["frames_total"] == 2
+    assert summary["counts"]["frames_processed"] == 1
+    assert summary["counts"]["frames_skipped_resumed"] == 1
+    assert summary["frame_status_counts"] == {"skipped_resumed": 1, "success": 1}
+    assert [row["frame_id"] for row in rows] == ["frame_000001", "frame_000002"]
+    assert rows[0]["visual_description"] == "Existing observation"
+    assert rows[1]["status"] == "success"
+    assert manifest["vlm_consistency"]["skips"] == {
+        "count": 1,
+        "reasons": {"resume": 1},
+    }
+    assert manifest["vlm_consistency"]["frame_status_counts"]["skipped_resumed"] == 1
+
+
+def test_run_vlm_records_frame_level_backend_and_parse_failures(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "failure_project"
+    frames_manifest = project_dir / "manifests" / "frames_manifest.jsonl"
+    _write_jsonl(
+        frames_manifest,
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": "frames/frame_000001.jpg",
+                "timestamp": 1.0,
+            },
+            {
+                "frame_id": "frame_000002",
+                "frame_path": "frames/frame_000002.jpg",
+                "timestamp": 2.0,
+            },
+            {
+                "frame_id": "frame_000003",
+                "frame_path": "frames/frame_000003.jpg",
+                "timestamp": 3.0,
+            },
+        ],
+    )
+
+    summary = run_vlm(
+        project_dir=project_dir,
+        backend="deterministic",
+        model="stub-vlm",
+        options={
+            "fail_frame_ids": "frame_000002",
+            "parse_fail_frame_ids": ["frame_000003"],
+        },
+    )
+
+    rows = _read_jsonl(project_dir / "manifests" / "vlm_visual_observations.jsonl")
+    manifest = json.loads(
+        (project_dir / "manifests" / "project_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert summary["status"] == "completed_with_errors"
+    assert summary["counts"]["frames_failed"] == 2
+    assert [row["status"] for row in rows] == [
+        "success",
+        "backend_failure",
+        "parse_failure",
+    ]
+    assert rows[1]["metadata"]["failure_reason"].startswith(
+        "Deterministic backend failure requested"
+    )
+    assert rows[2]["metadata"]["failure_reason"].startswith(
+        "Deterministic parse failure requested"
+    )
+    assert manifest["vlm_consistency"]["status"] == "completed_with_errors"
+    assert manifest["vlm_consistency"]["failures"] == {
+        "count": 2,
+        "reasons": {"backend_failure": 1, "parse_failure": 1},
+    }
+    assert manifest["vlm_consistency"]["frame_status_counts"] == {
+        "success": 1,
+        "backend_failure": 1,
+        "parse_failure": 1,
+    }
+    assert isinstance(manifest["vlm_consistency"]["elapsed_seconds"], float)
 
 
 def test_vlm_backend_errors_are_clear() -> None:

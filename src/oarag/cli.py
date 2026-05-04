@@ -390,6 +390,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional VLM frame candidate JSONL. Relative paths are resolved from project dir.",
     )
     vlm.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse existing VLM visual observations and skip already processed frames.",
+    )
+    vlm.add_argument(
         "--output",
         type=Path,
         help="Output VLM visual observations JSONL path. Relative paths resolve from project dir.",
@@ -722,6 +727,7 @@ def cmd_run_vlm(args: argparse.Namespace) -> None:
         frame_candidates_path=args.vlm_frame_candidates,
         output_path=args.output,
         manifest_path=args.manifest,
+        resume=args.resume,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
