@@ -13,6 +13,7 @@ from .eval import evaluate_query, summarize
 from .entity_links import link_entities
 from .evidence import build_evidence_response
 from .graph_ingest import ingest_project_graph
+from .graph_query import GraphTraversalConfig, graph_query
 from .ingest import (
     BatchIngestConfig,
     VideoIngestConfig,
@@ -571,6 +572,56 @@ def build_parser() -> argparse.ArgumentParser:
     query_project.add_argument("--output", type=Path, help="Optional JSON output path.")
     query_project.set_defaults(func=cmd_query_project)
 
+    graph_query_parser = subparsers.add_parser(
+        "graph-query",
+        help="Search a project, then expand temporal/reference hints through Neo4j graph traversal",
+    )
+    graph_query_parser.add_argument("--index", required=True)
+    location = graph_query_parser.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    graph_query_parser.add_argument("--query", required=True)
+    graph_query_parser.add_argument("--limit", type=int, default=5)
+    graph_query_parser.add_argument(
+        "--segments",
+        type=Path,
+        help="Optional segment JSONL path. Relative paths are resolved from project dir.",
+    )
+    graph_query_parser.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Optional frames manifest JSONL path. Relative paths are resolved from project dir.",
+    )
+    graph_query_parser.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Optional visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    graph_query_parser.add_argument(
+        "--entity-links",
+        type=Path,
+        help="Optional entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    graph_query_parser.add_argument(
+        "--domain-lexicon",
+        type=Path,
+        help="Optional domain_lexicon.json path. Relative paths are resolved from project dir.",
+    )
+    graph_query_parser.add_argument(
+        "--graph-lookback-segments",
+        type=int,
+        default=3,
+        help="Maximum previous NEXT_SEGMENT hops to inspect when a graph hint is present.",
+    )
+    graph_query_parser.add_argument(
+        "--graph-limit",
+        type=int,
+        default=12,
+        help="Maximum graph evidence rows to return per Meilisearch candidate.",
+    )
+    graph_query_parser.add_argument("--output", type=Path, help="Optional JSON output path.")
+    graph_query_parser.set_defaults(func=cmd_graph_query)
+
     evaluate = subparsers.add_parser("eval-eduvidqa", help="Run timestamp proximity eval")
     evaluate.add_argument("--input", required=True, type=Path)
     evaluate.add_argument("--index", required=True)
@@ -1038,6 +1089,36 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         window_after_seconds=args.window_after_seconds,
         rerank=args.rerank,
         rerank_time_hint=args.rerank_time_hint,
+    )
+    if args.output is not None:
+        output_path = args.output
+        if not output_path.is_absolute():
+            output_path = project_dir / output_path
+        write_json(output_path, response)
+    for line in response.get("summary_lines", []):
+        print(line, file=sys.stderr)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+
+
+def cmd_graph_query(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    response = graph_query(
+        client=client,
+        index_uid=args.index,
+        project_dir=project_dir,
+        project_id=args.project_id,
+        query=args.query,
+        limit=args.limit,
+        segments_path=args.segments,
+        frames_manifest_path=args.frames_manifest,
+        visual_entities_path=args.visual_entities,
+        entity_links_path=args.entity_links,
+        domain_lexicon_path=args.domain_lexicon,
+        traversal_config=GraphTraversalConfig(
+            lookback_segments=args.graph_lookback_segments,
+            per_candidate_limit=args.graph_limit,
+        ),
     )
     if args.output is not None:
         output_path = args.output

@@ -374,6 +374,26 @@ def test_query_project_cli_accepts_rerank_options() -> None:
     assert args.rerank_time_hint == "10-14s"
 
 
+def test_graph_query_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        ["graph-query", "--index", "sample_segments", "--project-id", "sample_project", "--query", "아까 개념"]
+    )
+
+    assert args.index == "sample_segments"
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.query == "아까 개념"
+    assert args.limit == 5
+    assert args.segments is None
+    assert args.frames_manifest is None
+    assert args.visual_entities is None
+    assert args.entity_links is None
+    assert args.domain_lexicon is None
+    assert args.graph_lookback_segments == 3
+    assert args.graph_limit == 12
+    assert args.output is None
+
+
 def test_batch_ingest_cli_defaults() -> None:
     args = build_parser().parse_args(["batch-ingest", "--root", "lectures"])
 
