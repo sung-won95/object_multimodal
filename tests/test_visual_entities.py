@@ -351,6 +351,144 @@ def test_vlm_jsonl_backend_rejects_unknown_frame_id(tmp_path: Path) -> None:
         )
 
 
+def test_extract_visual_entities_vlm_observations_maps_success_observations(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "vlm_observation_project"
+    frame_path = project_dir / "frames" / "frame_000001.jpg"
+    observations_path = project_dir / "manifests" / "vlm_visual_observations.jsonl"
+    project_manifest = project_dir / "manifests" / "project_manifest.json"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000001", "frame_path": str(frame_path), "timestamp": 7.25}],
+    )
+    project_manifest.parent.mkdir(parents=True, exist_ok=True)
+    project_manifest.write_text(
+        json.dumps({"project_id": "vlm_observation_project", "artifacts": {}, "counts": {}}),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        observations_path,
+        [
+            {
+                "observation_id": "obs_diagram_1",
+                "project_id": "vlm_observation_project",
+                "video_id": "lecture_01",
+                "frame_id": "frame_000001",
+                "timestamp": 7.25,
+                "segment_id": "seg_0001",
+                "backend": "deterministic",
+                "source_model": "offline-vlm",
+                "model_version": "test-v1",
+                "confidence": 0.92,
+                "status": "success",
+                "observation_type": "diagram",
+                "visual_description": "A labeled covariance matrix diagram",
+                "detected_text": "Covariance Matrix",
+                "bbox": {"left": 12, "top": 34, "width": 56, "height": 78},
+                "position": {"region": "center", "x": 0.5, "y": 0.4},
+                "relations": [{"type": "contains", "target": "matrix_label"}],
+            },
+            {
+                "observation_id": "obs_failure",
+                "project_id": "vlm_observation_project",
+                "video_id": "lecture_01",
+                "frame_id": "frame_000001",
+                "timestamp": 7.25,
+                "segment_id": "seg_0001",
+                "backend": "deterministic",
+                "source_model": "offline-vlm",
+                "model_version": "test-v1",
+                "confidence": 1.0,
+                "status": "backend_failure",
+                "observation_type": "frame_error",
+                "visual_description": "This failure should not become an entity",
+            },
+        ],
+    )
+
+    summary = extract_visual_entities(
+        project_dir=project_dir,
+        backend="vlm-observations",
+    )
+
+    output_path = project_dir / "manifests" / "visual_entities.jsonl"
+    rows = [
+        json.loads(line)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert summary["backend"] == "vlm-observations"
+    assert summary["paths"]["vlm_visual_observations"] == str(observations_path)
+    assert summary["counts"]["raw_visual_entities"] == 1
+    assert summary["counts"]["visual_entities"] == 1
+    assert rows == [
+        {
+            "entity_id": "ent_obs_diagram_1",
+            "project_id": "vlm_observation_project",
+            "frame_id": "frame_000001",
+            "timestamp": 7.25,
+            "frame_path": str(frame_path),
+            "bbox": {"left": 12.0, "top": 34.0, "width": 56.0, "height": 78.0},
+            "text": "Covariance Matrix",
+            "entity_type": "diagram",
+            "confidence": 0.92,
+            "source": "vlm:offline-vlm",
+            "visual_description": "A labeled covariance matrix diagram",
+            "position": {"region": "center", "x": 0.5, "y": 0.4},
+            "relations": [{"type": "contains", "target": "matrix_label"}],
+            "parser_version": "vlm-consistency-v1",
+            "source_model": "offline-vlm",
+        }
+    ]
+
+    manifest = json.loads(project_manifest.read_text(encoding="utf-8"))
+    assert manifest["artifacts"]["visual_entities"] == str(output_path)
+    assert manifest["counts"]["visual_entities"] == 1
+    assert manifest["visual_entity_extraction"]["backend"] == "vlm-observations"
+
+
+def test_vlm_observations_backend_rejects_unknown_frame_id(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "unknown_observation_project"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": str(project_dir / "frames" / "frame_000001.jpg"),
+                "timestamp": 0.0,
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "vlm_visual_observations.jsonl",
+        [
+            {
+                "observation_id": "obs_unknown",
+                "project_id": "unknown_observation_project",
+                "video_id": "lecture_01",
+                "frame_id": "frame_000999",
+                "timestamp": 0.0,
+                "segment_id": None,
+                "backend": "deterministic",
+                "source_model": "offline-vlm",
+                "model_version": None,
+                "confidence": 0.9,
+                "status": "success",
+                "observation_type": "diagram",
+                "visual_description": "unknown frame",
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="VLM observations contain frame_id"):
+        extract_visual_entities(
+            project_dir=project_dir,
+            backend="vlm-observations",
+        )
+
+
 def test_filter_visual_entities_keeps_vlm_description_without_text() -> None:
     entity = VisualEntity(
         entity_id="ent_vlm",

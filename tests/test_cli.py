@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from oarag.cli import (
     build_parser,
     build_vlm_alignment_parser,
@@ -190,6 +192,7 @@ def test_extract_visual_entities_cli_defaults() -> None:
     assert args.project_dir is None
     assert args.backend == "auto"
     assert args.vlm_jsonl is None
+    assert args.vlm_observations is None
     assert args.frames_manifest is None
     assert args.output is None
     assert args.manifest is None
@@ -211,6 +214,35 @@ def test_extract_visual_entities_cli_accepts_vlm_jsonl_backend() -> None:
 
     assert args.backend == "vlm-jsonl"
     assert args.vlm_jsonl.as_posix() == "manifests/vlm_parser_output.jsonl"
+
+
+def test_extract_visual_entities_cli_accepts_vlm_observations_backend() -> None:
+    args = build_parser().parse_args(
+        [
+            "extract-visual-entities",
+            "--project-id",
+            "sample_project",
+            "--backend",
+            "vlm-observations",
+            "--vlm-observations",
+            "manifests/vlm_visual_observations.jsonl",
+        ]
+    )
+
+    assert args.backend == "vlm-observations"
+    assert args.vlm_observations.as_posix() == "manifests/vlm_visual_observations.jsonl"
+
+
+def test_extract_visual_entities_cli_help_mentions_vlm_observations(capsys) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(["extract-visual-entities", "--help"])
+
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "vlm-observations" in captured.out
+    assert "--vlm-observations" in captured.out
 
 
 def test_run_vlm_cli_accepts_backend_model_and_options() -> None:

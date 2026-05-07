@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .io import write_json, write_jsonl
-from .schemas import VisualEntity, slugify
+from .schemas import VLMVisualObservation, VisualEntity, slugify
 
 
 OCR_MIN_CONFIDENCE = 0.40
 OCR_SHORT_TEXT_MIN_CONFIDENCE = 0.85
+VLM_OBSERVATIONS_BACKEND = "vlm-observations"
+VLM_OBSERVATION_SUCCESS_STATUS = "success"
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,78 @@ class VlmJsonlVisualEntityExtractor:
         return set(self._records_by_frame_id)
 
 
+@dataclass(frozen=True)
+class VlmObservationsVisualEntityExtractor:
+    observations_path: Path
+    backend: str = VLM_OBSERVATIONS_BACKEND
+    _observations_by_frame_id: dict[str, list[VLMVisualObservation]] = field(
+        init=False, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "_observations_by_frame_id",
+            _read_vlm_observation_records(self.observations_path),
+        )
+
+    def extract(self, *, project_id: str, frame: FrameRecord) -> list[VisualEntity]:
+        observations = self._observations_by_frame_id.get(frame.frame_id, [])
+        entities: list[VisualEntity] = []
+        for observation_index, observation in enumerate(observations, start=1):
+            status = _optional_str(observation.status)
+            if status is not None and status.casefold() != VLM_OBSERVATION_SUCCESS_STATUS:
+                continue
+
+            detected_text = _optional_str(observation.detected_text)
+            visual_description = _optional_str(observation.visual_description)
+            text = detected_text or visual_description or ""
+            source_model = _optional_str(observation.source_model)
+            backend = _optional_str(observation.backend)
+            if source_model is not None:
+                source = f"vlm:{source_model}"
+            elif backend is not None:
+                source = f"vlm:{backend}"
+            else:
+                source = VLM_OBSERVATIONS_BACKEND
+            observation_id = _optional_str(observation.observation_id)
+            entity_id = (
+                f"ent_{slugify(observation_id)}"
+                if observation_id is not None
+                else f"ent_{slugify(frame.frame_id)}_{observation_index:04d}"
+            )
+
+            entities.append(
+                VisualEntity(
+                    entity_id=entity_id,
+                    project_id=project_id,
+                    frame_id=frame.frame_id,
+                    timestamp=(
+                        frame.timestamp
+                        if frame.timestamp is not None
+                        else observation.timestamp
+                    ),
+                    frame_path=frame.frame_path,
+                    bbox=observation.bbox,
+                    text=text,
+                    entity_type=_optional_str(observation.observation_type)
+                    or "visual_observation",
+                    confidence=observation.confidence,
+                    source=source,
+                    visual_description=visual_description,
+                    position=observation.position,
+                    relations=observation.relations,
+                    parser_version=observation.schema_version,
+                    source_model=source_model,
+                )
+            )
+        return entities
+
+    @property
+    def frame_ids(self) -> set[str]:
+        return set(self._observations_by_frame_id)
+
+
 def extract_visual_entities(
     *,
     project_dir: Path,
@@ -158,6 +232,7 @@ def extract_visual_entities(
     manifest_path: Path | None = None,
     ocr_language: str | None = None,
     vlm_jsonl_path: Path | None = None,
+    vlm_observations_path: Path | None = None,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     if not resolved_project_dir.exists():
@@ -181,6 +256,7 @@ def extract_visual_entities(
 
     frames = _read_frames_manifest(resolved_frames_manifest_path)
     project_id = _project_id_from_manifest_or_dir(resolved_manifest_path, resolved_project_dir)
+    normalized_backend = backend.strip().lower()
     resolved_vlm_jsonl_path = (
         _resolve_path(
             project_dir=resolved_project_dir,
@@ -190,10 +266,20 @@ def extract_visual_entities(
         if vlm_jsonl_path is not None
         else None
     )
+    resolved_vlm_observations_path = (
+        _resolve_path(
+            project_dir=resolved_project_dir,
+            candidate=vlm_observations_path,
+            default=resolved_project_dir / "manifests" / "vlm_visual_observations.jsonl",
+        )
+        if vlm_observations_path is not None or normalized_backend == VLM_OBSERVATIONS_BACKEND
+        else None
+    )
     extractor = make_extractor(
         backend=backend,
         ocr_language=ocr_language,
         vlm_jsonl_path=resolved_vlm_jsonl_path,
+        vlm_observations_path=resolved_vlm_observations_path,
     )
     if isinstance(extractor, VlmJsonlVisualEntityExtractor):
         manifest_frame_ids = {frame.frame_id for frame in frames}
@@ -201,6 +287,15 @@ def extract_visual_entities(
         if unknown_frame_ids:
             preview = ", ".join(unknown_frame_ids[:5])
             raise ValueError(f"VLM JSONL contains frame_id not present in frames manifest: {preview}")
+    if isinstance(extractor, VlmObservationsVisualEntityExtractor):
+        manifest_frame_ids = {frame.frame_id for frame in frames}
+        unknown_frame_ids = sorted(extractor.frame_ids - manifest_frame_ids)
+        if unknown_frame_ids:
+            preview = ", ".join(unknown_frame_ids[:5])
+            raise ValueError(
+                "VLM observations contain frame_id not present in frames manifest: "
+                f"{preview}"
+            )
 
     raw_entities: list[VisualEntity] = []
     for frame in frames:
@@ -233,6 +328,11 @@ def extract_visual_entities(
             **(
                 {"vlm_jsonl": str(resolved_vlm_jsonl_path)}
                 if resolved_vlm_jsonl_path is not None
+                else {}
+            ),
+            **(
+                {"vlm_visual_observations": str(resolved_vlm_observations_path)}
+                if resolved_vlm_observations_path is not None
                 else {}
             ),
         },
@@ -286,6 +386,7 @@ def make_extractor(
     backend: str,
     ocr_language: str | None = None,
     vlm_jsonl_path: Path | None = None,
+    vlm_observations_path: Path | None = None,
 ) -> VisualEntityExtractor:
     normalized = backend.strip().lower()
     if normalized == "stub":
@@ -294,6 +395,10 @@ def make_extractor(
         if vlm_jsonl_path is None:
             raise ValueError("Backend vlm-jsonl requires --vlm-jsonl")
         return VlmJsonlVisualEntityExtractor(jsonl_path=vlm_jsonl_path)
+    if normalized == VLM_OBSERVATIONS_BACKEND:
+        if vlm_observations_path is None:
+            raise ValueError("Backend vlm-observations requires --vlm-observations")
+        return VlmObservationsVisualEntityExtractor(observations_path=vlm_observations_path)
     if normalized == "local-ocr":
         if shutil.which("tesseract") is None:
             raise RuntimeError("Backend local-ocr requested, but `tesseract` command is not available")
@@ -432,6 +537,35 @@ def _read_vlm_jsonl_records(path: Path) -> dict[str, list[dict[str, Any]]]:
                     }
                 )
     return records_by_frame_id
+
+
+def _read_vlm_observation_records(path: Path) -> dict[str, list[VLMVisualObservation]]:
+    resolved = path.expanduser().resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"VLM observations input not found: {resolved}")
+
+    observations_by_frame_id: dict[str, list[VLMVisualObservation]] = {}
+    with resolved.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            payload = json.loads(stripped)
+            if not isinstance(payload, dict):
+                raise ValueError(f"Expected JSON object row in {resolved}:{line_number}")
+            frame_id = _optional_str(payload.get("frame_id"))
+            if frame_id is None:
+                raise ValueError(
+                    f"Missing frame_id in VLM observations input {resolved}:{line_number}"
+                )
+            observation = VLMVisualObservation.from_dict(payload)
+            if observation.frame_id != frame_id:
+                raise ValueError(
+                    f"Observation frame_id mismatch in {resolved}:{line_number}: "
+                    f"{observation.frame_id} != {frame_id}"
+                )
+            observations_by_frame_id.setdefault(frame_id, []).append(observation)
+    return observations_by_frame_id
 
 
 def _coerce_bbox(value: Any) -> dict[str, float] | None:

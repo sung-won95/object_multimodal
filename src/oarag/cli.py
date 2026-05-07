@@ -365,9 +365,12 @@ def build_parser() -> argparse.ArgumentParser:
     location.add_argument("--project-dir", type=Path, help="Project artifact directory")
     extract_visual.add_argument(
         "--backend",
-        choices=["auto", "stub", "local-ocr", "vlm-jsonl"],
+        choices=["auto", "stub", "local-ocr", "vlm-jsonl", "vlm-observations"],
         default="auto",
-        help="auto uses local OCR when available, otherwise stub. vlm-jsonl loads structured parser output.",
+        help=(
+            "auto uses local OCR when available, otherwise stub. vlm-jsonl loads "
+            "structured parser output. vlm-observations loads VLM observation JSONL."
+        ),
     )
     extract_visual.add_argument(
         "--vlm-jsonl",
@@ -375,6 +378,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Structured VLM parser output JSONL for --backend vlm-jsonl. "
             "Relative paths are resolved from project dir."
+        ),
+    )
+    extract_visual.add_argument(
+        "--vlm-observations",
+        type=Path,
+        help=(
+            "VLM visual observations JSONL for --backend vlm-observations. "
+            "Defaults to manifests/vlm_visual_observations.jsonl under project dir."
         ),
     )
     extract_visual.add_argument(
@@ -971,6 +982,7 @@ def cmd_extract_visual_entities(args: argparse.Namespace) -> None:
         manifest_path=args.manifest,
         ocr_language=args.ocr_language,
         vlm_jsonl_path=args.vlm_jsonl,
+        vlm_observations_path=args.vlm_observations,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
