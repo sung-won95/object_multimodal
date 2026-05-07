@@ -87,13 +87,13 @@ Manifest shape:
       "limit": 5
     },
     {
-      "suite_id": "pilot_matrices",
+      "suite_id": "local_sample",
       "type": "local_project",
       "domain": "local_pilot",
-      "project_id": "pilot_issue8_matrices_safe",
+      "project_id": "sample_lecture",
       "queries": "reports/pilot_smoke/pilot_queries.csv",
-      "index": "pilot_issue8_matrices_segments_safe",
-      "video_id": "2_Matrices",
+      "index": "sample_lecture_segments",
+      "video_id": "sample_lecture",
       "limit": 3
     }
   ]
@@ -108,8 +108,8 @@ For a local video with a sibling `.srt` file:
 
 ```bash
 PYTHONPATH=src python -m oarag ingest-video \
-  --video "../data/업스윙 포커/2. 매트릭스(V)/2. Matrices.mp4" \
-  --project-id upswing_matrices \
+  --video "../data/local_lectures/sample_lecture.mp4" \
+  --project-id sample_lecture \
   --frame-rate 1 \
   --max-frames 120
 ```
@@ -140,14 +140,14 @@ Ingest an entire local lecture folder recursively:
 
 ```bash
 PYTHONPATH=src python -m oarag batch-ingest \
-  --root "../data/업스윙 포커" \
-  --project-prefix upswing \
+  --root "../data/local_lectures" \
+  --project-prefix local \
   --frame-rate 0.5 \
   --frame-sampling uniform \
   --max-frames 120 \
-  --summary-json artifacts/upswing_batch_summary.json \
-  --summary-jsonl artifacts/upswing_batch_results.jsonl \
-  --summary-csv artifacts/upswing_batch_results.csv
+  --summary-json artifacts/local_batch_summary.json \
+  --summary-jsonl artifacts/local_batch_results.jsonl \
+  --summary-csv artifacts/local_batch_results.csv
 ```
 
 Behavior:
@@ -179,8 +179,8 @@ Run STT segment generation on an M-series Mac:
 export OARAG_STT_LANGUAGE=en
 
 PYTHONPATH=src python -m oarag ingest-video \
-  --video "../data/업스윙 포커/2. 매트릭스(V)/2. Matrices.mp4" \
-  --project-id upswing_matrices_stt \
+  --video "../data/local_lectures/sample_lecture.mp4" \
+  --project-id sample_lecture_stt \
   --transcript-source stt \
   --stt-model mlx-community/whisper-large-v3-mlx \
   --frame-rate 0.2 \
@@ -205,7 +205,7 @@ Attach frame references to each transcript segment using timestamp overlap:
 
 ```bash
 PYTHONPATH=src python -m oarag align-frames \
-  --project-id upswing_matrices \
+  --project-id sample_lecture \
   --margin-seconds 0.5
 ```
 
@@ -225,7 +225,7 @@ Extract frame-level visual entities from sampled frames:
 
 ```bash
 PYTHONPATH=src python -m oarag extract-visual-entities \
-  --project-id upswing_matrices \
+  --project-id sample_lecture \
   --backend auto
 ```
 
@@ -268,7 +268,7 @@ Run it with an explicit JSONL path:
 
 ```bash
 PYTHONPATH=src python -m oarag extract-visual-entities \
-  --project-id upswing_matrices \
+  --project-id sample_lecture \
   --backend vlm-jsonl \
   --vlm-jsonl manifests/vlm_parser_output.jsonl
 ```
@@ -293,7 +293,7 @@ Optional local OCR language hint:
 
 ```bash
 PYTHONPATH=src python -m oarag extract-visual-entities \
-  --project-id upswing_matrices \
+  --project-id sample_lecture \
   --backend local-ocr \
   --ocr-language eng
 ```
@@ -304,7 +304,7 @@ Run the end-to-end VLM smoke path after frame alignment:
 
 ```bash
 PYTHONPATH=src python -m oarag run-vlm-alignment \
-  --project-id upswing_matrices \
+  --project-id sample_lecture \
   --vlm-backend deterministic \
   --vlm-model stub-vlm \
   --max-vlm-frames 24 \
@@ -330,7 +330,7 @@ artifacts:
 
 ```bash
 PYTHONPATH=src python -m oarag run-vlm-alignment \
-  --project-id upswing_matrices \
+  --project-id sample_lecture \
   --vlm-model stub-vlm \
   --max-vlm-frames 24 \
   --dry-run
@@ -348,7 +348,7 @@ through `--vlm-options`:
 
 ```bash
 PYTHONPATH=src python -m oarag run-vlm-alignment \
-  --project-id upswing_matrices \
+  --project-id sample_lecture \
   --vlm-backend command \
   --vlm-model local-vlm \
   --vlm-options '{"command":["vlm-adapter","--frame","{frame_path}"]}'
@@ -360,7 +360,7 @@ Link transcript segments to nearby visual entities:
 
 ```bash
 PYTHONPATH=src python -m oarag link-entities \
-  --project-id upswing_matrices
+  --project-id sample_lecture
 ```
 
 Defaults:
@@ -395,7 +395,7 @@ Save the file as `artifacts/projects/{project_id}/domain_lexicon.json` to enable
 
 ```bash
 PYTHONPATH=src python -m oarag link-entities \
-  --project-id upswing_matrices \
+  --project-id sample_lecture \
   --domain-lexicon domain_lexicon.json
 ```
 
@@ -403,8 +403,8 @@ The same project lexicon is used by `query-project` for query expansion when pre
 
 ```bash
 PYTHONPATH=src python -m oarag query-project \
-  --project-id upswing_matrices \
-  --index upswing_matrices_segments \
+  --project-id sample_lecture \
+  --index sample_lecture_segments \
   --query "alias-heavy question" \
   --domain-lexicon domain_lexicon.json
 ```
@@ -417,8 +417,8 @@ Index one local project artifact folder into Meilisearch:
 
 ```bash
 PYTHONPATH=src python -m oarag index-project \
-  --project-id upswing_matrices \
-  --index upswing_matrices_segments \
+  --project-id sample_lecture \
+  --index sample_lecture_segments \
   --settings-profile lecture_segments_default_v1 \
   --batch-size 500 \
   --reset
@@ -428,8 +428,8 @@ You can also index by explicit path:
 
 ```bash
 PYTHONPATH=src python -m oarag index-project \
-  --project-dir artifacts/projects/upswing_matrices \
-  --index upswing_matrices_segments
+  --project-dir artifacts/projects/sample_lecture \
+  --index sample_lecture_segments
 ```
 
 Segment artifact selection order:
@@ -438,6 +438,156 @@ Segment artifact selection order:
 - `segments/lecture_segments.jsonl` (fallback)
 
 Use `--segments` to override the default segment file path.
+
+## Semantic Graph Workflow
+
+Neo4j stores the semantic graph used for temporal/reference expansion. Start it
+next to Meilisearch for graph ingest and graph query smoke runs:
+
+```bash
+docker compose up -d meilisearch neo4j
+
+PYTHONPATH=src python -m oarag health
+PYTHONPATH=src python -m oarag health-neo4j
+```
+
+Local development defaults:
+
+- Neo4j Browser: `http://127.0.0.1:7474`
+- Bolt URI: `bolt://127.0.0.1:7687`
+- User/password: `neo4j` / `dev-password`
+- Database: `neo4j`
+
+Override those with `OARAG_NEO4J_URI`, `OARAG_NEO4J_USER`,
+`OARAG_NEO4J_PASSWORD`, and `OARAG_NEO4J_DATABASE` when using a non-local
+runtime.
+
+### Meilisearch vs Neo4j
+
+- Meilisearch is the lexical/vector-like retrieval entry point for transcript
+  segments. `index-project`, `query`, and `query-project` use it to find the
+  best candidate segment IDs for a natural-language question.
+- Neo4j is the semantic graph expansion layer. `graph-ingest` writes project,
+  segment, frame, visual entity, concept, and reference-resolution edges.
+  `graph-query` first retrieves Meilisearch candidates, then follows graph edges
+  such as previous segments, concept mentions, visual entities, frames, and
+  resolved references.
+- Keep both stores in sync for a project: re-run `index-project` when segment
+  artifacts change, and re-run `graph-ingest` when aligned segments, visual
+  entities, entity links, or domain lexicon artifacts change.
+
+### Reproducible Smoke Sequence
+
+Use generic local paths in docs, PRs, and reports. Do not paste private source
+paths, transcript excerpts, or raw query text from private lectures.
+
+```bash
+# 1. Create raw project artifacts from a local video and sibling SRT.
+PYTHONPATH=src python -m oarag ingest-video \
+  --video "../data/local_lectures/sample_lecture.mp4" \
+  --project-id sample_lecture \
+  --frame-rate 0.5 \
+  --frame-sampling uniform \
+  --max-frames 120
+
+# 2. Add frame references to transcript segments.
+PYTHONPATH=src python -m oarag align-frames \
+  --project-id sample_lecture \
+  --margin-seconds 0.5
+
+# 3. Produce optional visual/link artifacts for richer graph edges.
+PYTHONPATH=src python -m oarag extract-visual-entities \
+  --project-id sample_lecture \
+  --backend auto
+
+PYTHONPATH=src python -m oarag link-entities \
+  --project-id sample_lecture
+
+# 4. Index the selected segment artifact into Meilisearch.
+PYTHONPATH=src python -m oarag index-project \
+  --project-id sample_lecture \
+  --index sample_lecture_segments \
+  --settings-profile lecture_segments_default_v1 \
+  --reset
+
+# 5. Ingest the same project artifacts into Neo4j.
+PYTHONPATH=src python -m oarag graph-ingest \
+  --project-id sample_lecture
+```
+
+For a plan-only graph check that does not connect to Neo4j, add `--dry-run`:
+
+```bash
+PYTHONPATH=src python -m oarag graph-ingest \
+  --project-id sample_lecture \
+  --dry-run
+```
+
+The graph ingest summary reports node/relationship counts, skipped relationships,
+missing optional artifacts, and executed statement counts. Missing optional
+artifacts such as `visual_entities` or `entity_links` are acceptable for a
+minimal smoke run; missing segments means the project has not been ingested yet.
+
+### Graph Query Smoke Scenario
+
+Use `graph-query` for questions that depend on earlier context or pronouns such
+as "아까 말했던 개념" / "the concept mentioned earlier":
+
+```bash
+PYTHONPATH=src python -m oarag graph-query \
+  --project-id sample_lecture \
+  --index sample_lecture_segments \
+  --query "아까 말했던 개념이 왜 여기서 다시 필요한가요?" \
+  --limit 3 \
+  --graph-lookback-segments 3 \
+  --graph-limit 12 \
+  --output artifacts/projects/sample_lecture/graph_query_smoke.json
+```
+
+Expected smoke signals:
+
+- `counts.graph_evidence` is greater than `0` when Meilisearch finds candidates
+  and Neo4j has related temporal/reference paths.
+- `graph_availability.neo4j.status` is `queried` when Neo4j was reached.
+- `traversal_summary.hint_detection.has_graph_hint` is `true` for reference
+  phrases such as `아까`, `말했던`, `previous`, or `mentioned`.
+- If the query has no temporal/reference phrase,
+  `graph_availability.graph_evidence.status` is
+  `skipped_no_temporal_or_reference_hint`; use `query-project` for ordinary
+  segment retrieval.
+
+### Neo4j Failure Mode
+
+When Neo4j is stopped or unreachable, graph ingest exits non-zero with an
+unavailable-runtime error:
+
+```text
+error: Neo4j is unavailable: ...
+```
+
+`health-neo4j` gives the direct local runtime hint, including
+`docker compose up neo4j`, when the default local endpoint cannot be reached.
+
+`graph-query` still returns the Meilisearch-backed response, but
+`graph_availability.neo4j.status` becomes `unavailable` and
+`graph_availability.graph_evidence.status` becomes
+`skipped_neo4j_unavailable`.
+
+Fix:
+
+```bash
+docker compose up -d neo4j
+PYTHONPATH=src python -m oarag health-neo4j
+PYTHONPATH=src python -m oarag graph-ingest --project-id sample_lecture
+```
+
+Useful verification commands for README-only changes:
+
+```bash
+python3 -m pytest
+PYTHONPATH=src python3 -m oarag graph-ingest --help
+PYTHONPATH=src python3 -m oarag graph-query --help
+```
 
 ### Meilisearch Settings Policy
 
@@ -459,9 +609,9 @@ Build a transcript and frame evidence bundle around one or more retrieved segmen
 
 ```bash
 PYTHONPATH=src python -m oarag evidence-window \
-  --project-id upswing_matrices \
-  --segment-id seg_12._Betsize_000003 \
-  --query "what affects bet size" \
+  --project-id sample_lecture \
+  --segment-id seg_sample_000003 \
+  --query "what concept was introduced before this step" \
   --neighbor-count 1
 ```
 
@@ -480,9 +630,9 @@ Search a local project index and assemble transcript, frame, visual, and link ev
 
 ```bash
 PYTHONPATH=src python -m oarag query-project \
-  --project-id upswing_matrices \
-  --index upswing_matrices_segments \
-  --query "what affects bet size" \
+  --project-id sample_lecture \
+  --index sample_lecture_segments \
+  --query "what concept was introduced before this step" \
   --limit 3 \
   --neighbor-count 1
 ```
