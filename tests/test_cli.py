@@ -7,11 +7,13 @@ from oarag.cli import (
     build_parser,
     build_vlm_alignment_parser,
     cmd_index_project,
+    cmd_index_project_visual_entities,
     parse_vlm_options,
 )
 from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+    VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
 )
 
 
@@ -144,6 +146,72 @@ def test_cmd_index_project_forwards_settings_profile(monkeypatch, capsys) -> Non
     assert calls["index_kwargs"]["settings_profile"] == LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
     assert json.loads(capsys.readouterr().out)["settings_profile"] == (
         LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
+    )
+
+
+def test_index_project_visual_entities_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        [
+            "index-project-visual-entities",
+            "--index",
+            "local_visual_entities",
+            "--project-id",
+            "sample",
+        ]
+    )
+
+    assert args.index == "local_visual_entities"
+    assert args.project_id == "sample"
+    assert args.project_dir is None
+    assert args.visual_entities is None
+    assert args.batch_size == 500
+    assert args.reset is False
+    assert args.settings_profile == VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
+
+
+def test_cmd_index_project_visual_entities_forwards_settings_profile(monkeypatch, capsys) -> None:
+    calls = {}
+    fake_client = object()
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_index_project_visual_entities(client, **kwargs):
+        calls["client"] = client
+        calls["index_kwargs"] = kwargs
+        return {"settings_profile": kwargs["settings_profile"]}
+
+    monkeypatch.setattr("oarag.cli.client_from_args", lambda args: fake_client)
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr(
+        "oarag.cli.index_project_visual_entities",
+        fake_index_project_visual_entities,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "index-project-visual-entities",
+            "--index",
+            "local_visual_entities",
+            "--project-dir",
+            str(project_dir),
+            "--visual-entities",
+            "manifests/visual_entities.jsonl",
+            "--settings-profile",
+            VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+        ]
+    )
+
+    cmd_index_project_visual_entities(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["client"] is fake_client
+    assert calls["index_kwargs"]["settings_profile"] == VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
+    assert calls["index_kwargs"]["visual_entities"].as_posix() == "manifests/visual_entities.jsonl"
+    assert json.loads(capsys.readouterr().out)["settings_profile"] == (
+        VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
     )
 
 
@@ -366,6 +434,7 @@ def test_query_project_cli_defaults() -> None:
     )
 
     assert args.index == "sample_segments"
+    assert args.visual_index is None
     assert args.project_id == "sample_project"
     assert args.project_dir is None
     assert args.query == "bet size"
@@ -404,6 +473,25 @@ def test_query_project_cli_accepts_rerank_options() -> None:
 
     assert args.rerank is True
     assert args.rerank_time_hint == "10-14s"
+
+
+def test_query_project_cli_accepts_visual_index() -> None:
+    args = build_parser().parse_args(
+        [
+            "query-project",
+            "--index",
+            "sample_segments",
+            "--visual-index",
+            "sample_visual_entities",
+            "--project-id",
+            "sample_project",
+            "--query",
+            "range grid",
+        ]
+    )
+
+    assert args.index == "sample_segments"
+    assert args.visual_index == "sample_visual_entities"
 
 
 def test_graph_query_cli_defaults() -> None:

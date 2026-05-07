@@ -21,6 +21,21 @@ class FakeClient:
         }
 
 
+class MultiIndexFakeClient:
+    def __init__(self, hits_by_index: dict[str, list[dict]]) -> None:
+        self.hits_by_index = hits_by_index
+        self.searches: list[tuple[str, str, int]] = []
+
+    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+        self.searches.append((index_uid, query, limit))
+        return {
+            "hits": self.hits_by_index.get(index_uid, [])[:limit],
+            "processingTimeMs": 3,
+            "indexUid": index_uid,
+            "query": query,
+        }
+
+
 def test_query_project_returns_multimodal_bundle(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     _write_jsonl(
@@ -182,6 +197,175 @@ def test_query_project_without_visual_artifacts_falls_back_to_transcript_and_fra
         {"frame_id": "frame_000001", "timestamp": 0.0, "frame_path": "/tmp/f1.jpg"}
     ]
     assert "linked_entities=none" in bundle["summary"]["text"]
+
+
+def test_query_project_merges_visual_entity_hits_with_segment_targets(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_1", 1, 0.0, 4.0, "Intro", ["frame_000001"]),
+            _segment("seg_2", 2, 5.0, 9.0, "The range grid is on screen", ["frame_000006"]),
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {"frame_id": "frame_000001", "timestamp": 0.0, "frame_path": "/tmp/f1.jpg"},
+            {"frame_id": "frame_000006", "timestamp": 6.0, "frame_path": "/tmp/f6.jpg"},
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            _visual_entity(
+                "entity_grid",
+                "frame_000006",
+                "range grid",
+                6.0,
+                frame_path="/tmp/f6.jpg",
+            )
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "entity_links.jsonl",
+        [
+            {
+                "link_id": "link_seg_2_entity_grid",
+                "project_id": "project",
+                "segment_id": "seg_2",
+                "entity_id": "entity_grid",
+                "frame_id": "frame_000006",
+                "link_type": "time_overlap+lexical_match",
+                "score": 1.25,
+                "evidence": ["time_overlap", "lexical_match"],
+                "time_overlap": True,
+                "lexical_match": ["range", "grid"],
+                "mention_candidate": [],
+            }
+        ],
+    )
+    client = MultiIndexFakeClient(
+        {
+            "local_segments": [
+                {
+                    "segment_id": "seg_2",
+                    "sample_id": "seg_2",
+                    "video_id": "video",
+                    "start_time": 5.0,
+                    "end_time": 9.0,
+                    "timestamp_center": 7.0,
+                    "transcript_text": "The range grid is on screen",
+                    "_rankingScore": 0.77,
+                }
+            ],
+            "local_visual_entities": [
+                {
+                    **_visual_entity(
+                        "entity_grid",
+                        "frame_000006",
+                        "range grid",
+                        6.0,
+                        frame_path="/tmp/f6.jpg",
+                    ),
+                    "_rankingScore": 0.93,
+                }
+            ],
+        }
+    )
+
+    response = query_project(
+        client=client,
+        index_uid="local_segments",
+        visual_index_uid="local_visual_entities",
+        project_dir=project_dir,
+        query="range grid",
+        neighbor_count=0,
+    )
+
+    assert client.searches == [
+        ("local_segments", "range grid", 5),
+        ("local_visual_entities", "range grid", 5),
+    ]
+    assert [candidate["source"] for candidate in response["candidates"]] == [
+        "segment",
+        "visual_entity",
+    ]
+    assert response["counts"]["search_hits"] == 2
+    assert response["counts"]["segment_search_hits"] == 1
+    assert response["counts"]["visual_entity_search_hits"] == 1
+    assert response["counts"]["bundles"] == 1
+    bundle = response["bundles"][0]
+    assert bundle["candidate"]["source"] == "segment"
+    assert bundle["merge"] == {
+        "target_key": "segment:seg_2",
+        "target_segment_id": "seg_2",
+        "source_count": 2,
+        "selected_source": "segment",
+        "selected_rank": 1,
+        "deduplicated": True,
+    }
+    assert [source["source"] for source in bundle["retrieval_sources"]] == [
+        "segment",
+        "visual_entity",
+    ]
+    assert bundle["retrieval_sources"][1]["target_resolution"]["method"] == "entity_link"
+    assert bundle["visual_entities"][0]["entity_id"] == "entity_grid"
+
+
+def test_query_project_builds_bundle_from_visual_entity_only_hit(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [_segment("seg_1", 1, 5.0, 9.0, "Look at this grid", ["frame_000006"])],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000006", "timestamp": 6.0, "frame_path": "/tmp/f6.jpg"}],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [_visual_entity("entity_grid", "frame_000006", "range grid", 6.0, frame_path="/tmp/f6.jpg")],
+    )
+    client = MultiIndexFakeClient(
+        {
+            "local_segments": [],
+            "local_visual_entities": [
+                {
+                    **_visual_entity(
+                        "entity_grid",
+                        "frame_000006",
+                        "range grid",
+                        6.0,
+                        frame_path="/tmp/f6.jpg",
+                    ),
+                    "_rankingScore": 0.93,
+                }
+            ],
+        }
+    )
+
+    response = query_project(
+        client=client,
+        index_uid="local_segments",
+        visual_index_uid="local_visual_entities",
+        project_dir=project_dir,
+        query="range grid",
+        neighbor_count=0,
+    )
+
+    assert response["counts"]["bundles"] == 1
+    bundle = response["bundles"][0]
+    assert bundle["candidate"]["source"] == "visual_entity"
+    assert bundle["candidate"]["entity_id"] == "entity_grid"
+    assert bundle["candidate"]["segment_id"] == "seg_1"
+    assert bundle["evidence_window"]["target_segment"]["segment_id"] == "seg_1"
+    assert bundle["retrieval_sources"][0]["target_resolution"]["method"] == "frame_ref"
+    assert bundle["evidence_window"]["frame_refs"] == [
+        {"frame_id": "frame_000006", "timestamp": 6.0, "frame_path": "/tmp/f6.jpg"}
+    ]
+    assert bundle["visual_entities"][0]["text"] == "range grid"
+    assert "visual_entity=range grid" in response["summary_lines"][0]
 
 
 def test_query_project_expands_query_when_domain_lexicon_exists(tmp_path: Path) -> None:
@@ -417,3 +601,30 @@ def _segment(
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+
+def _visual_entity(
+    entity_id: str,
+    frame_id: str,
+    text: str,
+    timestamp: float,
+    *,
+    frame_path: str,
+) -> dict:
+    return {
+        "entity_id": entity_id,
+        "project_id": "project",
+        "frame_id": frame_id,
+        "timestamp": timestamp,
+        "frame_path": frame_path,
+        "bbox": None,
+        "text": text,
+        "entity_type": "visual_observation",
+        "confidence": 0.91,
+        "source": "test",
+        "visual_description": text,
+        "position": None,
+        "relations": [],
+        "parser_version": "test-v1",
+        "source_model": "stub-vlm",
+    }
