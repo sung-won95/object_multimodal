@@ -630,6 +630,8 @@ class EntityLink:
     time_overlap: bool
     lexical_match: list[str]
     mention_candidate: list[str]
+    score_breakdown: dict[str, float] = field(default_factory=dict)
+    reason_metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "EntityLink":
@@ -645,10 +647,21 @@ class EntityLink:
             time_overlap=bool(payload.get("time_overlap", False)),
             lexical_match=[str(item) for item in payload.get("lexical_match", [])],
             mention_candidate=[str(item) for item in payload.get("mention_candidate", [])],
+            score_breakdown={
+                str(key): float(value)
+                for key, value in _mapping(payload.get("score_breakdown")).items()
+                if _optional_float(value) is not None
+            },
+            reason_metadata=_mapping(payload.get("reason_metadata")),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if not self.score_breakdown:
+            payload.pop("score_breakdown")
+        if not self.reason_metadata:
+            payload.pop("reason_metadata")
+        return payload
 
 
 @dataclass(frozen=True)
