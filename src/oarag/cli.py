@@ -12,6 +12,7 @@ from .eduvidqa import iter_lecture_segments, iter_records
 from .eval import evaluate_query, summarize
 from .entity_links import link_entities
 from .evidence import build_evidence_response
+from .graph_ingest import ingest_project_graph
 from .ingest import (
     BatchIngestConfig,
     VideoIngestConfig,
@@ -76,6 +77,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     neo4j_health = subparsers.add_parser("health-neo4j", help="Check Neo4j runtime health")
     neo4j_health.set_defaults(func=cmd_health_neo4j)
+
+    graph_ingest = subparsers.add_parser(
+        "graph-ingest",
+        help="Ingest a local project graph document into Neo4j",
+    )
+    location = graph_ingest.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    location.add_argument("--graph-document", type=Path, help="Prebuilt graph document JSON path")
+    graph_ingest.add_argument(
+        "--skip-schema",
+        action="store_true",
+        help="Skip idempotent Neo4j constraint/index creation.",
+    )
+    graph_ingest.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build and summarize Cypher merge plan without connecting to Neo4j.",
+    )
+    graph_ingest.set_defaults(func=cmd_graph_ingest)
 
     index = subparsers.add_parser("index-eduvidqa", help="Index normalized EDUVIDQA JSONL")
     index.add_argument("--input", required=True, type=Path)
@@ -730,6 +751,19 @@ def cmd_health(args: argparse.Namespace) -> None:
 
 def cmd_health_neo4j(args: argparse.Namespace) -> None:
     print(json.dumps(check_neo4j_health(), ensure_ascii=False, indent=2))
+
+
+def cmd_graph_ingest(args: argparse.Namespace) -> None:
+    project_dir = None
+    if args.project_id is not None or args.project_dir is not None:
+        project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = ingest_project_graph(
+        project_dir=project_dir,
+        graph_document_path=args.graph_document,
+        create_schema=not args.skip_schema,
+        dry_run=args.dry_run,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def cmd_index_eduvidqa(args: argparse.Namespace) -> None:
