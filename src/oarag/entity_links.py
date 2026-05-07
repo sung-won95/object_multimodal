@@ -30,6 +30,32 @@ STOP_TERMS = {
     "with",
 }
 
+TIME_OVERLAP_SCORE = 0.2
+VISUAL_MATCH_FIELDS = (
+    "text",
+    "visual_description",
+    "entity_type",
+    "position",
+    "relations",
+)
+VISUAL_FIELD_EVIDENCE = {
+    "text": "visual_text_match",
+    "visual_description": "visual_description_match",
+    "entity_type": "entity_type_match",
+    "position": "position_match",
+    "relations": "relations_match",
+}
+VISUAL_FIELD_SCORE_WEIGHTS = {
+    "text": (0.4, 0.05, 0.6),
+    "visual_description": (0.42, 0.05, 0.65),
+    "entity_type": (0.14, 0.02, 0.22),
+    "position": (0.1, 0.02, 0.16),
+    "relations": (0.16, 0.02, 0.26),
+}
+MENTION_SCORE_BASE = 0.45
+MENTION_SCORE_PER_EXTRA_TERM = 0.05
+MENTION_SCORE_CAP = 0.6
+
 
 def link_entities(
     *,
@@ -76,13 +102,11 @@ def link_entities(
             if not time_overlap:
                 continue
 
-            lexical_match = _lexical_match(segment, entity, domain_lexicon=domain_lexicon)
-            mention_match = _mention_match(segment, entity, domain_lexicon=domain_lexicon)
-            evidence = ["time_overlap"]
-            if lexical_match:
-                evidence.append("lexical_match")
-            if mention_match:
-                evidence.append("mention_candidate")
+            link_evidence = _link_evidence(
+                segment,
+                entity,
+                domain_lexicon=domain_lexicon,
+            )
 
             links.append(
                 EntityLink(
@@ -91,16 +115,19 @@ def link_entities(
                     segment_id=str(segment.get("segment_id", "")),
                     entity_id=entity.entity_id,
                     frame_id=entity.frame_id,
-                    link_type=_link_type(lexical_match=lexical_match, mention_match=mention_match),
-                    score=_score(lexical_match=lexical_match, mention_match=mention_match),
-                    evidence=evidence,
+                    link_type=link_evidence["link_type"],
+                    score=link_evidence["score"],
+                    evidence=link_evidence["evidence"],
                     time_overlap=True,
-                    lexical_match=lexical_match,
-                    mention_candidate=mention_match,
+                    lexical_match=link_evidence["lexical_match"],
+                    mention_candidate=link_evidence["mention_candidate"],
+                    score_breakdown=link_evidence["score_breakdown"],
+                    reason_metadata=link_evidence["reason_metadata"],
                 )
             )
 
     evidence_type_counts = _evidence_type_counts(links)
+    score_breakdown_totals = _score_breakdown_totals(links)
 
     write_jsonl(resolved_output_path, [link.to_dict() for link in links])
     _update_project_manifest(
@@ -110,6 +137,7 @@ def link_entities(
         visual_entities_total=len(entities),
         links=links,
         evidence_type_counts=evidence_type_counts,
+        score_breakdown_totals=score_breakdown_totals,
         domain_lexicon_metadata=domain_lexicon.metadata(),
     )
 
@@ -133,7 +161,12 @@ def link_entities(
             "timestamp_only_links": sum(
                 1 for link in links if not link.lexical_match and not link.mention_candidate
             ),
+            "semantic_links": sum(
+                1 for link in links if link.lexical_match or link.mention_candidate
+            ),
             "evidence_type_counts": evidence_type_counts,
+            "score_summary": _score_summary(links),
+            "score_breakdown_totals": score_breakdown_totals,
         },
     }
 
@@ -183,46 +216,136 @@ def _has_time_overlap(segment: dict[str, Any], entity: VisualEntity) -> bool:
     return min(start, end) <= entity_time <= max(start, end)
 
 
-def _lexical_match(
+def _link_evidence(
     segment: dict[str, Any],
     entity: VisualEntity,
     *,
     domain_lexicon: DomainLexicon,
-) -> list[str]:
+) -> dict[str, Any]:
+    lexical_matches_by_field = _lexical_matches_by_field(
+        segment,
+        entity,
+        domain_lexicon=domain_lexicon,
+    )
+    mention_matches_by_field = _mention_matches_by_field(
+        segment,
+        entity,
+        domain_lexicon=domain_lexicon,
+    )
+    lexical_match = _unique_sorted_terms(lexical_matches_by_field)
+    mention_match = _unique_sorted_terms(mention_matches_by_field)
+    evidence = _evidence_types(
+        lexical_matches_by_field=lexical_matches_by_field,
+        mention_matches_by_field=mention_matches_by_field,
+    )
+    score_breakdown = _score_breakdown(
+        lexical_matches_by_field=lexical_matches_by_field,
+        mention_match=mention_match,
+    )
+    return {
+        "link_type": _link_type(
+            lexical_match=lexical_match,
+            mention_match=mention_match,
+            evidence=evidence,
+        ),
+        "score": round(sum(score_breakdown.values()), 3),
+        "evidence": evidence,
+        "lexical_match": lexical_match,
+        "mention_candidate": mention_match,
+        "score_breakdown": score_breakdown,
+        "reason_metadata": _reason_metadata(
+            entity=entity,
+            lexical_matches_by_field=lexical_matches_by_field,
+            mention_matches_by_field=mention_matches_by_field,
+        ),
+    }
+
+
+def _lexical_matches_by_field(
+    segment: dict[str, Any],
+    entity: VisualEntity,
+    *,
+    domain_lexicon: DomainLexicon,
+) -> dict[str, list[str]]:
     transcript_terms = _expanded_terms(
         str(segment.get("transcript_text", "")),
         domain_lexicon=domain_lexicon,
     )
-    entity_terms = _expanded_terms(entity.text, domain_lexicon=domain_lexicon)
-    return sorted(term for term in transcript_terms & entity_terms if _informative_term(term))
+    matches_by_field: dict[str, list[str]] = {}
+    for field_name, field_text in _visual_field_texts(entity).items():
+        field_terms = _expanded_terms(field_text, domain_lexicon=domain_lexicon)
+        matches_by_field[field_name] = sorted(
+            term for term in transcript_terms & field_terms if _informative_term(term)
+        )
+    return matches_by_field
 
 
-def _mention_match(
+def _mention_matches_by_field(
     segment: dict[str, Any],
     entity: VisualEntity,
     *,
     domain_lexicon: DomainLexicon,
-) -> list[str]:
-    entity_text = entity.text.casefold()
+) -> dict[str, list[str]]:
     transcript_text = str(segment.get("transcript_text", ""))
+    all_candidates = _candidate_mentions(segment=segment, transcript_text=transcript_text)
+
+    candidate_terms: set[str] = set()
+    for candidate in all_candidates:
+        candidate_terms.update(_expanded_terms(candidate, domain_lexicon=domain_lexicon))
+
+    matches_by_field: dict[str, list[str]] = {}
+    for field_name, field_text in _visual_field_texts(entity).items():
+        field_text_casefold = field_text.casefold()
+        direct_matches = {
+            candidate.strip()
+            for candidate in all_candidates
+            if candidate.strip() and candidate.strip().casefold() in field_text_casefold
+        }
+        field_terms = _expanded_terms(field_text, domain_lexicon=domain_lexicon)
+        alias_matches = {
+            term for term in candidate_terms & field_terms if _informative_term(term)
+        }
+        matches_by_field[field_name] = sorted(direct_matches | alias_matches)
+    return matches_by_field
+
+
+def _candidate_mentions(*, segment: dict[str, Any], transcript_text: str) -> list[str]:
     candidates = segment.get("mention_candidates")
     if not isinstance(candidates, list):
         candidates = []
     all_candidates = [str(candidate) for candidate in candidates]
     all_candidates.extend(mention_candidates(transcript_text))
+    return _unique_nonempty(all_candidates)
 
-    direct_matches = {
-        candidate.strip()
-        for candidate in all_candidates
-        if candidate.strip() and candidate.strip().casefold() in entity_text
+
+def _visual_field_texts(entity: VisualEntity) -> dict[str, str]:
+    return {
+        "text": entity.text,
+        "visual_description": entity.visual_description or "",
+        "entity_type": entity.entity_type.replace("_", " "),
+        "position": _visual_metadata_text(entity.position),
+        "relations": _visual_metadata_text(entity.relations),
     }
-    candidate_terms: set[str] = set()
-    for candidate in all_candidates:
-        candidate_terms.update(_expanded_terms(candidate, domain_lexicon=domain_lexicon))
 
-    entity_terms = _expanded_terms(entity.text, domain_lexicon=domain_lexicon)
-    alias_matches = {term for term in candidate_terms & entity_terms if _informative_term(term)}
-    return sorted(direct_matches | alias_matches)
+
+def _visual_metadata_text(value: Any) -> str:
+    return " ".join(_visual_metadata_values(value))
+
+
+def _visual_metadata_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        values: list[str] = []
+        for child in value.values():
+            values.extend(_visual_metadata_values(child))
+        return values
+    if isinstance(value, list):
+        values = []
+        for child in value:
+            values.extend(_visual_metadata_values(child))
+        return values
+    return [str(value)]
 
 
 def _terms(text: str) -> set[str]:
@@ -237,34 +360,201 @@ def _informative_term(term: str) -> bool:
     return len(term) >= 2 and not term.isdigit() and term not in STOP_TERMS
 
 
-def _link_type(*, lexical_match: list[str], mention_match: list[str]) -> str:
+def _unique_sorted_terms(matches_by_field: dict[str, list[str]]) -> list[str]:
+    terms = {
+        term
+        for matches in matches_by_field.values()
+        for term in matches
+        if _informative_term(term)
+    }
+    return sorted(terms)
+
+
+def _unique_nonempty(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique_values: list[str] = []
+    for value in values:
+        cleaned = value.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        unique_values.append(cleaned)
+    return unique_values
+
+
+def _evidence_types(
+    *,
+    lexical_matches_by_field: dict[str, list[str]],
+    mention_matches_by_field: dict[str, list[str]],
+) -> list[str]:
+    evidence = ["time_overlap"]
+    if any(lexical_matches_by_field.values()):
+        evidence.append("lexical_match")
+    if any(mention_matches_by_field.values()):
+        evidence.append("mention_candidate")
+    for field_name in VISUAL_MATCH_FIELDS:
+        if lexical_matches_by_field.get(field_name) or mention_matches_by_field.get(field_name):
+            evidence.append(VISUAL_FIELD_EVIDENCE[field_name])
+    if evidence == ["time_overlap"]:
+        evidence.append("timestamp_fallback")
+    return evidence
+
+
+def _link_type(
+    *,
+    lexical_match: list[str],
+    mention_match: list[str],
+    evidence: list[str],
+) -> str:
     if lexical_match and mention_match:
-        return "time_overlap+lexical_match+mention_candidate"
-    if lexical_match:
-        return "time_overlap+lexical_match"
-    if mention_match:
-        return "time_overlap+mention_candidate"
-    return "time_overlap"
+        parts = ["time_overlap", "lexical_match", "mention_candidate"]
+    elif lexical_match:
+        parts = ["time_overlap", "lexical_match"]
+    elif mention_match:
+        parts = ["time_overlap", "mention_candidate"]
+    else:
+        return "time_overlap"
+
+    for evidence_type in (
+        "visual_description_match",
+        "entity_type_match",
+        "position_match",
+        "relations_match",
+    ):
+        if evidence_type in evidence:
+            parts.append(evidence_type)
+    return "+".join(parts)
 
 
-def _score(*, lexical_match: list[str], mention_match: list[str]) -> float:
-    score = 0.4
-    if lexical_match:
-        score += 0.35 + (0.05 * len(lexical_match))
+def _score_breakdown(
+    *,
+    lexical_matches_by_field: dict[str, list[str]],
+    mention_match: list[str],
+) -> dict[str, float]:
+    breakdown = {"time_overlap": TIME_OVERLAP_SCORE}
+    for field_name in VISUAL_MATCH_FIELDS:
+        matches = lexical_matches_by_field.get(field_name, [])
+        if not matches:
+            continue
+        base, per_extra_term, cap = VISUAL_FIELD_SCORE_WEIGHTS[field_name]
+        component = min(cap, base + (per_extra_term * max(0, len(matches) - 1)))
+        breakdown[VISUAL_FIELD_EVIDENCE[field_name]] = round(component, 3)
     if mention_match:
-        score += 0.2 + (0.05 * len(mention_match))
-    return round(score, 3)
+        component = min(
+            MENTION_SCORE_CAP,
+            MENTION_SCORE_BASE + (MENTION_SCORE_PER_EXTRA_TERM * max(0, len(mention_match) - 1)),
+        )
+        breakdown["mention_candidate"] = round(component, 3)
+    return breakdown
+
+
+def _reason_metadata(
+    *,
+    entity: VisualEntity,
+    lexical_matches_by_field: dict[str, list[str]],
+    mention_matches_by_field: dict[str, list[str]],
+) -> dict[str, Any]:
+    lexical_details = _nonempty_matches(lexical_matches_by_field)
+    mention_details = _nonempty_matches(mention_matches_by_field)
+    matched_fields = sorted(set(lexical_details) | set(mention_details))
+    metadata: dict[str, Any] = {
+        "summary": _reason_summary(
+            lexical_matches_by_field=lexical_matches_by_field,
+            mention_matches_by_field=mention_matches_by_field,
+        ),
+        "matched_visual_fields": matched_fields,
+        "visual_fields_considered": _visual_fields_considered(entity),
+    }
+    if lexical_details:
+        metadata["lexical_matches_by_field"] = lexical_details
+    if mention_details:
+        metadata["mention_matches_by_field"] = mention_details
+    if entity.source_model:
+        metadata["source_model"] = entity.source_model
+    if entity.source:
+        metadata["source"] = entity.source
+    return metadata
+
+
+def _reason_summary(
+    *,
+    lexical_matches_by_field: dict[str, list[str]],
+    mention_matches_by_field: dict[str, list[str]],
+) -> str:
+    if not any(lexical_matches_by_field.values()) and not any(mention_matches_by_field.values()):
+        return "timestamp_fallback_only"
+    if (
+        lexical_matches_by_field.get("visual_description")
+        or mention_matches_by_field.get("visual_description")
+    ):
+        if any(mention_matches_by_field.values()):
+            return "mention_candidate_visual_description_match"
+        return "visual_description_match"
+    if any(mention_matches_by_field.values()):
+        return "mention_candidate_visual_match"
+    return "visual_lexical_match"
+
+
+def _nonempty_matches(matches_by_field: dict[str, list[str]]) -> dict[str, list[str]]:
+    return {
+        field_name: matches
+        for field_name, matches in matches_by_field.items()
+        if matches
+    }
+
+
+def _visual_fields_considered(entity: VisualEntity) -> list[str]:
+    considered = [
+        field_name
+        for field_name, text in _visual_field_texts(entity).items()
+        if text.strip()
+    ]
+    if entity.source_model:
+        considered.append("source_model")
+    return considered
 
 
 def _evidence_type_counts(links: list[EntityLink]) -> dict[str, int]:
-    return {
+    counts = {
         "time_overlap": sum(1 for link in links if link.time_overlap),
         "lexical_match": sum(1 for link in links if link.lexical_match),
         "mention_candidate": sum(1 for link in links if link.mention_candidate),
         "timestamp_only": sum(
             1 for link in links if not link.lexical_match and not link.mention_candidate
         ),
+        "semantic_match": sum(
+            1 for link in links if link.lexical_match or link.mention_candidate
+        ),
     }
+    for evidence_type in (
+        "timestamp_fallback",
+        "visual_text_match",
+        "visual_description_match",
+        "entity_type_match",
+        "position_match",
+        "relations_match",
+    ):
+        counts[evidence_type] = sum(1 for link in links if evidence_type in link.evidence)
+    return counts
+
+
+def _score_summary(links: list[EntityLink]) -> dict[str, float | None]:
+    if not links:
+        return {"min": None, "max": None, "avg": None}
+    scores = [link.score for link in links]
+    return {
+        "min": round(min(scores), 3),
+        "max": round(max(scores), 3),
+        "avg": round(sum(scores) / len(scores), 3),
+    }
+
+
+def _score_breakdown_totals(links: list[EntityLink]) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for link in links:
+        for component, value in link.score_breakdown.items():
+            totals[component] = totals.get(component, 0.0) + value
+    return {component: round(value, 3) for component, value in sorted(totals.items())}
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -309,6 +599,7 @@ def _update_project_manifest(
     visual_entities_total: int,
     links: list[EntityLink],
     evidence_type_counts: dict[str, int],
+    score_breakdown_totals: dict[str, float],
     domain_lexicon_metadata: dict[str, Any],
 ) -> None:
     payload: dict[str, Any]
@@ -339,7 +630,12 @@ def _update_project_manifest(
         "timestamp_only_links": sum(
             1 for link in links if not link.lexical_match and not link.mention_candidate
         ),
+        "semantic_links": sum(
+            1 for link in links if link.lexical_match or link.mention_candidate
+        ),
         "evidence_type_counts": evidence_type_counts,
+        "score_summary": _score_summary(links),
+        "score_breakdown_totals": score_breakdown_totals,
         "domain_lexicon": domain_lexicon_metadata,
     }
     write_json(manifest_path, payload)

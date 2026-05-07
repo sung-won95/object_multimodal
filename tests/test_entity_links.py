@@ -59,14 +59,27 @@ def test_link_entities_writes_timestamp_only_links_and_updates_manifest(tmp_path
         "lexical_match": 0,
         "mention_candidate": 0,
         "timestamp_only": 1,
+        "semantic_match": 0,
+        "timestamp_fallback": 1,
+        "visual_text_match": 0,
+        "visual_description_match": 0,
+        "entity_type_match": 0,
+        "position_match": 0,
+        "relations_match": 0,
     }
     assert rows[0]["link_type"] == "time_overlap"
+    assert rows[0]["score"] == 0.2
     assert rows[0]["lexical_match"] == []
     assert rows[0]["mention_candidate"] == []
+    assert rows[0]["evidence"] == ["time_overlap", "timestamp_fallback"]
+    assert rows[0]["score_breakdown"] == {"time_overlap": 0.2}
+    assert rows[0]["reason_metadata"]["summary"] == "timestamp_fallback_only"
 
     manifest = json.loads(project_manifest.read_text(encoding="utf-8"))
     assert manifest["artifacts"]["entity_links"] == str(output_path)
     assert manifest["counts"]["entity_links"] == 1
+    assert manifest["entity_linking"]["evidence_type_counts"]["timestamp_fallback"] == 1
+    assert manifest["entity_linking"]["score_summary"] == {"min": 0.2, "max": 0.2, "avg": 0.2}
     assert manifest["entity_linking"]["domain_lexicon"] == {
         "enabled": False,
         "source_path": None,
@@ -167,6 +180,88 @@ def test_link_entities_adds_lexical_and_mention_evidence(tmp_path: Path) -> None
     assert rows[0]["lexical_match"] == ["board", "size", "stack"]
     assert rows[0]["mention_candidate"] == ["board", "stack"]
     assert rows[0]["score"] == 1.2
+    assert rows[0]["score_breakdown"] == {
+        "time_overlap": 0.2,
+        "visual_text_match": 0.5,
+        "mention_candidate": 0.5,
+    }
+    assert rows[0]["reason_metadata"]["matched_visual_fields"] == ["text"]
+
+
+def test_link_entities_uses_vlm_description_and_metadata_for_evidence(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            {
+                "segment_id": "seg_1",
+                "project_id": "sample_project",
+                "video_id": "video",
+                "start_time": 30.0,
+                "end_time": 32.0,
+                "timestamp_center": 31.0,
+                "transcript_text": "explain the covariance matrix highlighted in the center",
+                "mention_candidates": ["matrix"],
+                "frame_refs": ["frame_000030"],
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "ent_timestamp_only",
+                "project_id": "sample_project",
+                "frame_id": "frame_000030",
+                "timestamp": 31.0,
+                "frame_path": "/tmp/frame_000030.jpg",
+                "bbox": None,
+                "text": "42",
+                "entity_type": "ocr_text",
+                "confidence": 0.9,
+                "source": "ocr:tesseract",
+            },
+            {
+                "entity_id": "ent_vlm_matrix",
+                "project_id": "sample_project",
+                "frame_id": "frame_000030",
+                "timestamp": 31.0,
+                "frame_path": "/tmp/frame_000030.jpg",
+                "bbox": None,
+                "text": "",
+                "entity_type": "diagram",
+                "confidence": 0.84,
+                "source": "vlm:stub-vlm",
+                "visual_description": "A covariance matrix is highlighted near the center of the slide",
+                "position": {"label": "center"},
+                "relations": [{"type": "contains", "target": "matrix label"}],
+                "source_model": "stub-vlm",
+            },
+        ],
+    )
+
+    summary = link_entities(project_dir=project_dir)
+
+    rows = {
+        row["entity_id"]: row
+        for row in _read_jsonl(project_dir / "manifests" / "entity_links.jsonl")
+    }
+    timestamp_link = rows["ent_timestamp_only"]
+    vlm_link = rows["ent_vlm_matrix"]
+    assert summary["counts"]["entity_links"] == 2
+    assert summary["counts"]["timestamp_only_links"] == 1
+    assert summary["counts"]["semantic_links"] == 1
+    assert summary["counts"]["evidence_type_counts"]["visual_description_match"] == 1
+    assert summary["counts"]["evidence_type_counts"]["position_match"] == 1
+    assert summary["counts"]["evidence_type_counts"]["relations_match"] == 1
+    assert timestamp_link["score"] == 0.2
+    assert vlm_link["score"] > timestamp_link["score"]
+    assert "visual_description_match" in vlm_link["evidence"]
+    assert vlm_link["lexical_match"] == ["center", "covariance", "highlighted", "matrix"]
+    assert vlm_link["mention_candidate"] == ["matrix"]
+    assert vlm_link["score_breakdown"]["visual_description_match"] == 0.57
+    assert vlm_link["reason_metadata"]["summary"] == "mention_candidate_visual_description_match"
+    assert vlm_link["reason_metadata"]["source_model"] == "stub-vlm"
 
 
 def test_link_entities_keeps_domain_aliases_off_without_project_lexicon(tmp_path: Path) -> None:
