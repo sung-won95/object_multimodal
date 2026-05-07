@@ -8,12 +8,36 @@ from pathlib import Path
 DEFAULT_MEILI_URL = "http://127.0.0.1:7700"
 DEFAULT_MEILI_API_KEY = "dev-master-key"
 ENV_STT_LANGUAGE = "OARAG_STT_LANGUAGE"
+DEFAULT_NEO4J_URI = "bolt://127.0.0.1:7687"
+DEFAULT_NEO4J_USER = "neo4j"
+DEFAULT_NEO4J_PASSWORD = "dev-password"
+DEFAULT_NEO4J_DATABASE = "neo4j"
+ENV_NEO4J_URI = "OARAG_NEO4J_URI"
+ENV_NEO4J_USER = "OARAG_NEO4J_USER"
+ENV_NEO4J_PASSWORD = "OARAG_NEO4J_PASSWORD"
+ENV_NEO4J_DATABASE = "OARAG_NEO4J_DATABASE"
 
 
 @dataclass(frozen=True)
 class Paths:
     repo_root: Path
     artifacts_dir: Path
+
+
+@dataclass(frozen=True)
+class Neo4jConfig:
+    uri: str
+    user: str
+    password: str
+    database: str
+
+    def redacted(self) -> dict[str, str]:
+        return {
+            "uri": self.uri,
+            "user": self.user,
+            "password": "***",
+            "database": self.database,
+        }
 
 
 def default_paths() -> Paths:
@@ -47,3 +71,12 @@ def normalize_env_value(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def load_neo4j_config() -> Neo4jConfig:
+    return Neo4jConfig(
+        uri=env_default(ENV_NEO4J_URI) or DEFAULT_NEO4J_URI,
+        user=env_default(ENV_NEO4J_USER) or DEFAULT_NEO4J_USER,
+        password=env_default(ENV_NEO4J_PASSWORD) or DEFAULT_NEO4J_PASSWORD,
+        database=env_default(ENV_NEO4J_DATABASE) or DEFAULT_NEO4J_DATABASE,
+    )
