@@ -675,6 +675,7 @@ class SearchCandidate:
     timestamp_center: float | None
     transcript_excerpt: str
     score: float | None
+    semantic_source_fields: list[str] = field(default_factory=list)
 
     @classmethod
     def from_hit(cls, rank: int, hit: dict[str, Any]) -> "SearchCandidate":
@@ -690,10 +691,16 @@ class SearchCandidate:
             timestamp_center=_optional_float(hit.get("timestamp_center")),
             transcript_excerpt=excerpt,
             score=_optional_float(hit.get("_rankingScore")),
+            semantic_source_fields=_semantic_source_field_list(
+                hit.get(LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD)
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if not self.semantic_source_fields:
+            payload.pop("semantic_source_fields")
+        return payload
 
 
 @dataclass(frozen=True)
