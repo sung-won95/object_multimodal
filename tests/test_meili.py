@@ -5,20 +5,26 @@ import pytest
 from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+    LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE,
     lecture_segment_settings,
     lecture_segment_settings_hash,
     lecture_segment_settings_profile_names,
     lecture_segment_settings_snapshot,
 )
+from oarag.schemas import (
+    LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
+    LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+)
 
 
-EXPECTED_DEFAULT_SETTINGS_HASH = "f5164705dfc709f02399414cd0cb6856013185aeabc61e74fdabf3ec4af27352"
+EXPECTED_DEFAULT_SETTINGS_HASH = "cf3664e1c618e4b81fdfc7099cf9f2f6da7e552e48479e9127a55546af7a1abd"
 
 
 def test_lecture_segment_settings_payload_is_domain_agnostic_and_multilingual_safe() -> None:
     settings = lecture_segment_settings()
 
     assert settings["searchableAttributes"] == [
+        LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
         "transcript_text",
         "normalized_text",
         "mention_candidates",
@@ -51,6 +57,10 @@ def test_lecture_segment_settings_payload_is_domain_agnostic_and_multilingual_sa
         "disableOnWords": [],
     }
     assert settings["displayedAttributes"] != ["*"]
+    assert settings["displayedAttributes"].index(LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD) < (
+        settings["displayedAttributes"].index("slide_id")
+    )
+    assert LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD in settings["displayedAttributes"]
     assert "frame_refs" in settings["displayedAttributes"]
     assert "source_video_path" not in settings["displayedAttributes"]
 
@@ -76,6 +86,22 @@ def test_legacy_profile_is_available_for_rollback() -> None:
 
     assert settings["displayedAttributes"] == ["*"]
     assert LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE in lecture_segment_settings_profile_names()
+
+
+def test_pre_semantic_profile_remains_available_for_settings_rollback() -> None:
+    settings = lecture_segment_settings(LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE)
+
+    assert settings["searchableAttributes"] == [
+        "transcript_text",
+        "normalized_text",
+        "mention_candidates",
+        "video_name",
+        "video_id",
+        "slide_id",
+        "sample_id",
+    ]
+    assert LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD not in settings["searchableAttributes"]
+    assert LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE in lecture_segment_settings_profile_names()
 
 
 def test_unknown_lecture_segment_settings_profile_is_rejected() -> None:

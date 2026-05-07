@@ -7,6 +7,7 @@ from typing import Any, Iterable, Iterator
 from .config import default_paths
 from .meili import LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE, MeiliClient
 from .meili import lecture_segment_settings, lecture_segment_settings_snapshot
+from .schemas import ensure_lecture_segment_semantic_contract
 
 
 def project_dir_from_args(*, project_id: str | None, project_dir: Path | None) -> Path:
@@ -91,7 +92,11 @@ def index_project_segments(
 
     indexed_documents = 0
     indexed_batches = 0
-    for batch in iter_batches(iter_jsonl_documents(segments_path), batch_size=batch_size):
+    documents = (
+        ensure_lecture_segment_semantic_contract(document)
+        for document in iter_jsonl_documents(segments_path)
+    )
+    for batch in iter_batches(documents, batch_size=batch_size):
         client.wait_task(client.add_documents(index_uid, batch))
         indexed_documents += len(batch)
         indexed_batches += 1

@@ -10,9 +10,15 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from .schemas import (
+    LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
+    LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+)
+
 
 LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE = "lecture_segments_legacy_v0"
-LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE = "lecture_segments_default_v1"
+LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE = "lecture_segments_default_v1"
+LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE = "lecture_segments_default_v2"
 
 LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE: {
@@ -37,7 +43,7 @@ LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
         ],
         "displayedAttributes": ["*"],
     },
-    LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE: {
+    LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE: {
         "searchableAttributes": [
             "transcript_text",
             "normalized_text",
@@ -85,6 +91,86 @@ LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
             "timestamp_points",
             "transcript_text",
             "normalized_text",
+            "slide_id",
+            "frame_refs",
+            "mention_candidates",
+            "source",
+        ],
+        "rankingRules": [
+            "words",
+            "typo",
+            "proximity",
+            "attribute",
+            "sort",
+            "exactness",
+        ],
+        "stopWords": [],
+        "synonyms": {},
+        "typoTolerance": {
+            "enabled": True,
+            "minWordSizeForTypos": {
+                "oneTypo": 5,
+                "twoTypos": 9,
+            },
+            "disableOnAttributes": [
+                "video_id",
+                "slide_id",
+                "sample_id",
+            ],
+            "disableOnWords": [],
+        },
+    },
+    LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE: {
+        "searchableAttributes": [
+            LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+            "transcript_text",
+            "normalized_text",
+            "mention_candidates",
+            "video_name",
+            "video_id",
+            "slide_id",
+            "sample_id",
+        ],
+        "filterableAttributes": [
+            "project_id",
+            "dataset_name",
+            "subset_name",
+            "split_name",
+            "video_id",
+            "video_name",
+            "source",
+            "segment_id",
+            "sample_id",
+            "slide_id",
+            "sample_index",
+            "start_time",
+            "end_time",
+            "timestamp_center",
+        ],
+        "sortableAttributes": [
+            "timestamp_center",
+            "start_time",
+            "end_time",
+            "sample_index",
+        ],
+        "displayedAttributes": [
+            "segment_id",
+            "project_id",
+            "dataset_name",
+            "subset_name",
+            "split_name",
+            "sample_id",
+            "sample_index",
+            "video_id",
+            "video_name",
+            "start_time",
+            "end_time",
+            "timestamp_center",
+            "timestamp_points",
+            "transcript_text",
+            "normalized_text",
+            LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+            LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
             "slide_id",
             "frame_refs",
             "mention_candidates",
