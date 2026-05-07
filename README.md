@@ -593,13 +593,14 @@ PYTHONPATH=src python3 -m oarag graph-query --help
 
 The default `lecture_segments` settings profile is domain-agnostic:
 
-- Search prioritizes transcript text, normalized text, mention candidates, and low-priority video/slide identifiers.
+- Search prioritizes `semantic_text`, then transcript text, normalized text, mention candidates, and low-priority video/slide identifiers.
+- `semantic_source_fields` records which segment fields were folded into `semantic_text`; future visual entity text should append to `semantic_text` rather than replacing transcript text.
 - Filter/sort fields cover stable project, dataset, video, sample, and timestamp metadata.
 - Displayed attributes are explicit so accidental extra fields are not returned by default.
 - Core settings keep `synonyms` empty and `stopWords` empty. Domain-specific aliases belong in optional project lexicons, not the shared Meilisearch profile.
 - Typo tolerance remains enabled, but is conservative for short tokens and disabled on identifier attributes to avoid surprising multilingual transcript matches.
 
-`index-project` prints `settings_profile`, `settings_hash`, and a `settings_snapshot` in its JSON summary. Keep those values with benchmark artifacts so retrieval changes can be compared or rolled back with `--settings-profile lecture_segments_legacy_v0` if a cross-domain regression appears.
+`index-project` prints `settings_profile`, `settings_hash`, and a `settings_snapshot` in its JSON summary. Keep those values with benchmark artifacts so retrieval changes can be compared or rolled back with `--settings-profile lecture_segments_default_v1` or `--settings-profile lecture_segments_legacy_v0` if a cross-domain regression appears.
 
 When validating settings changes with `benchmark-retrieval`, report aggregate `metrics.json` / `summary.md` numbers by domain and latency only. Do not paste private query text, transcript excerpts, frame paths, or local project paths into public PRs.
 
