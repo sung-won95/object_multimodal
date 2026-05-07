@@ -51,6 +51,21 @@ def test_blank_stt_language_env_is_ignored(monkeypatch) -> None:
     assert args.stt_language is None
 
 
+def test_health_neo4j_cli_calls_helper(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "oarag.cli.check_neo4j_health",
+        lambda: {"ok": True, "uri": "bolt://127.0.0.1:7687"},
+    )
+
+    args = build_parser().parse_args(["health-neo4j"])
+    args.func(args)
+
+    assert json.loads(capsys.readouterr().out) == {
+        "ok": True,
+        "uri": "bolt://127.0.0.1:7687",
+    }
+
+
 def test_align_frames_cli_defaults() -> None:
     args = build_parser().parse_args(["align-frames", "--project-id", "sample"])
 

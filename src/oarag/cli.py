@@ -29,6 +29,7 @@ from .meili import (
     MeiliClient,
     lecture_segment_settings_profile_names,
 )
+from .neo4j import check_neo4j_health
 from .project_query import query_project
 from .project_index import index_project_segments, project_dir_from_args
 from .schemas import SearchCandidate
@@ -72,6 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     health = subparsers.add_parser("health", help="Check Meilisearch health")
     health.set_defaults(func=cmd_health)
+
+    neo4j_health = subparsers.add_parser("health-neo4j", help="Check Neo4j runtime health")
+    neo4j_health.set_defaults(func=cmd_health_neo4j)
 
     index = subparsers.add_parser("index-eduvidqa", help="Index normalized EDUVIDQA JSONL")
     index.add_argument("--input", required=True, type=Path)
@@ -722,6 +726,10 @@ def client_from_args(args: argparse.Namespace) -> MeiliClient:
 def cmd_health(args: argparse.Namespace) -> None:
     client = client_from_args(args)
     print(json.dumps(client.health(), ensure_ascii=False, indent=2))
+
+
+def cmd_health_neo4j(args: argparse.Namespace) -> None:
+    print(json.dumps(check_neo4j_health(), ensure_ascii=False, indent=2))
 
 
 def cmd_index_eduvidqa(args: argparse.Namespace) -> None:
