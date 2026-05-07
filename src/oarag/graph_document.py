@@ -8,6 +8,7 @@ from typing import Any
 
 from .domain_lexicon import DomainLexicon, load_domain_lexicon
 from .project_index import segment_artifact_path
+from .reference_resolution import REFERENCE_RESOLUTION_SOURCE, resolve_references
 from .schemas import EntityLink, VisualEntity, slugify
 
 GRAPH_DOCUMENT_SCHEMA_VERSION = "graph-document-v1"
@@ -128,6 +129,7 @@ def build_graph_document(
     builder.add_frames(frames)
     builder.add_visual_entities(entities)
     builder.add_entity_links(links)
+    builder.add_reference_resolutions(segments=segments, entities=entities, links=links)
     builder.add_temporal_edges()
 
     availability = _availability(
@@ -307,6 +309,78 @@ class _GraphDocumentBuilder:
                 ),
                 identity=link.link_id,
             )
+
+    def add_reference_resolutions(
+        self,
+        *,
+        segments: list[dict[str, Any]],
+        entities: list[VisualEntity],
+        links: list[EntityLink],
+    ) -> None:
+        for resolution in resolve_references(
+            segments=segments,
+            domain_lexicon=self.domain_lexicon,
+            entities=entities,
+            links=links,
+        ):
+            segment_key = self._node_key("segment", resolution.segment_id)
+            reference_key = self._add_node(
+                "reference_mention",
+                resolution.reference_id,
+                ("ReferenceMention",),
+                _compact(
+                    {
+                        "reference_id": resolution.reference_id,
+                        "project_id": self.project_id,
+                        "segment_id": resolution.segment_id,
+                        "hint_text": resolution.hint_text,
+                        "source": REFERENCE_RESOLUTION_SOURCE,
+                        "score": resolution.score,
+                        "reason": resolution.reason,
+                        "evidence": list(resolution.evidence),
+                        "lookback_segment_id": resolution.lookback_segment_id,
+                        "lookback_segment_count": resolution.lookback_segment_count,
+                        "lookback_seconds": resolution.lookback_seconds,
+                    }
+                ),
+            )
+            self._add_relationship(
+                "REFERS_TO",
+                segment_key,
+                reference_key,
+                _compact(
+                    {
+                        "source": REFERENCE_RESOLUTION_SOURCE,
+                        "score": resolution.score,
+                        "reason": resolution.reason,
+                        "evidence": list(resolution.evidence),
+                        "lookback_segment_id": resolution.lookback_segment_id,
+                        "lookback_segment_count": resolution.lookback_segment_count,
+                        "lookback_seconds": resolution.lookback_seconds,
+                    }
+                ),
+                identity=resolution.reference_id,
+            )
+            for target in resolution.targets:
+                target_key = self._node_key(target.node_namespace, target.local_id)
+                self._add_relationship(
+                    "RESOLVES_TO",
+                    reference_key,
+                    target_key,
+                    _compact(
+                        {
+                            "source": REFERENCE_RESOLUTION_SOURCE,
+                            "target_type": target.target_type,
+                            "score": target.score,
+                            "reason": target.reason,
+                            "evidence": list(target.evidence),
+                            "lookback_segment_id": resolution.lookback_segment_id,
+                            "lookback_segment_count": resolution.lookback_segment_count,
+                            "lookback_seconds": resolution.lookback_seconds,
+                        }
+                    ),
+                    identity=f"{resolution.reference_id}:{target.target_type}:{target.local_id}",
+                )
 
     def add_temporal_edges(self) -> None:
         for video_id, segments in sorted(self.segments_by_video.items()):
