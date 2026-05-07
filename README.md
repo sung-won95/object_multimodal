@@ -102,6 +102,51 @@ Manifest shape:
 
 The command writes `metrics.json`, `query_results.jsonl`, and `summary.md`. Reports include per-domain metrics so retrieval changes can be checked for overfitting instead of only improving one pilot video.
 
+## Private-Safe Lecture Smoke
+
+Run a manifest-driven smoke suite for private/local lectures:
+
+```bash
+PYTHONPATH=src python -m oarag lecture-smoke \
+  --manifest reports/lecture_smoke/manifest.json \
+  --output-dir reports/lecture_smoke/run_001
+```
+
+Minimal manifest shape:
+
+```json
+{
+  "run_id": "run_001",
+  "suites": [
+    {
+      "suite_id": "local_safe_suite",
+      "type": "lecture_project",
+      "project_id": "local_project_id",
+      "index": "local_project_segments",
+      "visual_index": "local_project_visual_entities",
+      "limit": 3,
+      "queries": [
+        {"query_id": "q001", "query_text": "safe placeholder query"}
+      ]
+    }
+  ]
+}
+```
+
+Public outputs are `metrics.json`, `query_results.jsonl`, and `summary.md`. These files keep only IDs, hashes, counts, booleans, source labels, timestamp availability, latency, frame-backed/linked-entity/graph counts, transcript-only fallback, and semantic-source-field availability. They must not contain raw query text, transcript excerpts, local absolute paths, frame paths, visual entity text, or full retrieval responses.
+
+Raw/private output is opt-in only:
+
+```bash
+PYTHONPATH=src python -m oarag lecture-smoke \
+  --manifest reports/lecture_smoke/manifest.json \
+  --output-dir reports/lecture_smoke/run_001 \
+  --allow-private-output \
+  --private-output-dir /tmp/lecture_smoke_private_run_001
+```
+
+Keep private outputs outside public PRs, docs, and tracked fixtures.
+
 ## Local Video Ingest
 
 For a local video with a sibling `.srt` file:

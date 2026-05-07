@@ -579,3 +579,23 @@ def test_benchmark_retrieval_cli_accepts_manifest_and_output_dir() -> None:
 
     assert str(args.manifest) == "benchmarks/retrieval.json"
     assert str(args.output_dir) == "reports/perf_runs/dev"
+
+
+def test_lecture_smoke_cli_accepts_manifest_and_output_dir() -> None:
+    args = build_parser().parse_args(
+        [
+            "lecture-smoke",
+            "--manifest",
+            "reports/lecture_smoke/manifest.json",
+            "--output-dir",
+            "reports/lecture_smoke/dev",
+            "--private-output-dir",
+            "/tmp/private_lecture_smoke",
+            "--allow-private-output",
+        ]
+    )
+
+    assert str(args.manifest) == "reports/lecture_smoke/manifest.json"
+    assert str(args.output_dir) == "reports/lecture_smoke/dev"
+    assert str(args.private_output_dir) == "/tmp/private_lecture_smoke"
+    assert args.allow_private_output is True

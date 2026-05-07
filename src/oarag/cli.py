@@ -25,6 +25,7 @@ from .ingest import (
     write_batch_summary_jsonl,
 )
 from .io import write_json
+from .lecture_smoke import run_lecture_smoke
 from .meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_SETTINGS,
@@ -687,6 +688,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark.set_defaults(func=cmd_benchmark_retrieval)
 
+    lecture_smoke = subparsers.add_parser(
+        "lecture-smoke",
+        help="Run a private-safe lecture smoke suite from a manifest",
+    )
+    lecture_smoke.add_argument("--manifest", required=True, type=Path)
+    lecture_smoke.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Optional public output directory. Writes sanitized metrics.json, query_results.jsonl, and summary.md.",
+    )
+    lecture_smoke.add_argument(
+        "--private-output-dir",
+        type=Path,
+        help="Optional raw output directory. Requires --allow-private-output.",
+    )
+    lecture_smoke.add_argument(
+        "--allow-private-output",
+        action="store_true",
+        help="Allow raw private outputs that may contain queries, transcripts, and local paths.",
+    )
+    lecture_smoke.set_defaults(func=cmd_lecture_smoke)
+
     return parser
 
 
@@ -1257,6 +1280,28 @@ def cmd_benchmark_retrieval(args: argparse.Namespace) -> None:
             indent=2,
         )
     )
+
+
+def cmd_lecture_smoke(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    run = run_lecture_smoke(
+        client=client,
+        manifest_path=args.manifest,
+        output_dir=args.output_dir,
+        repo_root=default_paths().repo_root,
+        private_output_dir=args.private_output_dir,
+        allow_private_output=args.allow_private_output,
+    )
+    payload = {
+        "run_id": run.run_id,
+        "output_dir": str(run.output_dir),
+        "metrics": str(run.metrics_path),
+        "query_results": str(run.query_results_path),
+        "summary": str(run.summary_path),
+    }
+    if run.private_query_outputs_path is not None:
+        payload["private_query_outputs"] = str(run.private_query_outputs_path)
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def parse_deltas(value: str) -> list[int]:
