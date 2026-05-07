@@ -5,16 +5,16 @@ import json
 import sys
 from pathlib import Path
 
-from .alignment import align_segments_to_frames
-from .benchmark import run_benchmark
-from .config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
-from .eduvidqa import iter_lecture_segments, iter_records
-from .eval import evaluate_query, summarize
-from .entity_links import link_entities
-from .evidence import build_evidence_response
-from .graph_ingest import ingest_project_graph
-from .graph_query import GraphTraversalConfig, graph_query
-from .ingest import (
+from oarag.ingestion.alignment import align_segments_to_frames
+from oarag.evaluation.benchmark import run_benchmark
+from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
+from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
+from oarag.evaluation.eval import evaluate_query, summarize
+from oarag.vision.entity_links import link_entities
+from oarag.retrieval.evidence import build_evidence_response
+from oarag.graph.graph_ingest import ingest_project_graph
+from oarag.graph.graph_query import GraphTraversalConfig, graph_query
+from oarag.ingestion.ingest import (
     BatchIngestConfig,
     VideoIngestConfig,
     batch_ingest_videos,
@@ -24,9 +24,9 @@ from .ingest import (
     write_batch_summary_json,
     write_batch_summary_jsonl,
 )
-from .io import write_json
-from .lecture_smoke import run_lecture_smoke
-from .meili import (
+from oarag.core.io import write_json
+from oarag.evaluation.lecture_smoke import run_lecture_smoke
+from oarag.integrations.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_SETTINGS,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
@@ -34,20 +34,20 @@ from .meili import (
     lecture_segment_settings_profile_names,
     visual_entity_settings_profile_names,
 )
-from .neo4j import check_neo4j_health
-from .project_query import query_project
-from .project_index import (
+from oarag.integrations.neo4j import check_neo4j_health
+from oarag.retrieval.project_query import query_project
+from oarag.retrieval.project_index import (
     index_project_segments,
     index_project_visual_entities,
     project_dir_from_args,
 )
-from .schemas import SearchCandidate
-from .stt import DEFAULT_MLX_WHISPER_MODEL
-from .visual_entities import extract_visual_entities
-from .vlm import DEFAULT_VLM_BACKEND, run_vlm
-from .audio_visual_consistency import AudioVisualConsistencyConfig
-from .vlm_alignment_pipeline import VLMAlignmentPipelineConfig, run_vlm_alignment_pipeline
-from .vlm_frame_candidates import VLMFrameCandidateConfig
+from oarag.core.schemas import SearchCandidate
+from oarag.ingestion.stt import DEFAULT_MLX_WHISPER_MODEL
+from oarag.vision.visual_entities import extract_visual_entities
+from oarag.vision.vlm import DEFAULT_VLM_BACKEND, run_vlm
+from oarag.vision.audio_visual_consistency import AudioVisualConsistencyConfig
+from oarag.vision.vlm_alignment_pipeline import VLMAlignmentPipelineConfig, run_vlm_alignment_pipeline
+from oarag.vision.vlm_frame_candidates import VLMFrameCandidateConfig
 
 
 def main(argv: list[str] | None = None) -> None:
