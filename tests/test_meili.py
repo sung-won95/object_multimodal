@@ -6,10 +6,15 @@ from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
     LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE,
+    VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     lecture_segment_settings,
     lecture_segment_settings_hash,
     lecture_segment_settings_profile_names,
     lecture_segment_settings_snapshot,
+    visual_entity_settings,
+    visual_entity_settings_hash,
+    visual_entity_settings_profile_names,
+    visual_entity_settings_snapshot,
 )
 from oarag.schemas import (
     LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
@@ -18,6 +23,7 @@ from oarag.schemas import (
 
 
 EXPECTED_DEFAULT_SETTINGS_HASH = "cf3664e1c618e4b81fdfc7099cf9f2f6da7e552e48479e9127a55546af7a1abd"
+EXPECTED_VISUAL_ENTITY_SETTINGS_HASH = "bbda5dcb692e2d42d935f085654934584d4ec66ae7ce40238cb44541806770e9"
 
 
 def test_lecture_segment_settings_payload_is_domain_agnostic_and_multilingual_safe() -> None:
@@ -107,3 +113,49 @@ def test_pre_semantic_profile_remains_available_for_settings_rollback() -> None:
 def test_unknown_lecture_segment_settings_profile_is_rejected() -> None:
     with pytest.raises(ValueError, match="Unknown lecture segment settings profile"):
         lecture_segment_settings("pilot_video_synonyms")
+
+
+def test_visual_entity_settings_payload_indexes_direct_visual_evidence() -> None:
+    settings = visual_entity_settings()
+
+    assert settings["searchableAttributes"] == [
+        "text",
+        "visual_description",
+        "entity_type",
+        "frame_id",
+        "source_model",
+    ]
+    assert settings["filterableAttributes"] == [
+        "project_id",
+        "frame_id",
+        "entity_id",
+        "entity_type",
+        "source",
+        "source_model",
+        "timestamp",
+    ]
+    assert "frame_path" in settings["displayedAttributes"]
+    assert "source_video_path" not in settings["displayedAttributes"]
+    assert settings["rankingRules"] == [
+        "words",
+        "typo",
+        "proximity",
+        "attribute",
+        "sort",
+        "exactness",
+    ]
+
+
+def test_visual_entity_settings_hash_is_a_regression_guard() -> None:
+    snapshot = visual_entity_settings_snapshot()
+
+    assert visual_entity_settings_hash() == EXPECTED_VISUAL_ENTITY_SETTINGS_HASH
+    assert snapshot["profile"] == VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
+    assert snapshot["hash"] == EXPECTED_VISUAL_ENTITY_SETTINGS_HASH
+    assert snapshot["settings"] == visual_entity_settings()
+    assert VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE in visual_entity_settings_profile_names()
+
+
+def test_unknown_visual_entity_settings_profile_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Unknown visual entity settings profile"):
+        visual_entity_settings("visual_entities_experimental")

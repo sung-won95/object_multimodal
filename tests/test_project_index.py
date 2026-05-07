@@ -8,9 +8,16 @@ import pytest
 from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+    VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     lecture_segment_settings_hash,
+    visual_entity_settings_hash,
 )
-from oarag.project_index import index_project_segments, segment_artifact_path
+from oarag.project_index import (
+    index_project_segments,
+    index_project_visual_entities,
+    segment_artifact_path,
+    visual_entity_artifact_path,
+)
 from oarag.schemas import (
     LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
     LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
@@ -79,6 +86,16 @@ def test_segment_artifact_raises_when_no_default_or_aligned(tmp_path: Path) -> N
 
     with pytest.raises(FileNotFoundError):
         segment_artifact_path(project_dir)
+
+
+def test_visual_entity_artifact_uses_default_manifest_path(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    visual_entities = project_dir / "manifests" / "visual_entities.jsonl"
+    write_jsonl(visual_entities, [{"entity_id": "entity_board"}])
+
+    selected = visual_entity_artifact_path(project_dir)
+
+    assert selected == visual_entities
 
 
 def test_index_project_segments_batches_documents(tmp_path: Path) -> None:
@@ -179,3 +196,81 @@ def test_index_project_segments_can_use_legacy_settings_profile(tmp_path: Path) 
         settings_call[2],
         profile=LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
     )
+
+
+def test_index_project_visual_entities_batches_documents(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    visual_entities_path = project_dir / "manifests" / "visual_entities.jsonl"
+    rows = [
+        _visual_entity("entity_a", "frame_000001", "matrix A", 1.0),
+        _visual_entity("entity_b", "frame_000002", "range grid", 2.0),
+        _visual_entity("entity_c", "frame_000003", "bet size", 3.0),
+    ]
+    write_jsonl(visual_entities_path, rows)
+    client = FakeMeiliClient()
+
+    summary = index_project_visual_entities(
+        client,
+        index_uid="local_visual_entities",
+        project_dir=project_dir,
+        batch_size=2,
+        reset=True,
+    )
+
+    add_calls = [call for call in client.calls if call[0] == "add_documents"]
+    settings_call = next(call for call in client.calls if call[0] == "update_settings")
+    assert len(add_calls) == 2
+    assert add_calls[0][1] == "local_visual_entities"
+    assert add_calls[0][2] == rows[:2]
+    assert add_calls[1][2] == rows[2:]
+    assert settings_call[1] == "local_visual_entities"
+    assert ("delete_index", "local_visual_entities") in client.calls
+    assert ("create_index", "local_visual_entities", "entity_id") in client.calls
+    assert summary["index"] == "local_visual_entities"
+    assert summary["indexed_documents"] == 3
+    assert summary["indexed_batches"] == 2
+    assert summary["visual_entities_path"] == str(visual_entities_path)
+    assert summary["settings_profile"] == VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
+    assert summary["settings_hash"] == visual_entity_settings_hash(settings_call[2])
+
+
+def test_index_project_visual_entities_preserves_optional_segment_hint(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    visual_entities_path = project_dir / "manifests" / "visual_entities.jsonl"
+    row = {
+        **_visual_entity("entity_a", "frame_000001", "matrix A", 1.0),
+        "segment_id": "seg_1",
+        "video_id": "video_1",
+    }
+    write_jsonl(visual_entities_path, [row])
+    client = FakeMeiliClient()
+
+    index_project_visual_entities(
+        client,
+        index_uid="local_visual_entities",
+        project_dir=project_dir,
+    )
+
+    add_call = next(call for call in client.calls if call[0] == "add_documents")
+    assert add_call[2][0]["segment_id"] == "seg_1"
+    assert add_call[2][0]["video_id"] == "video_1"
+
+
+def _visual_entity(entity_id: str, frame_id: str, text: str, timestamp: float) -> dict:
+    return {
+        "entity_id": entity_id,
+        "project_id": "project",
+        "frame_id": frame_id,
+        "timestamp": timestamp,
+        "frame_path": f"/tmp/{frame_id}.jpg",
+        "bbox": None,
+        "text": text,
+        "entity_type": "visual_observation",
+        "confidence": 0.91,
+        "source": "test",
+        "visual_description": text,
+        "position": None,
+        "relations": [],
+        "parser_version": "test-v1",
+        "source_model": "stub-vlm",
+    }

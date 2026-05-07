@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+import urllib.error
 
 from .domain_lexicon import load_domain_lexicon
 from .evidence import (
@@ -12,6 +14,8 @@ from .evidence import (
     read_jsonl,
     resolve_project_path,
     resolve_window_config,
+    segment_sort_key,
+    segment_window,
     select_window_segments,
 )
 from .meili import MeiliClient
@@ -20,12 +24,21 @@ from .rerank import rerank_bundles, rerank_metadata
 from .schemas import EntityLink, SearchCandidate, VisualEntity
 
 
+SEGMENT_HIT_SOURCE = "segment"
+VISUAL_ENTITY_HIT_SOURCE = "visual_entity"
+SOURCE_PRIORITY = {
+    SEGMENT_HIT_SOURCE: 0,
+    VISUAL_ENTITY_HIT_SOURCE: 1,
+}
+
+
 def query_project(
     *,
     client: MeiliClient,
     index_uid: str,
     project_dir: Path,
     query: str,
+    visual_index_uid: str | None = None,
     limit: int = 5,
     segments_path: Path | None = None,
     frames_manifest_path: Path | None = None,
@@ -80,12 +93,14 @@ def query_project(
     )
     entity_lookup = {entity.entity_id: entity for entity in visual_entities}
     links_by_segment: dict[str, list[EntityLink]] = defaultdict(list)
+    links_by_entity: dict[str, list[EntityLink]] = defaultdict(list)
     for link in entity_links:
         links_by_segment[link.segment_id].append(link)
+        links_by_entity[link.entity_id].append(link)
 
     search_query = domain_lexicon.expand_query(query)
     search_response = client.search(index_uid, search_query, limit=limit)
-    hits = search_response.get("hits", [])
+    segment_hits = search_response.get("hits", [])
 
     bundles: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
@@ -94,20 +109,113 @@ def query_project(
     bundled_entity_total = 0
     bundled_link_total = 0
 
-    for rank, hit in enumerate(hits, start=1):
-        candidate = SearchCandidate.from_hit(rank=rank, hit=hit)
-        candidates.append(candidate.to_dict())
-
-        target = segment_lookup.get(candidate.segment_id)
-        if target is None:
+    visual_search_response: dict[str, Any] | None = None
+    visual_hits: list[dict[str, Any]] = []
+    if visual_index_uid:
+        try:
+            visual_search_response = client.search(visual_index_uid, search_query, limit=limit)
+            visual_hits = visual_search_response.get("hits", [])
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
             warnings.append(
-                f"Skipped search hit because the segment was not found in project artifacts: {candidate.segment_id}"
+                f"Skipped visual entity search because the index was not found: {visual_index_uid}"
             )
-            continue
 
+    retrieval_entries: list[dict[str, Any]] = []
+    for rank, hit in enumerate(segment_hits, start=1):
+        candidate = SearchCandidate.from_hit(rank=rank, hit=hit).to_dict()
+        candidate["source"] = SEGMENT_HIT_SOURCE
+        candidates.append(candidate)
+        retrieval_entries.append(
+            {
+                "source": SEGMENT_HIT_SOURCE,
+                "index": index_uid,
+                "rank": rank,
+                "score": candidate.get("score"),
+                "hit": hit,
+                "candidate": candidate,
+                "target_segment_id": candidate.get("segment_id"),
+            }
+        )
+
+    for rank, hit in enumerate(visual_hits, start=1):
+        entity = _visual_entity_from_hit(hit=hit, entity_lookup=entity_lookup)
+        target_segment_id, target_resolution = _resolve_visual_entity_target_segment(
+            hit=hit,
+            entity=entity,
+            segments=segments,
+            segment_lookup=segment_lookup,
+            links_by_entity=links_by_entity,
+        )
+        candidate = _visual_entity_candidate_from_hit(
+            rank=rank,
+            hit=hit,
+            entity=entity,
+            target_segment_id=target_segment_id,
+            target=segment_lookup.get(target_segment_id or ""),
+        )
+        candidates.append(candidate)
+        retrieval_entries.append(
+            {
+                "source": VISUAL_ENTITY_HIT_SOURCE,
+                "index": visual_index_uid,
+                "rank": rank,
+                "score": candidate.get("score"),
+                "hit": hit,
+                "candidate": candidate,
+                "entity": entity,
+                "target_segment_id": target_segment_id,
+                "target_resolution": target_resolution,
+            }
+        )
+
+    entries_by_target: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for entry in retrieval_entries:
+        target_segment_id = str(entry.get("target_segment_id") or "")
+        if not target_segment_id or target_segment_id not in segment_lookup:
+            source = entry.get("source")
+            if source == VISUAL_ENTITY_HIT_SOURCE:
+                candidate = entry.get("candidate") if isinstance(entry.get("candidate"), dict) else {}
+                warnings.append(
+                    "Skipped visual entity search hit because no nearby segment could be "
+                    f"resolved: {candidate.get('entity_id') or candidate.get('frame_id') or '(unknown)'}"
+                )
+            else:
+                warnings.append(
+                    "Skipped search hit because the segment was not found in project "
+                    f"artifacts: {target_segment_id}"
+                )
+            continue
+        entries_by_target[target_segment_id].append(entry)
+
+    merged_targets = sorted(
+        entries_by_target.items(),
+        key=lambda item: _target_merge_sort_key(item[0], item[1]),
+    )[:limit]
+
+    for merged_rank, (target_segment_id, entries) in enumerate(merged_targets, start=1):
+        primary_entry = _primary_retrieval_entry(entries)
+        candidate = copy.deepcopy(primary_entry["candidate"])
+        candidate["merged_rank"] = merged_rank
+        retrieval_sources = [
+            _retrieval_source_summary(entry)
+            for entry in sorted(entries, key=_retrieval_source_sort_key)
+        ]
+        candidate["merged_sources"] = [
+            {
+                "source": source["source"],
+                "index": source["index"],
+                "rank": source["rank"],
+                "score": source["score"],
+            }
+            for source in retrieval_sources
+        ]
+
+        target = segment_lookup[target_segment_id]
         window_segments = select_window_segments(
             segments,
-            target_segment_id=candidate.segment_id,
+            target_segment_id=target_segment_id,
             window_seconds=window_seconds,
             neighbor_count=neighbor_count,
             previous_neighbor_count=previous_neighbor_count,
@@ -121,12 +229,17 @@ def query_project(
             frame_lookup=frame_lookup,
             window_config=window_config,
         ).to_dict()
+        _add_visual_hit_frames_to_window(
+            evidence_window=evidence_window,
+            entries=entries,
+            frame_lookup=frame_lookup,
+        )
         window_visual_entities = _window_visual_entities(
             evidence_window=evidence_window,
             visual_entities=visual_entities,
         )
         linked_entities = _linked_entities_for_segment(
-            segment_id=candidate.segment_id,
+            segment_id=target_segment_id,
             evidence_window=evidence_window,
             links_by_segment=links_by_segment,
             entity_lookup=entity_lookup,
@@ -141,17 +254,37 @@ def query_project(
             if entity_id and entity_id not in window_entity_ids:
                 window_visual_entities.append(entity)
                 window_entity_ids.add(entity_id)
+        for entry in entries:
+            if entry.get("source") != VISUAL_ENTITY_HIT_SOURCE:
+                continue
+            entity = entry.get("entity")
+            if not isinstance(entity, VisualEntity):
+                continue
+            entity_id = entity.entity_id
+            if entity_id and entity_id not in window_entity_ids:
+                window_visual_entities.append(entity.to_dict())
+                window_entity_ids.add(entity_id)
         window_visual_entities.sort(key=_serialized_entity_sort_key)
 
-        summary = _bundle_summary(
+        summary = _bundle_summary_from_dict(
             candidate=candidate,
             evidence_window=evidence_window,
             linked_entities=linked_entities,
+            display_rank=merged_rank,
         )
         bundles.append(
             {
-                "rank": candidate.rank,
-                "candidate": candidate.to_dict(),
+                "rank": merged_rank,
+                "candidate": candidate,
+                "retrieval_sources": retrieval_sources,
+                "merge": {
+                    "target_key": f"segment:{target_segment_id}",
+                    "target_segment_id": target_segment_id,
+                    "source_count": len(retrieval_sources),
+                    "selected_source": primary_entry["source"],
+                    "selected_rank": primary_entry["rank"],
+                    "deduplicated": len(retrieval_sources) > 1,
+                },
                 "evidence_window": evidence_window,
                 "visual_entities": window_visual_entities,
                 "linked_entities": linked_entities,
@@ -174,8 +307,12 @@ def query_project(
     return {
         "query": query,
         "index": index_uid,
+        "visual_index": visual_index_uid,
         "project_id": _project_id(segments=segments, project_dir=resolved_project_dir),
-        "processing_time_ms": search_response.get("processingTimeMs"),
+        "processing_time_ms": _combined_processing_time_ms(
+            search_response,
+            visual_search_response,
+        ),
         "paths": {
             "project_dir": str(resolved_project_dir),
             "segments": str(resolved_segments_path),
@@ -193,11 +330,24 @@ def query_project(
             "domain_lexicon": domain_lexicon.enabled,
         },
         "retrieval_context": {
+            "indexes": {
+                "segment": index_uid,
+                "visual_entity": visual_index_uid,
+            },
+            "searches": {
+                "segment": _search_metadata(search_response, index_uid),
+                "visual_entity": _search_metadata(visual_search_response, visual_index_uid)
+                if visual_index_uid
+                else None,
+            },
             "window_config": window_config,
             "rerank": rerank_context,
         },
         "counts": {
-            "search_hits": len(hits),
+            "search_hits": len(segment_hits) + len(visual_hits),
+            "segment_search_hits": len(segment_hits),
+            "visual_entity_search_hits": len(visual_hits),
+            "merged_candidate_targets": len(entries_by_target),
             "bundles": len(bundles),
             "skipped_hits": len(warnings),
             "project_segments": len(segments),
@@ -212,6 +362,279 @@ def query_project(
         "candidates": candidates,
         "bundles": bundles,
     }
+
+
+def _visual_entity_from_hit(
+    *,
+    hit: dict[str, Any],
+    entity_lookup: dict[str, VisualEntity],
+) -> VisualEntity:
+    entity_id = str(hit.get("entity_id", ""))
+    existing = entity_lookup.get(entity_id)
+    if existing is not None:
+        return existing
+    return VisualEntity.from_dict(hit)
+
+
+def _visual_entity_candidate_from_hit(
+    *,
+    rank: int,
+    hit: dict[str, Any],
+    entity: VisualEntity,
+    target_segment_id: str | None,
+    target: dict[str, Any] | None,
+) -> dict[str, Any]:
+    target = target or {}
+    transcript = str(target.get("transcript_text", ""))
+    timestamp = entity.timestamp
+    visual_text = _visual_entity_text(entity)
+    return {
+        "rank": rank,
+        "source": VISUAL_ENTITY_HIT_SOURCE,
+        "segment_id": target_segment_id or "",
+        "sample_id": str(target.get("sample_id", "")),
+        "video_id": str(target.get("video_id", hit.get("video_id", ""))),
+        "start_time": timestamp,
+        "end_time": timestamp,
+        "timestamp_center": timestamp,
+        "transcript_excerpt": transcript[:360] + ("..." if len(transcript) > 360 else ""),
+        "score": optional_float(hit.get("_rankingScore")),
+        "entity_id": entity.entity_id,
+        "frame_id": entity.frame_id,
+        "frame_path": entity.frame_path,
+        "visual_entity_text": visual_text,
+        "visual_description": entity.visual_description,
+        "entity_type": entity.entity_type,
+        "confidence": entity.confidence,
+        "target_segment_start_time": optional_float(target.get("start_time")),
+        "target_segment_end_time": optional_float(target.get("end_time")),
+        "target_segment_timestamp_center": optional_float(target.get("timestamp_center")),
+    }
+
+
+def _resolve_visual_entity_target_segment(
+    *,
+    hit: dict[str, Any],
+    entity: VisualEntity,
+    segments: list[dict[str, Any]],
+    segment_lookup: dict[str, dict[str, Any]],
+    links_by_entity: dict[str, list[EntityLink]],
+) -> tuple[str | None, dict[str, Any]]:
+    hit_segment_id = str(hit.get("segment_id", "")).strip()
+    if hit_segment_id and hit_segment_id in segment_lookup:
+        return hit_segment_id, {"method": "hit_segment_id", "segment_id": hit_segment_id}
+
+    link = _best_entity_link(
+        entity_id=entity.entity_id,
+        links_by_entity=links_by_entity,
+        segment_lookup=segment_lookup,
+    )
+    if link is not None:
+        return link.segment_id, {
+            "method": "entity_link",
+            "segment_id": link.segment_id,
+            "link_id": link.link_id,
+            "score": link.score,
+        }
+
+    frame_candidates = [
+        segment
+        for segment in segments
+        if entity.frame_id and entity.frame_id in {str(ref) for ref in segment.get("frame_refs") or []}
+    ]
+    if frame_candidates:
+        selected = _nearest_segment_to_timestamp(
+            segments=frame_candidates,
+            timestamp=entity.timestamp,
+        )
+        segment_id = str(selected.get("segment_id", ""))
+        return segment_id, {
+            "method": "frame_ref",
+            "segment_id": segment_id,
+            "frame_id": entity.frame_id,
+        }
+
+    if entity.timestamp is not None and segments:
+        selected = _nearest_segment_to_timestamp(
+            segments=segments,
+            timestamp=entity.timestamp,
+        )
+        segment_id = str(selected.get("segment_id", ""))
+        return segment_id, {
+            "method": "timestamp_nearest",
+            "segment_id": segment_id,
+            "timestamp": entity.timestamp,
+        }
+
+    return None, {"method": "unresolved"}
+
+
+def _best_entity_link(
+    *,
+    entity_id: str,
+    links_by_entity: dict[str, list[EntityLink]],
+    segment_lookup: dict[str, dict[str, Any]],
+) -> EntityLink | None:
+    links = [link for link in links_by_entity.get(entity_id, []) if link.segment_id in segment_lookup]
+    if not links:
+        return None
+    return sorted(
+        links,
+        key=lambda link: (
+            -link.score,
+            _segment_lookup_sort_key(segment_lookup[link.segment_id]),
+            link.segment_id,
+            link.link_id,
+        ),
+    )[0]
+
+
+def _nearest_segment_to_timestamp(
+    *,
+    segments: list[dict[str, Any]],
+    timestamp: float | None,
+) -> dict[str, Any]:
+    if not segments:
+        raise ValueError("segments must not be empty")
+    return sorted(
+        enumerate(segments),
+        key=lambda item: (
+            _segment_timestamp_distance(item[1], timestamp),
+            segment_sort_key(item[1], item[0]),
+            str(item[1].get("segment_id", "")),
+        ),
+    )[0][1]
+
+
+def _segment_lookup_sort_key(segment: dict[str, Any]) -> tuple[float, int]:
+    sample_index = _optional_int(segment.get("sample_index")) or 0
+    return segment_sort_key(segment, sample_index)
+
+
+def _segment_timestamp_distance(segment: dict[str, Any], timestamp: float | None) -> float:
+    if timestamp is None:
+        return float("inf")
+    window = segment_window(segment)
+    if window is None:
+        center = optional_float(segment.get("timestamp_center"))
+        if center is None:
+            return float("inf")
+        return abs(center - timestamp)
+    if window[0] <= timestamp <= window[1]:
+        return 0.0
+    return min(abs(timestamp - window[0]), abs(timestamp - window[1]))
+
+
+def _primary_retrieval_entry(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    return sorted(entries, key=_retrieval_entry_merge_key)[0]
+
+
+def _target_merge_sort_key(
+    target_segment_id: str,
+    entries: list[dict[str, Any]],
+) -> tuple[int, int, str, str]:
+    primary = _primary_retrieval_entry(entries)
+    rank, priority, discriminator = _retrieval_entry_merge_key(primary)
+    return rank, priority, target_segment_id, discriminator
+
+
+def _retrieval_entry_merge_key(entry: dict[str, Any]) -> tuple[int, int, str]:
+    source = str(entry.get("source", ""))
+    rank = _optional_int(entry.get("rank")) or 0
+    rank = rank if rank > 0 else 10**9
+    priority = SOURCE_PRIORITY.get(source, 99)
+    candidate = entry.get("candidate") if isinstance(entry.get("candidate"), dict) else {}
+    discriminator = str(candidate.get("entity_id") or candidate.get("segment_id") or "")
+    return rank, priority, discriminator
+
+
+def _retrieval_source_sort_key(entry: dict[str, Any]) -> tuple[int, int, str]:
+    source = str(entry.get("source", ""))
+    rank = _optional_int(entry.get("rank")) or 0
+    return SOURCE_PRIORITY.get(source, 99), rank, str(entry.get("target_segment_id", ""))
+
+
+def _retrieval_source_summary(entry: dict[str, Any]) -> dict[str, Any]:
+    candidate = entry.get("candidate") if isinstance(entry.get("candidate"), dict) else {}
+    summary = {
+        "source": entry.get("source"),
+        "index": entry.get("index"),
+        "rank": entry.get("rank"),
+        "score": entry.get("score"),
+        "target_segment_id": entry.get("target_segment_id"),
+    }
+    if entry.get("source") == VISUAL_ENTITY_HIT_SOURCE:
+        summary.update(
+            {
+                "entity_id": candidate.get("entity_id"),
+                "frame_id": candidate.get("frame_id"),
+                "timestamp": candidate.get("timestamp_center"),
+                "visual_entity_text": candidate.get("visual_entity_text"),
+                "target_resolution": entry.get("target_resolution"),
+            }
+        )
+    return summary
+
+
+def _add_visual_hit_frames_to_window(
+    *,
+    evidence_window: dict[str, Any],
+    entries: list[dict[str, Any]],
+    frame_lookup: dict[str, dict[str, Any]],
+) -> None:
+    frame_refs = evidence_window.setdefault("frame_refs", [])
+    if not isinstance(frame_refs, list):
+        frame_refs = []
+        evidence_window["frame_refs"] = frame_refs
+    seen = {
+        str(frame.get("frame_id", ""))
+        for frame in frame_refs
+        if isinstance(frame, dict) and frame.get("frame_id") is not None
+    }
+    for entry in entries:
+        if entry.get("source") != VISUAL_ENTITY_HIT_SOURCE:
+            continue
+        entity = entry.get("entity")
+        if not isinstance(entity, VisualEntity) or not entity.frame_id or entity.frame_id in seen:
+            continue
+        frame = dict(frame_lookup.get(entity.frame_id, {}))
+        frame.setdefault("frame_id", entity.frame_id)
+        if entity.timestamp is not None:
+            frame.setdefault("timestamp", entity.timestamp)
+        if entity.frame_path:
+            frame.setdefault("frame_path", entity.frame_path)
+        frame_refs.append(frame)
+        seen.add(entity.frame_id)
+    frame_refs.sort(key=lambda frame: (optional_float(frame.get("timestamp")) is None, optional_float(frame.get("timestamp")) or 0.0, str(frame.get("frame_id", ""))))
+
+
+def _combined_processing_time_ms(
+    segment_response: dict[str, Any],
+    visual_response: dict[str, Any] | None,
+) -> int | float | None:
+    values = [
+        optional_float(response.get("processingTimeMs"))
+        for response in (segment_response, visual_response)
+        if isinstance(response, dict) and response.get("processingTimeMs") is not None
+    ]
+    if not values:
+        return None
+    total = sum(values)
+    return int(total) if total.is_integer() else total
+
+
+def _search_metadata(response: dict[str, Any] | None, index_uid: str | None) -> dict[str, Any] | None:
+    if response is None:
+        return None
+    return {
+        "index": index_uid,
+        "processing_time_ms": response.get("processingTimeMs"),
+        "hit_count": len(response.get("hits", [])),
+    }
+
+
+def _visual_entity_text(entity: VisualEntity) -> str:
+    return str(entity.text or entity.visual_description or "").strip()
 
 
 def _window_visual_entities(
@@ -337,9 +760,17 @@ def _bundle_summary_from_dict(
     if display_rank is not None and original_rank is not None and display_rank != original_rank:
         rank_label = f"#{display_rank} (orig #{original_rank})"
 
+    visual_entity_text = str(candidate.get("visual_entity_text", "")).strip()
+    if candidate.get("source") == VISUAL_ENTITY_HIT_SOURCE:
+        main_excerpt = f"visual_entity={visual_entity_text or '(empty visual entity)'}"
+        if transcript_excerpt:
+            main_excerpt += f" | transcript={transcript_excerpt}"
+    else:
+        main_excerpt = transcript_excerpt or "(empty transcript)"
+
     summary_text = (
         f"{rank_label} {candidate.get('video_id')} {time_label}: "
-        f"{transcript_excerpt or '(empty transcript)'} | "
+        f"{main_excerpt} | "
         f"frames={len(evidence_window.get('frame_refs') or [])} | "
         f"linked_entities={', '.join(linked_entity_labels[:3]) or 'none'}"
     )
@@ -348,6 +779,7 @@ def _bundle_summary_from_dict(
         "frame_paths": frame_paths,
         "linked_entity_labels": linked_entity_labels,
         "transcript_excerpt": transcript_excerpt,
+        "visual_entity_text": visual_entity_text or None,
     }
 
 

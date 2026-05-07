@@ -28,12 +28,18 @@ from .io import write_json
 from .meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_SETTINGS,
+    VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     MeiliClient,
     lecture_segment_settings_profile_names,
+    visual_entity_settings_profile_names,
 )
 from .neo4j import check_neo4j_health
 from .project_query import query_project
-from .project_index import index_project_segments, project_dir_from_args
+from .project_index import (
+    index_project_segments,
+    index_project_visual_entities,
+    project_dir_from_args,
+)
 from .schemas import SearchCandidate
 from .stt import DEFAULT_MLX_WHISPER_MODEL
 from .visual_entities import extract_visual_entities
@@ -127,6 +133,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Meilisearch settings profile to apply to lecture_segments.",
     )
     index_project.set_defaults(func=cmd_index_project)
+
+    index_visual_entities = subparsers.add_parser(
+        "index-project-visual-entities",
+        help="Index a local project visual_entities JSONL",
+    )
+    index_visual_entities.add_argument("--index", required=True)
+    location = index_visual_entities.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    index_visual_entities.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Optional visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    index_visual_entities.add_argument("--batch-size", type=int, default=500)
+    index_visual_entities.add_argument("--reset", action="store_true")
+    index_visual_entities.add_argument(
+        "--settings-profile",
+        choices=visual_entity_settings_profile_names(),
+        default=VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+        help="Meilisearch settings profile to apply to visual_entities.",
+    )
+    index_visual_entities.set_defaults(func=cmd_index_project_visual_entities)
 
     ingest = subparsers.add_parser("ingest-video", help="Ingest a local lecture video")
     ingest.add_argument("--video", required=True, type=Path)
@@ -510,6 +539,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Search a local project and return multimodal evidence bundles",
     )
     query_project.add_argument("--index", required=True)
+    query_project.add_argument(
+        "--visual-index",
+        help="Optional Meilisearch index containing visual_entities documents.",
+    )
     location = query_project.add_mutually_exclusive_group(required=True)
     location.add_argument("--project-id", help="Project ID under artifacts/projects/")
     location.add_argument("--project-dir", type=Path, help="Project artifact directory")
@@ -866,6 +899,21 @@ def cmd_index_project(args: argparse.Namespace) -> None:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def cmd_index_project_visual_entities(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = index_project_visual_entities(
+        client,
+        index_uid=args.index,
+        project_dir=project_dir,
+        batch_size=args.batch_size,
+        reset=args.reset,
+        visual_entities=args.visual_entities,
+        settings_profile=args.settings_profile,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
 def cmd_ingest_video(args: argparse.Namespace) -> None:
     output_root = args.output_root
     if not output_root.is_absolute():
@@ -1085,6 +1133,7 @@ def cmd_query_project(args: argparse.Namespace) -> None:
     response = query_project(
         client=client,
         index_uid=args.index,
+        visual_index_uid=args.visual_index,
         project_dir=project_dir,
         query=args.query,
         limit=args.limit,

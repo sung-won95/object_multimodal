@@ -19,6 +19,7 @@ from .schemas import (
 LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE = "lecture_segments_legacy_v0"
 LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE = "lecture_segments_default_v1"
 LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE = "lecture_segments_default_v2"
+VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE = "visual_entities_default_v1"
 
 LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE: {
@@ -202,6 +203,71 @@ LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 
+VISUAL_ENTITY_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
+    VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE: {
+        "searchableAttributes": [
+            "text",
+            "visual_description",
+            "entity_type",
+            "frame_id",
+            "source_model",
+        ],
+        "filterableAttributes": [
+            "project_id",
+            "frame_id",
+            "entity_id",
+            "entity_type",
+            "source",
+            "source_model",
+            "timestamp",
+        ],
+        "sortableAttributes": [
+            "timestamp",
+            "confidence",
+        ],
+        "displayedAttributes": [
+            "entity_id",
+            "project_id",
+            "frame_id",
+            "timestamp",
+            "frame_path",
+            "bbox",
+            "text",
+            "entity_type",
+            "confidence",
+            "source",
+            "visual_description",
+            "position",
+            "relations",
+            "parser_version",
+            "source_model",
+        ],
+        "rankingRules": [
+            "words",
+            "typo",
+            "proximity",
+            "attribute",
+            "sort",
+            "exactness",
+        ],
+        "stopWords": [],
+        "synonyms": {},
+        "typoTolerance": {
+            "enabled": True,
+            "minWordSizeForTypos": {
+                "oneTypo": 5,
+                "twoTypos": 9,
+            },
+            "disableOnAttributes": [
+                "frame_id",
+                "entity_id",
+                "source_model",
+            ],
+            "disableOnWords": [],
+        },
+    },
+}
+
 
 def lecture_segment_settings(
     profile: str = LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
@@ -235,6 +301,42 @@ def lecture_segment_settings_snapshot(
     return {
         "profile": profile,
         "hash": lecture_segment_settings_hash(payload),
+        "settings": payload,
+    }
+
+
+def visual_entity_settings(
+    profile: str = VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+) -> dict[str, Any]:
+    if profile not in VISUAL_ENTITY_SETTINGS_PROFILES:
+        valid = ", ".join(sorted(VISUAL_ENTITY_SETTINGS_PROFILES))
+        raise ValueError(f"Unknown visual entity settings profile: {profile}. Valid profiles: {valid}")
+    return copy.deepcopy(VISUAL_ENTITY_SETTINGS_PROFILES[profile])
+
+
+def visual_entity_settings_profile_names() -> list[str]:
+    return sorted(VISUAL_ENTITY_SETTINGS_PROFILES)
+
+
+def visual_entity_settings_hash(
+    settings: dict[str, Any] | None = None,
+    *,
+    profile: str = VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+) -> str:
+    payload = visual_entity_settings(profile) if settings is None else settings
+    encoded = _canonical_settings_json(payload).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def visual_entity_settings_snapshot(
+    settings: dict[str, Any] | None = None,
+    *,
+    profile: str = VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+) -> dict[str, Any]:
+    payload = visual_entity_settings(profile) if settings is None else copy.deepcopy(settings)
+    return {
+        "profile": profile,
+        "hash": visual_entity_settings_hash(payload),
         "settings": payload,
     }
 
