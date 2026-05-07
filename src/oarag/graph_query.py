@@ -300,10 +300,14 @@ MATCH (start:GraphNode:Segment {{project_id: $project_id, segment_id: $segment_i
 CALL {{
   WITH start
   MATCH path=(source:GraphNode:Segment)-[:NEXT_SEGMENT*1..{depth}]->(start)
+  WHERE all(segment IN nodes(path) WHERE segment.project_id = $project_id)
   OPTIONAL MATCH (source)-[:MENTIONS]->(concept:GraphNode:Concept)
   OPTIONAL MATCH (entity:GraphNode:VisualEntity)-[:REPRESENTS]->(concept)
+  WHERE entity.project_id = $project_id
   OPTIONAL MATCH (entity_frame:GraphNode:Frame)-[:CONTAINS]->(entity)
+  WHERE entity_frame.project_id = $project_id
   OPTIONAL MATCH (source)-[:ALIGNED_WITH]->(aligned_frame:GraphNode:Frame)
+  WHERE aligned_frame.project_id = $project_id
   RETURN 'previous_segment' AS type, start, source, concept, entity AS visual_entity,
          coalesce(entity_frame, aligned_frame) AS frame,
          [node IN nodes(path) | node.key]
@@ -315,15 +319,19 @@ CALL {{
   UNION
   WITH start
   MATCH (start)-[ref:REFERS_TO]->(reference:GraphNode:ReferenceMention)-[res:RESOLVES_TO]->(target:GraphNode)
+  WHERE target.project_id IS NULL OR target.project_id = $project_id
   OPTIONAL MATCH (target)-[:MENTIONS]->(target_concept:GraphNode:Concept)
   OPTIONAL MATCH (target)-[:ALIGNED_WITH]->(segment_frame:GraphNode:Frame)
+  WHERE segment_frame.project_id = $project_id
   OPTIONAL MATCH (target)-[:CONTAINS]->(contained_entity:GraphNode:VisualEntity)
+  WHERE contained_entity.project_id = $project_id
   OPTIONAL MATCH (entity_frame:GraphNode:Frame)-[:CONTAINS]->(target)
+  WHERE entity_frame.project_id = $project_id
   RETURN 'reference_resolution' AS type, start,
          CASE WHEN target:Segment THEN target ELSE null END AS source,
          CASE WHEN target:Concept THEN target ELSE target_concept END AS concept,
          CASE WHEN target:VisualEntity THEN target ELSE contained_entity END AS visual_entity,
-         coalesce(segment_frame, entity_frame) AS frame,
+         CASE WHEN target:Frame THEN target ELSE coalesce(segment_frame, entity_frame) END AS frame,
          [start.key, reference.key, target.key] AS graph_path,
          coalesce(res.reason, ref.reason, reference.reason, 'Reference mention resolved in graph') AS reason,
          coalesce(res.evidence, ref.evidence, reference.evidence, ['REFERS_TO', 'RESOLVES_TO']) AS evidence,
@@ -332,7 +340,9 @@ CALL {{
   WITH start
   MATCH (start)-[:MENTIONS]->(concept:GraphNode:Concept)
   OPTIONAL MATCH (entity:GraphNode:VisualEntity)-[:REPRESENTS]->(concept)
+  WHERE entity.project_id = $project_id
   OPTIONAL MATCH (frame:GraphNode:Frame)-[:CONTAINS]->(entity)
+  WHERE frame.project_id = $project_id
   RETURN 'concept_visual_expansion' AS type, start, null AS source, concept, entity AS visual_entity, frame,
          [start.key, concept.key] + CASE WHEN entity IS NULL THEN [] ELSE [entity.key] END AS graph_path,
          'Candidate segment concept expanded to linked visual evidence' AS reason,

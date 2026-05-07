@@ -9,6 +9,7 @@ from oarag.graph_query import (
     GraphTraversalConfig,
     detect_graph_query_hints,
     graph_query,
+    graph_traversal_cypher,
     run_graph_traversal,
     serialize_traversal_record,
 )
@@ -112,6 +113,21 @@ def test_run_graph_traversal_returns_previous_concept_and_visual_evidence() -> N
     assert evidence[0]["source_segment"]["segment_id"] == "seg_1"
     assert evidence[0]["resolved_concept"]["canonical"] == "pot odds"
     assert "ALIGNED_WITH" in evidence[0]["evidence"]
+
+
+def test_graph_traversal_cypher_scopes_project_evidence_nodes() -> None:
+    cypher = graph_traversal_cypher(lookback_segments=3)
+
+    assert "MATCH (start:GraphNode:Segment {project_id: $project_id, segment_id: $segment_id})" in cypher
+    assert "WHERE all(segment IN nodes(path) WHERE segment.project_id = $project_id)" in cypher
+    assert cypher.count("WHERE entity.project_id = $project_id") == 2
+    assert "WHERE entity_frame.project_id = $project_id" in cypher
+    assert "WHERE aligned_frame.project_id = $project_id" in cypher
+    assert "WHERE target.project_id IS NULL OR target.project_id = $project_id" in cypher
+    assert "WHERE segment_frame.project_id = $project_id" in cypher
+    assert "WHERE contained_entity.project_id = $project_id" in cypher
+    assert "WHERE frame.project_id = $project_id" in cypher
+    assert "CASE WHEN target:Frame THEN target ELSE coalesce(segment_frame, entity_frame) END AS frame" in cypher
 
 
 def test_graph_query_extends_query_project_response_with_graph_summary(tmp_path: Path) -> None:
