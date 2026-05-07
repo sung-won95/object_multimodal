@@ -1,5 +1,9 @@
 from oarag.schemas import (
     AUDIO_VISUAL_CONSISTENCY_ARTIFACT,
+    LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
+    LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+    LECTURE_SEGMENT_TEXT_SEMANTIC_SOURCE_FIELDS,
+    LECTURE_SEGMENT_VISUAL_SEMANTIC_SOURCE_FIELDS,
     VLM_ARTIFACT_PATHS,
     VLM_COMMON_RECORD_FIELDS,
     VLM_FRAME_CANDIDATES_ARTIFACT,
@@ -14,6 +18,7 @@ from oarag.schemas import (
     VLMVisualObservation,
     VisualEntity,
     build_vlm_project_manifest_fields,
+    ensure_lecture_segment_semantic_contract,
     mention_candidates,
 )
 
@@ -293,6 +298,83 @@ def test_local_transcript_segment_id_is_meili_safe() -> None:
     )
 
     assert segment.segment_id == "seg_10_Deviating_From_The_Charts_000001"
+
+
+def test_lecture_segment_to_dict_includes_semantic_contract() -> None:
+    segment = LectureSegment.from_local_transcript(
+        project_id="sample_project",
+        video_id="lecture_01",
+        seq_no=1,
+        start_time=0.0,
+        end_time=1.0,
+        text="Look at this matrix on the slide.",
+    )
+
+    encoded = segment.to_dict()
+
+    assert encoded[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] == (
+        "Look at this matrix on the slide. this matrix"
+    )
+    assert encoded[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] == [
+        "transcript_text",
+        "mention_candidates",
+    ]
+
+
+def test_semantic_contract_can_append_future_visual_entity_text() -> None:
+    document = ensure_lecture_segment_semantic_contract(
+        {
+            "segment_id": "seg_1",
+            "transcript_text": "The equation is rewritten here.",
+            "mention_candidates": ["equation"],
+            "visual_entities": [
+                {
+                    "text": "x + y = z",
+                    "visual_description": "Equation label centered on the slide",
+                },
+                {
+                    "text": "x + y = z",
+                    "visual_description": "",
+                },
+            ],
+        }
+    )
+
+    assert LECTURE_SEGMENT_TEXT_SEMANTIC_SOURCE_FIELDS == (
+        "transcript_text",
+        "mention_candidates",
+    )
+    assert LECTURE_SEGMENT_VISUAL_SEMANTIC_SOURCE_FIELDS == (
+        "visual_entities.text",
+        "visual_entities.visual_description",
+    )
+    assert document[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] == (
+        "The equation is rewritten here. equation x + y = z "
+        "Equation label centered on the slide"
+    )
+    assert document[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] == [
+        "transcript_text",
+        "mention_candidates",
+        "visual_entities.text",
+        "visual_entities.visual_description",
+    ]
+
+
+def test_semantic_contract_preserves_precomputed_fields() -> None:
+    document = ensure_lecture_segment_semantic_contract(
+        {
+            "segment_id": "seg_1",
+            "transcript_text": "Transcript text",
+            "semantic_text": "Precomputed visual search text",
+            "semantic_source_fields": ["transcript_text", "visual_entities.text"],
+        }
+    )
+
+    assert document[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] == "Precomputed visual search text"
+    assert document[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] == [
+        "transcript_text",
+        "visual_entities.text",
+    ]
 
 
 def test_evidence_window_keeps_additive_fields_optional() -> None:

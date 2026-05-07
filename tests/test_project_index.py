@@ -11,6 +11,11 @@ from oarag.meili import (
     lecture_segment_settings_hash,
 )
 from oarag.project_index import index_project_segments, segment_artifact_path
+from oarag.schemas import (
+    LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
+    LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+    ensure_lecture_segment_semantic_contract,
+)
 
 
 class FakeMeiliClient:
@@ -97,10 +102,11 @@ def test_index_project_segments_batches_documents(tmp_path: Path) -> None:
 
     add_calls = [call for call in client.calls if call[0] == "add_documents"]
     settings_call = next(call for call in client.calls if call[0] == "update_settings")
+    expected_rows = [ensure_lecture_segment_semantic_contract(row) for row in rows]
     assert len(add_calls) == 2
     assert add_calls[0][1] == "local_segments"
-    assert add_calls[0][2] == rows[:2]
-    assert add_calls[1][2] == rows[2:]
+    assert add_calls[0][2] == expected_rows[:2]
+    assert add_calls[1][2] == expected_rows[2:]
     assert settings_call[1] == "local_segments"
     assert ("delete_index", "local_segments") in client.calls
     assert summary["index"] == "local_segments"
@@ -114,6 +120,43 @@ def test_index_project_segments_batches_documents(tmp_path: Path) -> None:
         "hash": summary["settings_hash"],
         "settings": settings_call[2],
     }
+
+
+def test_index_project_segments_adds_semantic_contract_to_segment_only_documents(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    rows = [
+        {"segment_id": "s1", "transcript_text": "alpha transcript"},
+        {
+            "segment_id": "s2",
+            "transcript_text": "beta transcript",
+            "semantic_text": "custom beta retrieval text",
+            "semantic_source_fields": ["transcript_text", "visual_entities.text"],
+        },
+    ]
+    write_jsonl(segments_path, rows)
+    client = FakeMeiliClient()
+
+    index_project_segments(
+        client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        batch_size=10,
+    )
+
+    add_call = next(call for call in client.calls if call[0] == "add_documents")
+    documents = add_call[2]
+    assert documents[0][LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] == "alpha transcript"
+    assert documents[0][LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] == [
+        "transcript_text"
+    ]
+    assert documents[1][LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] == "custom beta retrieval text"
+    assert documents[1][LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] == [
+        "transcript_text",
+        "visual_entities.text",
+    ]
 
 
 def test_index_project_segments_can_use_legacy_settings_profile(tmp_path: Path) -> None:

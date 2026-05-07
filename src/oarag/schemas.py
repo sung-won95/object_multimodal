@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 from statistics import mean
-from typing import Any
+from typing import Any, Iterator
 
 
 VLM_SCHEMA_VERSION = "vlm-consistency-v1"
@@ -73,6 +73,24 @@ VLM_COUNT_FIELDS = (
     VLM_FRAME_CANDIDATES_ARTIFACT,
     VLM_VISUAL_OBSERVATIONS_ARTIFACT,
     AUDIO_VISUAL_CONSISTENCY_ARTIFACT,
+)
+
+LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD = "semantic_text"
+LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD = "semantic_source_fields"
+
+LECTURE_SEGMENT_TEXT_SEMANTIC_SOURCE_FIELDS = (
+    "transcript_text",
+    "mention_candidates",
+)
+
+LECTURE_SEGMENT_VISUAL_SEMANTIC_SOURCE_FIELDS = (
+    "visual_entities.text",
+    "visual_entities.visual_description",
+)
+
+LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELD_ORDER = (
+    *LECTURE_SEGMENT_TEXT_SEMANTIC_SOURCE_FIELDS,
+    *LECTURE_SEGMENT_VISUAL_SEMANTIC_SOURCE_FIELDS,
 )
 
 
@@ -153,6 +171,96 @@ def mention_candidates(text: str) -> list[str]:
     return [hint for hint in DEICTIC_HINTS if hint.lower() in lower]
 
 
+def build_lecture_segment_semantic_text(payload: dict[str, Any]) -> tuple[str, list[str]]:
+    pieces: list[str] = []
+    source_fields: list[str] = []
+    for source_field in LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELD_ORDER:
+        values = _semantic_source_values(payload, source_field)
+        text_values = _unique_text_values(values)
+        if not text_values:
+            continue
+        pieces.extend(text_values)
+        source_fields.append(source_field)
+    return _compact_text(" ".join(pieces)), source_fields
+
+
+def ensure_lecture_segment_semantic_contract(payload: dict[str, Any]) -> dict[str, Any]:
+    document = dict(payload)
+    computed_text, computed_source_fields = build_lecture_segment_semantic_text(document)
+
+    existing_text = _compact_text(str(document.get(LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD) or ""))
+    document[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] = existing_text or computed_text
+
+    existing_source_fields = _semantic_source_field_list(
+        document.get(LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD)
+    )
+    document[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] = (
+        existing_source_fields or computed_source_fields
+    )
+    return document
+
+
+def _semantic_source_values(payload: dict[str, Any], source_field: str) -> list[Any]:
+    values = list(_extract_path_values(payload, source_field.split(".")))
+    flattened: list[Any] = []
+    for value in values:
+        flattened.extend(_flatten_semantic_value(value))
+    return flattened
+
+
+def _extract_path_values(value: Any, parts: list[str]) -> Iterator[Any]:
+    if not parts:
+        yield value
+        return
+    if isinstance(value, dict):
+        child = value.get(parts[0])
+        if child is not None:
+            yield from _extract_path_values(child, parts[1:])
+    elif isinstance(value, list):
+        for item in value:
+            yield from _extract_path_values(item, parts)
+
+
+def _flatten_semantic_value(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        flattened: list[Any] = []
+        for item in value:
+            flattened.extend(_flatten_semantic_value(item))
+        return flattened
+    return [value]
+
+
+def _unique_text_values(values: list[Any]) -> list[str]:
+    text_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _compact_text(str(value))
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        text_values.append(text)
+    return text_values
+
+
+def _semantic_source_field_list(value: Any) -> list[str]:
+    raw_items = value if isinstance(value, list) else ([] if value is None else [value])
+    fields: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        field_name = _compact_text(str(item))
+        if not field_name or field_name in seen:
+            continue
+        seen.add(field_name)
+        fields.append(field_name)
+    return fields
+
+
+def _compact_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip())
+
+
 @dataclass(frozen=True)
 class EduVidQARecord:
     dataset_name: str
@@ -210,6 +318,28 @@ class LectureSegment:
     frame_refs: list[str] = field(default_factory=list)
     mention_candidates: list[str] = field(default_factory=list)
     source: str = "eduvidqa"
+    semantic_text: str = ""
+    semantic_source_fields: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        semantic_fields = ensure_lecture_segment_semantic_contract(
+            {
+                "transcript_text": self.transcript_text,
+                "mention_candidates": self.mention_candidates,
+                LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD: self.semantic_text,
+                LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD: self.semantic_source_fields,
+            }
+        )
+        object.__setattr__(
+            self,
+            LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+            semantic_fields[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD],
+        )
+        object.__setattr__(
+            self,
+            LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
+            semantic_fields[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD],
+        )
 
     @classmethod
     def from_eduvidqa(
