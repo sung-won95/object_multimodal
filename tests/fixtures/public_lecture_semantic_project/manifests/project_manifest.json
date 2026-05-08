@@ -1,0 +1,9 @@
+{
+  "project_id": "public_semantic_fixture",
+  "fixture_type": "public_synthetic",
+  "description": "Synthetic lecture fixture for Meilisearch-backed semantic retrieval smoke tests.",
+  "artifacts": {
+    "segments": "segments/lecture_segments.jsonl",
+    "frames_manifest": "manifests/frames_manifest.jsonl"
+  }
+}

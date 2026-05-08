@@ -61,6 +61,28 @@ python -m pytest
 
 The pytest configuration adds `src` to the test import path, so `PYTHONPATH=src` is not required for tests.
 
+Run the public synthetic Meilisearch semantic retrieval smoke:
+
+```bash
+docker compose up -d meilisearch
+
+PYTHONPATH=src python -m oarag index-project \
+  --project-dir tests/fixtures/public_lecture_semantic_project \
+  --index public_lecture_semantic_fixture \
+  --reset
+
+PYTHONPATH=src python -m oarag query-project \
+  --project-dir tests/fixtures/public_lecture_semantic_project \
+  --index public_lecture_semantic_fixture \
+  --query "slope information lower loss" \
+  --limit 2 \
+  --neighbor-count 0
+```
+
+The same path is covered by `python -m pytest tests/test_meili_semantic_smoke.py -q -rs`.
+Set `OARAG_MEILI_URL` or `OARAG_MEILI_API_KEY` when using a non-default local server.
+If Meilisearch is not running, the pytest smoke reports a clear skip instead of a failure.
+
 ## Retrieval Benchmark
 
 Run cross-domain retrieval benchmarks from a JSON manifest:

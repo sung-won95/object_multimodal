@@ -385,6 +385,9 @@ class MeiliClient:
         payload = self._request("PATCH", f"/indexes/{quote(index_uid)}/settings", settings)
         return MeiliTask(uid=int(payload["taskUid"]))
 
+    def get_settings(self, index_uid: str) -> dict[str, Any]:
+        return self._request("GET", f"/indexes/{quote(index_uid)}/settings")
+
     def add_documents(self, index_uid: str, documents: list[dict[str, Any]]) -> MeiliTask:
         payload = self._request("POST", f"/indexes/{quote(index_uid)}/documents", documents)
         return MeiliTask(uid=int(payload["taskUid"]))
