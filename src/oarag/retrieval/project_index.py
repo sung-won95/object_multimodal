@@ -112,7 +112,7 @@ def index_project_segments(
     settings_snapshot = lecture_segment_settings_snapshot(settings, profile=settings_profile)
 
     if reset:
-        client.wait_task(client.delete_index(index_uid))
+        client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
     client.wait_task(client.create_index(index_uid, primary_key="segment_id"))
     client.wait_task(client.update_settings(index_uid, settings))
 
@@ -156,7 +156,7 @@ def index_project_visual_entities(
     settings_snapshot = visual_entity_settings_snapshot(settings, profile=settings_profile)
 
     if reset:
-        client.wait_task(client.delete_index(index_uid))
+        client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
     client.wait_task(client.create_index(index_uid, primary_key="entity_id"))
     client.wait_task(client.update_settings(index_uid, settings))
 
