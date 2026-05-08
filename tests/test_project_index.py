@@ -8,6 +8,7 @@ import pytest
 from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+    MeiliTaskError,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     lecture_segment_settings_hash,
     visual_entity_settings_hash,
@@ -29,8 +30,8 @@ class FakeMeiliClient:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def wait_task(self, task):
-        self.calls.append(("wait_task", task))
+    def wait_task(self, task, **kwargs):
+        self.calls.append(("wait_task", task, kwargs))
         return {"status": "succeeded"}
 
     def delete_index(self, uid: str):
@@ -48,6 +49,28 @@ class FakeMeiliClient:
     def add_documents(self, index_uid: str, documents: list[dict]):
         self.calls.append(("add_documents", index_uid, documents))
         return {"taskUid": 4}
+
+
+class DeleteFailureMeiliClient(FakeMeiliClient):
+    def __init__(self, error_code: str) -> None:
+        super().__init__()
+        self.error_code = error_code
+
+    def wait_task(self, task, **kwargs):
+        self.calls.append(("wait_task", task, kwargs))
+        if task == {"taskUid": 1}:
+            payload = {
+                "status": "failed",
+                "error": {
+                    "code": self.error_code,
+                    "message": "delete failed",
+                },
+            }
+            ignored_error_codes = set(kwargs.get("ignored_error_codes", ()))
+            if self.error_code in ignored_error_codes:
+                return payload
+            raise MeiliTaskError(1, "failed", payload)
+        return {"status": "succeeded"}
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -196,6 +219,44 @@ def test_index_project_segments_can_use_legacy_settings_profile(tmp_path: Path) 
         settings_call[2],
         profile=LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
     )
+
+
+def test_index_project_segments_reset_treats_missing_index_as_noop(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(segments_path, [{"segment_id": "s1", "transcript_text": "alpha"}])
+    client = DeleteFailureMeiliClient("index_not_found")
+
+    summary = index_project_segments(
+        client,
+        index_uid="fresh_segments",
+        project_dir=project_dir,
+        reset=True,
+    )
+
+    delete_wait = next(call for call in client.calls if call[0] == "wait_task")
+    assert delete_wait[2]["ignored_error_codes"] == {"index_not_found"}
+    assert ("create_index", "fresh_segments", "segment_id") in client.calls
+    assert summary["indexed_documents"] == 1
+
+
+def test_index_project_segments_reset_propagates_non_missing_delete_failure(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(segments_path, [{"segment_id": "s1", "transcript_text": "alpha"}])
+    client = DeleteFailureMeiliClient("internal")
+
+    with pytest.raises(MeiliTaskError, match="Meilisearch task 1 ended with status failed"):
+        index_project_segments(
+            client,
+            index_uid="broken_segments",
+            project_dir=project_dir,
+            reset=True,
+        )
+
+    assert ("create_index", "broken_segments", "segment_id") not in client.calls
 
 
 def test_index_project_visual_entities_batches_documents(tmp_path: Path) -> None:

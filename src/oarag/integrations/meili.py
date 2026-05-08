@@ -8,7 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from oarag.core.schemas import (
     LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
@@ -354,6 +354,14 @@ class MeiliTask:
     status: str | None = None
 
 
+class MeiliTaskError(RuntimeError):
+    def __init__(self, task_uid: int, status: str, payload: dict[str, Any]) -> None:
+        self.task_uid = task_uid
+        self.status = status
+        self.payload = payload
+        super().__init__(f"Meilisearch task {task_uid} ended with status {status}: {payload}")
+
+
 class MeiliClient:
     def __init__(self, base_url: str, api_key: str | None = None, timeout: float = 30.0) -> None:
         self.base_url = base_url.rstrip("/")
@@ -406,16 +414,24 @@ class MeiliClient:
         }
         return self._request("POST", f"/indexes/{quote(index_uid)}/search", payload)
 
-    def wait_task(self, task: MeiliTask | None, timeout_seconds: float = 60.0) -> dict[str, Any] | None:
+    def wait_task(
+        self,
+        task: MeiliTask | None,
+        timeout_seconds: float = 60.0,
+        ignored_error_codes: Iterable[str] = (),
+    ) -> dict[str, Any] | None:
         if task is None:
             return None
+        ignored_error_codes = set(ignored_error_codes)
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             payload = self._request("GET", f"/tasks/{task.uid}")
             status = payload.get("status")
             if status in {"succeeded", "failed", "canceled"}:
                 if status != "succeeded":
-                    raise RuntimeError(f"Meilisearch task {task.uid} ended with status {status}: {payload}")
+                    if _task_error_code(payload) in ignored_error_codes:
+                        return payload
+                    raise MeiliTaskError(task.uid, status, payload)
                 return payload
             time.sleep(0.2)
         raise TimeoutError(f"Timed out waiting for Meilisearch task {task.uid}")
@@ -439,6 +455,15 @@ class MeiliClient:
         if not data:
             return {}
         return json.loads(data.decode("utf-8"))
+
+
+def _task_error_code(payload: dict[str, Any]) -> str | None:
+    error = payload.get("error")
+    if isinstance(error, dict):
+        code = error.get("code")
+        if isinstance(code, str):
+            return code
+    return None
 
 
 def quote(value: str) -> str:
