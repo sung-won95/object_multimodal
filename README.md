@@ -18,6 +18,13 @@ Start Meilisearch:
 docker compose up -d meilisearch
 ```
 
+When verifying from multiple git worktrees, pass a unique Compose project name
+to keep Docker resources separate:
+
+```bash
+docker compose -p oarag_issue_82 up -d meilisearch
+```
+
 Check health:
 
 ```bash
@@ -82,6 +89,9 @@ PYTHONPATH=src python -m oarag query-project \
 The same path is covered by `python -m pytest tests/test_meili_semantic_smoke.py -q -rs`.
 Set `OARAG_MEILI_URL` or `OARAG_MEILI_API_KEY` when using a non-default local server.
 If Meilisearch is not running, the pytest smoke reports a clear skip instead of a failure.
+For concurrent worktrees, keep the Compose project name unique; host port
+`7700` is still shared, so only one default-port Meilisearch instance can run
+at a time.
 
 ## Retrieval Benchmark
 
