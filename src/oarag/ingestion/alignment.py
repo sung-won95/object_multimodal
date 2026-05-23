@@ -64,10 +64,19 @@ def align_segments_to_frames(
         "segment_frame_coverage_ratio": (
             round(segments_with_frames / len(segments), 4) if segments else None
         ),
+        "frame_free_segment_ratio": (
+            round((len(segments) - segments_with_frames) / len(segments), 4)
+            if segments
+            else None
+        ),
         "frame_refs_total": total_frame_refs,
         "unique_frames_referenced": len(referenced_frames),
         "available_frames": len(frames),
         "available_frame_time_span_sec": _frame_time_span(frames),
+        "available_frame_temporal_coverage_ratio": _frame_temporal_coverage_ratio(
+            frames=frames,
+            segments=segments,
+        ),
     }
     _update_project_manifest(
         manifest_path=resolved_manifest_path,
@@ -141,6 +150,32 @@ def _frame_time_span(frames: list[dict[str, Any]]) -> float | None:
     if not timestamps:
         return None
     return round(max(timestamps) - min(timestamps), 3)
+
+
+def _frame_temporal_coverage_ratio(
+    *,
+    frames: list[dict[str, Any]],
+    segments: list[dict[str, Any]],
+) -> float | None:
+    timestamps = [
+        timestamp
+        for timestamp in (_optional_float(frame.get("timestamp")) for frame in frames)
+        if timestamp is not None
+    ]
+    windows = [
+        window
+        for window in (_segment_window(segment, margin_seconds=0.0) for segment in segments)
+        if window is not None
+    ]
+    if not timestamps or not windows:
+        return None
+    first_segment_start = min(window[0] for window in windows)
+    last_segment_end = max(window[1] for window in windows)
+    segment_span = last_segment_end - first_segment_start
+    if segment_span <= 0:
+        return None
+    frame_span = max(timestamps) - min(timestamps)
+    return round(min(1.0, frame_span / segment_span), 4)
 
 
 def _update_project_manifest(

@@ -130,6 +130,7 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
             duration_sec=probe.get("duration_sec"),
             frame_sampling=config.frame_sampling,
             frame_selection=config.frame_selection,
+            segments=_read_jsonl_dicts(segments_path),
         )
         frame_count = len(frame_result["frames"])
         write_frames_manifest(
@@ -308,6 +309,7 @@ def sample_frames(
     duration_sec: float | None = None,
     frame_sampling: str = "uniform",
     frame_selection: str = "none",
+    segments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if frame_rate <= 0:
         raise ValueError("frame_rate must be greater than 0")
@@ -325,6 +327,7 @@ def sample_frames(
         frame_rate=frame_rate,
         max_frames=max_frames,
         frame_sampling=frame_sampling,
+        segments=segments,
     )
 
     if selected_timestamps is None:
@@ -423,6 +426,7 @@ def sample_frames(
             frame_rate=frame_rate,
             max_frames=max_frames,
             frame_sampling=frame_sampling,
+            segments=segments,
         ),
         "selection_summary": selection_summary,
     }
@@ -434,6 +438,7 @@ def select_frame_timestamps(
     frame_rate: float,
     max_frames: int | None,
     frame_sampling: str,
+    segments: list[dict[str, Any]] | None = None,
 ) -> list[float] | None:
     if max_frames is None:
         return None
@@ -450,14 +455,32 @@ def select_frame_timestamps(
         return candidate_timestamps[:max_frames]
 
     if max_frames == 1:
+        segment_timestamps = _segment_representative_timestamps(
+            segments=segments,
+            duration_sec=duration_sec,
+        )
+        if segment_timestamps:
+            return [segment_timestamps[0]]
         return [candidate_timestamps[0]]
 
     max_index = len(candidate_timestamps) - 1
-    selected_indices = [
-        round(position * max_index / (max_frames - 1)) for position in range(max_frames)
+    uniform_timestamps = [
+        candidate_timestamps[round(position * max_index / (max_frames - 1))]
+        for position in range(max_frames)
     ]
-    deduped_indices = sorted(dict.fromkeys(int(index) for index in selected_indices))
-    return [candidate_timestamps[index] for index in deduped_indices]
+    segment_timestamps = _segment_representative_timestamps(
+        segments=segments,
+        duration_sec=duration_sec,
+    )
+    if not segment_timestamps:
+        return _dedupe_sorted_timestamps(uniform_timestamps)
+
+    selected = _spread_timestamps(segment_timestamps, min(max_frames, len(segment_timestamps)))
+    for timestamp in uniform_timestamps:
+        if len(selected) >= max_frames:
+            break
+        selected.append(timestamp)
+    return _dedupe_sorted_timestamps(selected)[:max_frames]
 
 
 def write_frames_manifest(
@@ -474,6 +497,7 @@ def summarize_frame_sampling(
     frame_rate: float,
     max_frames: int | None,
     frame_sampling: str,
+    segments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     timestamps = [
         timestamp
@@ -496,6 +520,10 @@ def summarize_frame_sampling(
         math.ceil(duration_sec * frame_rate) if duration_sec and duration_sec > 0 else None
     )
     cap = max_frames if max_frames is not None and max_frames > 0 else None
+    segment_coverage = summarize_segment_frame_coverage(
+        frames=frames,
+        segments=segments or [],
+    )
     return {
         "strategy": frame_sampling,
         "frame_rate": frame_rate,
@@ -509,6 +537,7 @@ def summarize_frame_sampling(
         "covered_until_sec": covered_until,
         "timestamp_span_sec": timestamp_span,
         "temporal_coverage_ratio": coverage_ratio,
+        "segment_coverage": segment_coverage,
         "skipped": False,
     }
 
@@ -530,6 +559,105 @@ def _empty_frame_sampling_summary(
     )
     summary["skipped"] = skipped
     return summary
+
+
+def summarize_segment_frame_coverage(
+    *,
+    frames: list[dict[str, Any]],
+    segments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    segment_windows = [
+        window for window in (_segment_window(segment) for segment in segments) if window is not None
+    ]
+    frame_timestamps = [
+        timestamp
+        for timestamp in (_optional_float(frame.get("timestamp")) for frame in frames)
+        if timestamp is not None
+    ]
+    segments_with_frames = 0
+    for start, end in segment_windows:
+        if any(start <= timestamp <= end for timestamp in frame_timestamps):
+            segments_with_frames += 1
+
+    segment_count = len(segment_windows)
+    segments_without_frames = max(0, segment_count - segments_with_frames)
+    coverage_ratio = round(segments_with_frames / segment_count, 4) if segment_count else None
+    return {
+        "segment_count": segment_count,
+        "segments_with_frames": segments_with_frames,
+        "segments_without_frames": segments_without_frames,
+        "segment_frame_coverage_ratio": coverage_ratio,
+        "frame_free_segment_ratio": (
+            round(segments_without_frames / segment_count, 4) if segment_count else None
+        ),
+    }
+
+
+def _segment_representative_timestamps(
+    *,
+    segments: list[dict[str, Any]] | None,
+    duration_sec: float | None,
+) -> list[float]:
+    if not segments:
+        return []
+    timestamps: list[float] = []
+    for segment in segments:
+        window = _segment_window(segment)
+        if window is None:
+            continue
+        start, end = window
+        timestamp = start + ((end - start) / 2)
+        if duration_sec is not None and duration_sec > 0:
+            timestamp = min(max(0.0, timestamp), max(0.0, duration_sec - 0.001))
+        timestamps.append(round(timestamp, 3))
+    return _dedupe_sorted_timestamps(timestamps)
+
+
+def _spread_timestamps(timestamps: list[float], limit: int) -> list[float]:
+    if limit <= 0:
+        return []
+    if len(timestamps) <= limit:
+        return list(timestamps)
+    if limit == 1:
+        return [timestamps[0]]
+    max_index = len(timestamps) - 1
+    indices = [round(position * max_index / (limit - 1)) for position in range(limit)]
+    return [timestamps[index] for index in sorted(dict.fromkeys(indices))]
+
+
+def _dedupe_sorted_timestamps(timestamps: list[float]) -> list[float]:
+    return sorted(dict.fromkeys(round(timestamp, 3) for timestamp in timestamps))
+
+
+def _segment_window(segment: dict[str, Any]) -> tuple[float, float] | None:
+    start = _optional_float(segment.get("start_time"))
+    end = _optional_float(segment.get("end_time"))
+    if start is None and end is None:
+        return None
+    if start is None:
+        start = end
+    if end is None:
+        end = start
+    if start is None or end is None:
+        return None
+    if end < start:
+        start, end = end, start
+    return start, end
+
+
+def _read_jsonl_dicts(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            payload = json.loads(stripped)
+            if isinstance(payload, dict):
+                rows.append(payload)
+    return rows
 
 
 def _empty_frame_selection_summary(*, frame_selection: str, skipped: bool) -> dict[str, Any]:
