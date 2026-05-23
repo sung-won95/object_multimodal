@@ -696,6 +696,7 @@ def test_ask_project_cli_defaults() -> None:
     )
 
     assert args.index == "sample_segments"
+    assert args.index_kind == "segment"
     assert args.visual_index is None
     assert args.project_id == "sample_project"
     assert args.project_dir is None
@@ -707,6 +708,41 @@ def test_ask_project_cli_defaults() -> None:
     assert args.hybrid_semantic_ratio == 1.0
     assert args.output_format == "json"
     assert args.output is None
+
+
+def test_ask_project_cli_accepts_window_hybrid_and_rerank_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "ask-project",
+            "--index",
+            "sample_windows",
+            "--index-kind",
+            "window",
+            "--project-id",
+            "sample_project",
+            "--query",
+            "range grid",
+            "--rerank",
+            "--rerank-time-hint",
+            "10-14s",
+            "--rerank-backend",
+            "stub",
+            "--hybrid-retrieval",
+            "--hybrid-embedder",
+            "lecture_embedder",
+            "--hybrid-semantic-ratio",
+            "0.75",
+        ]
+    )
+
+    assert args.index == "sample_windows"
+    assert args.index_kind == "window"
+    assert args.rerank is True
+    assert args.rerank_time_hint == "10-14s"
+    assert args.rerank_backend == "stub"
+    assert args.hybrid_retrieval is True
+    assert args.hybrid_embedder == "lecture_embedder"
+    assert args.hybrid_semantic_ratio == 0.75
 
 
 def test_graph_query_cli_defaults() -> None:

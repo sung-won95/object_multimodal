@@ -802,6 +802,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask_project_parser.add_argument("--index", required=True)
     ask_project_parser.add_argument(
+        "--index-kind",
+        choices=["segment", "window"],
+        default="segment",
+        help="Interpret --index hits as segment documents or window-level documents.",
+    )
+    ask_project_parser.add_argument(
         "--visual-index",
         help="Optional Meilisearch index containing visual_entities documents.",
     )
@@ -1548,6 +1554,7 @@ def cmd_ask_project(args: argparse.Namespace) -> None:
     response = ask_project(
         client=client,
         index_uid=args.index,
+        retrieval_index_kind=args.index_kind,
         visual_index_uid=args.visual_index,
         project_dir=project_dir,
         query=args.query,
