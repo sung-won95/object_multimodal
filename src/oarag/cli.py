@@ -7,7 +7,9 @@ from pathlib import Path
 
 from oarag.ingestion.alignment import align_segments_to_frames
 from oarag.evaluation.benchmark import run_benchmark
+from oarag.evaluation.claims import build_paper_claims
 from oarag.evaluation.experiment import run_paper_experiment
+from oarag.evaluation.paper_registry import build_paper_artifact_registry
 from oarag.evaluation.quality_gate import check_retrieval_quality_gate
 from oarag.evaluation.readiness import audit_paper_readiness
 from oarag.evaluation.reporting import generate_evaluation_report
@@ -1139,6 +1141,50 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paper_readiness.set_defaults(func=cmd_audit_paper_readiness)
 
+    paper_claims = subparsers.add_parser(
+        "build-paper-claims",
+        help="Build a private-safe claim/evidence matrix from paper experiment artifacts",
+    )
+    paper_claims.add_argument("--metrics", required=True, type=Path)
+    paper_claims.add_argument("--reproducibility", required=True, type=Path)
+    paper_claims.add_argument("--quality-gate-result", required=True, type=Path)
+    paper_claims.add_argument("--readiness-audit", required=True, type=Path)
+    paper_claims.add_argument(
+        "--robustness",
+        type=Path,
+        help="Optional private-safe robustness summary artifact.",
+    )
+    paper_claims.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Output directory. Defaults to paper_claims next to metrics.json.",
+    )
+    paper_claims.set_defaults(func=cmd_build_paper_claims)
+
+    paper_registry = subparsers.add_parser(
+        "build-paper-registry",
+        help="Build a private-safe registry of paper experiment artifact filenames and statuses",
+    )
+    paper_registry.add_argument("--experiment-manifest", required=True, type=Path)
+    paper_registry.add_argument("--readiness-audit", required=True, type=Path)
+    paper_registry.add_argument("--claim-matrix", required=True, type=Path)
+    paper_registry.add_argument(
+        "--quality-gate-result",
+        type=Path,
+        help="Optional quality gate result override. Defaults to the experiment manifest artifact.",
+    )
+    paper_registry.add_argument(
+        "--robustness",
+        type=Path,
+        help="Optional private-safe robustness summary artifact.",
+    )
+    paper_registry.add_argument(
+        "--output",
+        type=Path,
+        help="Optional output JSON path. When omitted, prints the registry only.",
+    )
+    paper_registry.set_defaults(func=cmd_build_paper_registry)
+
     lecture_smoke = subparsers.add_parser(
         "lecture-smoke",
         help="Run a private-safe lecture smoke suite from a manifest",
@@ -2064,6 +2110,41 @@ def cmd_audit_paper_readiness(args: argparse.Namespace) -> None:
     )
     if args.fail_on_gap and not audit.payload.get("ready"):
         raise SystemExit(1)
+
+
+def cmd_build_paper_claims(args: argparse.Namespace) -> None:
+    run = build_paper_claims(
+        metrics_path=args.metrics,
+        reproducibility_path=args.reproducibility,
+        quality_gate_result_path=args.quality_gate_result,
+        readiness_audit_path=args.readiness_audit,
+        robustness_path=args.robustness,
+        output_dir=args.output_dir,
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": run.payload.get("run_id"),
+                "overall_status": (run.payload.get("summary") or {}).get("overall_status"),
+                "json": str(run.json_path),
+                "markdown": str(run.markdown_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+def cmd_build_paper_registry(args: argparse.Namespace) -> None:
+    run = build_paper_artifact_registry(
+        experiment_manifest_path=args.experiment_manifest,
+        readiness_audit_path=args.readiness_audit,
+        claim_matrix_path=args.claim_matrix,
+        quality_gate_result_path=args.quality_gate_result,
+        robustness_path=args.robustness,
+        output_path=args.output,
+    )
+    print(json.dumps(run.payload, ensure_ascii=False, indent=2))
 
 
 def cmd_lecture_smoke(args: argparse.Namespace) -> None:
