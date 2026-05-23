@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from oarag.visual_entities import (
     extract_visual_entities,
     filter_visual_entities,
 )
+from oarag.vlm import run_vlm
 
 
 def test_extract_visual_entities_stub_writes_empty_jsonl_and_updates_manifest(tmp_path: Path) -> None:
@@ -447,6 +449,54 @@ def test_extract_visual_entities_vlm_observations_maps_success_observations(
     assert manifest["artifacts"]["visual_entities"] == str(output_path)
     assert manifest["counts"]["visual_entities"] == 1
     assert manifest["visual_entity_extraction"]["backend"] == "vlm-observations"
+
+
+def test_run_vlm_to_extract_visual_entities_vlm_observations_smoke(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "vlm_smoke_project"
+    frame_path = project_dir / "frames" / "frame_000001.jpg"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000001", "frame_path": str(frame_path), "timestamp": 2.0}],
+    )
+
+    command_code = (
+        "import json,sys;"
+        "req=json.load(sys.stdin);"
+        "f=req['frame'];"
+        "print(json.dumps({'frame_id':f['frame_id'],"
+        "'observation_type':'equation','visual_description':'A displayed equation',"
+        "'detected_text':'E = mc^2','confidence':0.88,"
+        "'bbox':{'left':1,'top':2,'width':3,'height':4}}))"
+    )
+
+    vlm_summary = run_vlm(
+        project_dir=project_dir,
+        backend="command",
+        model="fixture-vlm",
+        options={
+            "command": [sys.executable, "-c", command_code],
+            "input_mode": "json-stdin",
+            "prompt_template_version": "smoke-template-v1",
+        },
+    )
+    entity_summary = extract_visual_entities(
+        project_dir=project_dir,
+        backend="vlm-observations",
+    )
+
+    rows = [
+        json.loads(line)
+        for line in (project_dir / "manifests" / "visual_entities.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+
+    assert vlm_summary["counts"]["vlm_visual_observations"] == 1
+    assert entity_summary["counts"]["visual_entities"] == 1
+    assert rows[0]["source"] == "vlm:fixture-vlm"
+    assert rows[0]["text"] == "E = mc^2"
+    assert rows[0]["visual_description"] == "A displayed equation"
 
 
 def test_vlm_observations_backend_rejects_unknown_frame_id(tmp_path: Path) -> None:

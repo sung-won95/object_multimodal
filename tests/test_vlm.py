@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -254,6 +255,99 @@ def test_run_vlm_records_frame_level_backend_and_parse_failures(tmp_path: Path) 
         "parse_failure": 1,
     }
     assert isinstance(manifest["vlm_consistency"]["elapsed_seconds"], float)
+
+
+def test_run_vlm_command_backend_accepts_json_stdin_and_records_public_contract(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "command_project"
+    frames_manifest = project_dir / "manifests" / "frames_manifest.jsonl"
+    project_manifest = project_dir / "manifests" / "project_manifest.json"
+    output = project_dir / "manifests" / "vlm_visual_observations.jsonl"
+    _write_jsonl(
+        frames_manifest,
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": "frames/frame_000001.jpg",
+                "timestamp": 4.25,
+            }
+        ],
+    )
+
+    command_code = (
+        "import json,sys;"
+        "req=json.load(sys.stdin);"
+        "f=req['frame'];"
+        "print(json.dumps({'observations':[{'frame_id':f['frame_id'],"
+        "'observation_type':'diagram','visual_description':'A VLM parsed chart',"
+        "'detected_text':'Chart A','confidence':0.91,"
+        "'position':{'region':'center'},"
+        "'relations':[{'type':'contains','target':'label'}]}]}))"
+    )
+
+    summary = run_vlm(
+        project_dir=project_dir,
+        backend="command",
+        model="fixture-vlm",
+        options={
+            "command": [sys.executable, "-c", command_code],
+            "input_mode": "json-stdin",
+            "prompt_template_version": "fixture-template-v2",
+            "temperature": 0,
+            "api_key": "do-not-write",
+        },
+    )
+
+    rows = _read_jsonl(output)
+    manifest = json.loads(project_manifest.read_text(encoding="utf-8"))
+
+    assert summary["status"] == "completed"
+    assert rows[0]["backend"] == "command"
+    assert rows[0]["source_model"] == "fixture-vlm"
+    assert rows[0]["visual_description"] == "A VLM parsed chart"
+    assert rows[0]["metadata"]["prompt_template_version"] == "fixture-template-v2"
+    assert rows[0]["metadata"]["backend_options"]["command"] == "<configured>"
+    assert rows[0]["metadata"]["backend_options"]["api_key"] == "<redacted>"
+    assert manifest["vlm_consistency"]["settings"]["prompt_template_version"] == (
+        "fixture-template-v2"
+    )
+    assert manifest["vlm_consistency"]["settings"]["options"]["command"] == "<configured>"
+    assert manifest["vlm_consistency"]["settings"]["options"]["api_key"] == "<redacted>"
+
+
+def test_run_vlm_command_backend_schema_failures_become_parse_failure_rows(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "bad_command_project"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": "frames/frame_000001.jpg",
+                "timestamp": 1.0,
+            }
+        ],
+    )
+
+    command_code = "import json; print(json.dumps({'observations': []}))"
+
+    summary = run_vlm(
+        project_dir=project_dir,
+        backend="command",
+        model="fixture-vlm",
+        options={"command": [sys.executable, "-c", command_code]},
+    )
+
+    rows = _read_jsonl(project_dir / "manifests" / "vlm_visual_observations.jsonl")
+
+    assert summary["status"] == "completed_with_errors"
+    assert summary["counts"]["frames_failed"] == 1
+    assert rows[0]["status"] == "parse_failure"
+    assert rows[0]["metadata"]["failure_reason"].startswith(
+        "VLM backend returned no observations"
+    )
 
 
 def test_vlm_backend_errors_are_clear() -> None:

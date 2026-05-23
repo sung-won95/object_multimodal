@@ -22,10 +22,18 @@ from oarag.core.schemas import (
 
 
 DEFAULT_VLM_BACKEND = "deterministic"
+DEFAULT_VLM_PROMPT_TEMPLATE_VERSION = "vlm-visual-parser-v1"
 VLM_SUCCESS_STATUS = "success"
 VLM_SKIPPED_RESUMED_STATUS = "skipped_resumed"
 VLM_BACKEND_FAILURE_STATUS = "backend_failure"
 VLM_PARSE_FAILURE_STATUS = "parse_failure"
+VLM_ALLOWED_ROW_STATUSES = {
+    VLM_SUCCESS_STATUS,
+    VLM_SKIPPED_RESUMED_STATUS,
+    VLM_BACKEND_FAILURE_STATUS,
+    VLM_PARSE_FAILURE_STATUS,
+}
+_SENSITIVE_OPTION_PARTS = ("api_key", "apikey", "token", "secret", "password", "credential")
 
 
 class VLMParseError(ValueError):
@@ -56,6 +64,19 @@ class VLMRunConfig:
     def model_version(self) -> str | None:
         value = self.options.get("model_version")
         return str(value) if value is not None else None
+
+    @property
+    def prompt_template_version(self) -> str:
+        value = self.options.get("prompt_template_version")
+        return (
+            str(value).strip()
+            if value is not None and str(value).strip()
+            else DEFAULT_VLM_PROMPT_TEMPLATE_VERSION
+        )
+
+    @property
+    def prompt_template(self) -> str | None:
+        return _optional_str(self.options.get("prompt_template"))
 
 
 class VLMBackend(Protocol):
@@ -131,8 +152,12 @@ class DeterministicVLMBackend:
                         "device": config.device,
                         "frame_path": frame.frame_path,
                         "rank": frame.rank,
+                        "prompt_template_version": config.prompt_template_version,
                     },
-                    metadata={"backend_options": dict(config.options)},
+                    metadata={
+                        "backend_options": _public_backend_options(config.options),
+                        "prompt_template_version": config.prompt_template_version,
+                    },
                 )
             )
         return observations
@@ -155,7 +180,16 @@ class CommandVLMBackend:
         observations: list[VLMVisualObservation] = []
         for frame in frames:
             command = _format_command(raw_command, frame=frame, config=config)
-            result = _run_command(command, frame_id=frame.frame_id)
+            request_payload = _command_request_payload(frame=frame, config=config)
+            result = _run_command(
+                command,
+                frame_id=frame.frame_id,
+                stdin_payload=(
+                    json.dumps(request_payload, ensure_ascii=False)
+                    if _command_uses_json_stdin(config.options)
+                    else None
+                ),
+            )
             observations.extend(
                 _observations_from_command_stdout(
                     result.stdout,
@@ -270,7 +304,8 @@ def run_vlm(
         frame_started_at = time.perf_counter()
         try:
             frame_observations = _normalize_success_observations(
-                runner.run(frames=[frame], config=config)
+                runner.run(frames=[frame], config=config),
+                frame=frame,
             )
         except VLMParseError as exc:
             frame_observations = [
@@ -454,13 +489,18 @@ def _read_existing_observations(path: Path) -> list[VLMVisualObservation]:
 
 def _normalize_success_observations(
     observations: list[VLMVisualObservation],
+    *,
+    frame: VLMFrameInput,
 ) -> list[VLMVisualObservation]:
-    return [
-        replace(observation, status=VLM_SUCCESS_STATUS)
-        if observation.status in {"", "completed"}
-        else observation
-        for observation in observations
-    ]
+    if not observations:
+        raise VLMParseError(f"VLM backend returned no observations for frame_id={frame.frame_id}")
+    normalized: list[VLMVisualObservation] = []
+    for observation in observations:
+        status = VLM_SUCCESS_STATUS if observation.status in {"", "completed"} else observation.status
+        candidate = replace(observation, status=status)
+        _validate_success_observation(candidate, frame=frame)
+        normalized.append(candidate)
+    return normalized
 
 
 def _failure_observation(
@@ -490,8 +530,13 @@ def _failure_observation(
             "device": config.device,
             "frame_path": frame.frame_path,
             "rank": frame.rank,
+            "prompt_template_version": config.prompt_template_version,
         },
-        metadata={"failure_reason": reason},
+        metadata={
+            "failure_reason": reason,
+            "backend_options": _public_backend_options(config.options),
+            "prompt_template_version": config.prompt_template_version,
+        },
     )
 
 
@@ -556,10 +601,61 @@ def _observations_from_command_stdout(
                 metadata={
                     **_mapping(raw.get("metadata")),
                     "run_id": config.run_id,
+                    "backend_options": _public_backend_options(config.options),
+                    "prompt_template_version": config.prompt_template_version,
                 },
             )
         )
     return observations
+
+
+def _validate_success_observation(
+    observation: VLMVisualObservation,
+    *,
+    frame: VLMFrameInput,
+) -> None:
+    if observation.frame_id != frame.frame_id:
+        raise VLMParseError(
+            f"VLM observation frame_id mismatch for {frame.frame_id}: "
+            f"returned {observation.frame_id}"
+        )
+    if observation.status not in VLM_ALLOWED_ROW_STATUSES:
+        raise VLMParseError(
+            f"VLM observation has unsupported status for frame_id={frame.frame_id}: "
+            f"{observation.status}"
+        )
+    if observation.status != VLM_SUCCESS_STATUS:
+        raise VLMParseError(
+            f"VLM backend returned failure status in success path for "
+            f"frame_id={frame.frame_id}: {observation.status}"
+        )
+    required_fields = {
+        "observation_id": observation.observation_id,
+        "project_id": observation.project_id,
+        "video_id": observation.video_id,
+        "backend": observation.backend,
+        "source_model": observation.source_model,
+        "observation_type": observation.observation_type,
+    }
+    missing = [field for field, value in required_fields.items() if _optional_str(value) is None]
+    if missing:
+        raise VLMParseError(
+            f"VLM observation missing required fields for frame_id={frame.frame_id}: "
+            f"{', '.join(missing)}"
+        )
+    if (
+        _optional_str(observation.visual_description) is None
+        and _optional_str(observation.detected_text) is None
+    ):
+        raise VLMParseError(
+            "VLM success observation requires visual_description or detected_text "
+            f"for frame_id={frame.frame_id}"
+        )
+    if observation.confidence is not None and not 0.0 <= observation.confidence <= 1.0:
+        raise VLMParseError(
+            f"VLM observation confidence must be between 0 and 1 for "
+            f"frame_id={frame.frame_id}: {observation.confidence}"
+        )
 
 
 def _format_command(
@@ -588,15 +684,29 @@ def _format_command(
         "device": config.device or "",
         "run_id": config.run_id,
     }
-    try:
-        return [part.format(**values) for part in parts]
-    except KeyError as exc:
-        raise ValueError(f"Unknown VLM command placeholder: {exc.args[0]}") from exc
+    formatted: list[str] = []
+    for part in parts:
+        resolved_part = part
+        for key, value in values.items():
+            resolved_part = resolved_part.replace(f"{{{key}}}", value)
+        formatted.append(resolved_part)
+    return formatted
 
 
-def _run_command(command: list[str], *, frame_id: str) -> subprocess.CompletedProcess[str]:
+def _run_command(
+    command: list[str],
+    *,
+    frame_id: str,
+    stdin_payload: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(command, check=True, capture_output=True, text=True)
+        return subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            input=stdin_payload,
+        )
     except FileNotFoundError as exc:
         raise RuntimeError(f"VLM backend command not found for frame_id={frame_id}: {command[0]}") from exc
     except subprocess.CalledProcessError as exc:
@@ -605,6 +715,37 @@ def _run_command(command: list[str], *, frame_id: str) -> subprocess.CompletedPr
             f"VLM backend command failed for frame_id={frame_id}: "
             f"{' '.join(command)} exited with {exc.returncode}\n{stderr}"
         ) from exc
+
+
+def _command_uses_json_stdin(options: Mapping[str, Any]) -> bool:
+    value = options.get("input_mode")
+    if value is None:
+        value = options.get("stdin")
+    return str(value).strip().lower() in {"json", "json-stdin", "stdin-json", "true", "1", "yes"}
+
+
+def _command_request_payload(*, frame: VLMFrameInput, config: VLMRunConfig) -> dict[str, Any]:
+    return {
+        "schema_version": "vlm-command-request-v1",
+        "run_id": config.run_id,
+        "backend": config.backend,
+        "model": config.model,
+        "model_version": config.model_version,
+        "device": config.device,
+        "prompt_template_version": config.prompt_template_version,
+        "prompt_template": config.prompt_template,
+        "backend_options": _public_backend_options(config.options),
+        "frame": {
+            "project_id": frame.project_id,
+            "video_id": frame.video_id,
+            "frame_id": frame.frame_id,
+            "frame_path": frame.frame_path,
+            "timestamp": frame.timestamp,
+            "segment_id": frame.segment_id,
+            "rank": frame.rank,
+            "metadata": dict(frame.metadata),
+        },
+    }
 
 
 def _update_project_manifest(
@@ -640,7 +781,11 @@ def _update_project_manifest(
         settings={
             "run_id": run_id,
             "device": device,
-            "options": options,
+            "prompt_template_version": (
+                _optional_str(options.get("prompt_template_version"))
+                or DEFAULT_VLM_PROMPT_TEMPLATE_VERSION
+            ),
+            "options": _public_backend_options(options),
         },
         artifact_paths=artifact_paths,
         counts={
@@ -737,6 +882,27 @@ def _option_str_set(value: Any) -> set[str]:
     if isinstance(value, (list, tuple, set)):
         return {str(item).strip() for item in value if str(item).strip()}
     return {str(value).strip()} if str(value).strip() else set()
+
+
+def _public_backend_options(options: Mapping[str, Any]) -> dict[str, Any]:
+    public: dict[str, Any] = {}
+    for key, value in options.items():
+        normalized_key = str(key)
+        lowered = normalized_key.lower().replace("-", "_")
+        if lowered == "command":
+            public[normalized_key] = "<configured>"
+        elif any(part in lowered for part in _SENSITIVE_OPTION_PARTS):
+            public[normalized_key] = "<redacted>"
+        elif isinstance(value, Mapping):
+            public[normalized_key] = _public_backend_options(value)
+        elif isinstance(value, list):
+            public[normalized_key] = [
+                _public_backend_options(item) if isinstance(item, Mapping) else item
+                for item in value
+            ]
+        else:
+            public[normalized_key] = value
+    return public
 
 
 def _mapping(value: Any) -> dict[str, Any]:
