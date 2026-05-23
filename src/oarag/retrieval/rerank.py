@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import math
 import re
-from typing import Any
+from typing import Any, Protocol
 
 
 STRATEGY_NAME = "deterministic_evidence_v1"
+DEFAULT_RERANK_BACKEND = "deterministic"
+STUB_RERANK_BACKEND = "stub"
+STUB_STRATEGY_NAME = "stub_evidence_overlap_v1"
+RERANK_BACKEND_CHOICES = (DEFAULT_RERANK_BACKEND, STUB_RERANK_BACKEND)
+DISABLED_EXTERNAL_RERANK_BACKENDS = {
+    "cross-encoder": "External cross-encoder reranking is reserved but disabled by default.",
+    "llm-judge": "External LLM judge reranking is reserved but disabled by default.",
+}
 DEFAULT_WEIGHTS: dict[str, float] = {
     "original": 0.4,
     "query_overlap": 0.22,
@@ -15,6 +24,64 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "frame_backed": 0.08,
     "entity_link": 0.08,
 }
+FIELD_RELEVANCE_WEIGHTS: dict[str, float] = {
+    "candidate.transcript_excerpt": 1.0,
+    "evidence_window.target_segment.transcript_text": 1.0,
+    "linked_entities.entity.text": 0.9,
+    "linked_entities.lexical_match": 0.9,
+    "visual_entities.text": 0.55,
+    "evidence_window.transcript_segments.transcript_text": 0.35,
+}
+
+
+@dataclass(frozen=True)
+class RerankRequest:
+    bundles: list[dict[str, Any]]
+    query: str
+    timestamp_hint: str | None = None
+    weights: dict[str, float] | None = None
+
+
+@dataclass(frozen=True)
+class RerankResult:
+    bundles: list[dict[str, Any]]
+    metadata: dict[str, Any]
+
+
+class RerankerBackend(Protocol):
+    name: str
+    strategy_name: str
+    private_safe: bool
+
+    def rerank(self, request: RerankRequest) -> RerankResult: ...
+
+
+class DeterministicEvidenceReranker:
+    name = DEFAULT_RERANK_BACKEND
+    strategy_name = STRATEGY_NAME
+    private_safe = True
+
+    def rerank(self, request: RerankRequest) -> RerankResult:
+        return _rerank_deterministic(
+            request=request,
+            backend_name=self.name,
+            strategy_name=self.strategy_name,
+            private_safe=self.private_safe,
+        )
+
+
+class StubEvidenceReranker:
+    name = STUB_RERANK_BACKEND
+    strategy_name = STUB_STRATEGY_NAME
+    private_safe = True
+
+    def rerank(self, request: RerankRequest) -> RerankResult:
+        return _rerank_stub(
+            request=request,
+            backend_name=self.name,
+            strategy_name=self.strategy_name,
+            private_safe=self.private_safe,
+        )
 
 
 def rerank_bundles(
@@ -23,24 +90,65 @@ def rerank_bundles(
     query: str,
     timestamp_hint: str | None = None,
     weights: dict[str, float] | None = None,
+    backend: str | RerankerBackend = DEFAULT_RERANK_BACKEND,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    resolved_weights = _normalize_weights(weights or DEFAULT_WEIGHTS)
+    resolved_backend = resolve_reranker_backend(backend)
+    result = resolved_backend.rerank(
+        RerankRequest(
+            bundles=bundles,
+            query=query,
+            timestamp_hint=timestamp_hint,
+            weights=weights,
+        )
+    )
+    return result.bundles, result.metadata
+
+
+def resolve_reranker_backend(backend: str | RerankerBackend) -> RerankerBackend:
+    if not isinstance(backend, str):
+        return backend
+    backend_name = backend.strip().casefold().replace("_", "-")
+    if backend_name in {"default", DEFAULT_RERANK_BACKEND, "deterministic-evidence"}:
+        return DeterministicEvidenceReranker()
+    if backend_name in {STUB_RERANK_BACKEND, "deterministic-stub", "local-stub"}:
+        return StubEvidenceReranker()
+    if backend_name in DISABLED_EXTERNAL_RERANK_BACKENDS:
+        message = DISABLED_EXTERNAL_RERANK_BACKENDS[backend_name]
+        raise ValueError(
+            f"rerank backend '{backend}' is not enabled: {message} "
+            "No evidence is sent to external services by the built-in backends."
+        )
+    valid = ", ".join(RERANK_BACKEND_CHOICES)
+    raise ValueError(f"Unknown rerank backend: {backend}. Available private-safe backends: {valid}")
+
+
+def _rerank_deterministic(
+    *,
+    request: RerankRequest,
+    backend_name: str,
+    strategy_name: str,
+    private_safe: bool,
+) -> RerankResult:
+    resolved_weights = _normalize_weights(request.weights or DEFAULT_WEIGHTS)
     metadata = rerank_metadata(
         enabled=True,
-        query=query,
-        timestamp_hint=timestamp_hint,
+        query=request.query,
+        timestamp_hint=request.timestamp_hint,
         weights=resolved_weights,
+        backend=backend_name,
+        strategy=strategy_name,
+        private_safe=private_safe,
     )
-    if not bundles:
-        return [], metadata
+    if not request.bundles:
+        return RerankResult([], metadata)
 
     timestamp_ranges = _timestamp_ranges_from_metadata(metadata)
-    query_terms = _tokenize(query)
-    search_scores = [_optional_float(_candidate(bundle).get("score")) for bundle in bundles]
+    query_terms = _tokenize(request.query)
+    search_scores = [_optional_float(_candidate(bundle).get("score")) for bundle in request.bundles]
     normalized_search_scores = _normalized_search_scores(search_scores)
 
     scored: list[tuple[float, int, str, dict[str, Any]]] = []
-    for position, bundle in enumerate(bundles, start=1):
+    for position, bundle in enumerate(request.bundles, start=1):
         original_rank = _candidate_rank(bundle, fallback=position)
         score, breakdown = _score_bundle(
             bundle=bundle,
@@ -52,12 +160,15 @@ def rerank_bundles(
         )
         updated = copy.deepcopy(bundle)
         updated["rerank"] = {
-            "strategy": STRATEGY_NAME,
+            "backend": backend_name,
+            "strategy": strategy_name,
             "rank": None,
             "score": round(score, 4),
             "original_rank": original_rank,
+            "used_fields": breakdown["used_fields"],
             "breakdown": breakdown,
-            "explanation": _human_explanation(breakdown),
+            "explanation": breakdown["explanation"],
+            "private_safe": private_safe,
         }
         segment_id = str(_candidate(updated).get("segment_id", ""))
         scored.append((score, original_rank, segment_id, updated))
@@ -77,7 +188,93 @@ def rerank_bundles(
         }
         for bundle in reranked
     ]
-    return reranked, metadata
+    return RerankResult(reranked, metadata)
+
+
+def _rerank_stub(
+    *,
+    request: RerankRequest,
+    backend_name: str,
+    strategy_name: str,
+    private_safe: bool,
+) -> RerankResult:
+    metadata = rerank_metadata(
+        enabled=True,
+        query=request.query,
+        timestamp_hint=request.timestamp_hint,
+        backend=backend_name,
+        strategy=strategy_name,
+        private_safe=private_safe,
+    )
+    if not request.bundles:
+        return RerankResult([], metadata)
+
+    query_terms = _tokenize(request.query)
+    search_scores = [_optional_float(_candidate(bundle).get("score")) for bundle in request.bundles]
+    normalized_search_scores = _normalized_search_scores(search_scores)
+    scored: list[tuple[float, int, str, dict[str, Any]]] = []
+    for position, bundle in enumerate(request.bundles, start=1):
+        original_rank = _candidate_rank(bundle, fallback=position)
+        original = _original_signal(
+            original_rank=original_rank,
+            normalized_search_score=normalized_search_scores[position - 1],
+            raw_search_score=_optional_float(_candidate(bundle).get("score")),
+        )
+        overlap = _query_overlap_signal(bundle=bundle, query_terms=query_terms)
+        score = (0.3 * original["score"]) + (0.7 * overlap["score"])
+        explanation = (
+            f"field_overlap: {overlap['detail']} (+{0.7 * overlap['score']:.4f}); "
+            f"original: {original['detail']} (+{0.3 * original['score']:.4f})"
+        )
+        breakdown = {
+            "score": round(score, 4),
+            "original_rank": original_rank,
+            "used_fields": _bundle_used_fields(bundle),
+            "explanation": explanation,
+            "signals": {
+                "field_overlap": {
+                    **overlap,
+                    "weight": 0.7,
+                    "contribution": round(0.7 * overlap["score"], 4),
+                },
+                "original": {
+                    **original,
+                    "weight": 0.3,
+                    "contribution": round(0.3 * original["score"], 4),
+                },
+            },
+        }
+        updated = copy.deepcopy(bundle)
+        updated["rerank"] = {
+            "backend": backend_name,
+            "strategy": strategy_name,
+            "rank": None,
+            "score": breakdown["score"],
+            "original_rank": original_rank,
+            "used_fields": breakdown["used_fields"],
+            "breakdown": breakdown,
+            "explanation": explanation,
+            "private_safe": private_safe,
+        }
+        segment_id = str(_candidate(updated).get("segment_id", ""))
+        scored.append((score, original_rank, segment_id, updated))
+
+    ordered = sorted(scored, key=lambda item: (-item[0], item[1], item[2]))
+    reranked: list[dict[str, Any]] = []
+    for rank, (_, _, _, bundle) in enumerate(ordered, start=1):
+        bundle["rank"] = rank
+        bundle["rerank"]["rank"] = rank
+        reranked.append(bundle)
+    metadata["order"] = [
+        {
+            "rank": bundle["rerank"]["rank"],
+            "segment_id": _candidate(bundle).get("segment_id"),
+            "original_rank": bundle["rerank"]["original_rank"],
+            "score": bundle["rerank"]["score"],
+        }
+        for bundle in reranked
+    ]
+    return RerankResult(reranked, metadata)
 
 
 def rerank_metadata(
@@ -86,12 +283,18 @@ def rerank_metadata(
     query: str = "",
     timestamp_hint: str | None = None,
     weights: dict[str, float] | None = None,
+    backend: str = DEFAULT_RERANK_BACKEND,
+    strategy: str | None = None,
+    private_safe: bool = True,
 ) -> dict[str, Any]:
     timestamp_text = " ".join(part for part in (query, timestamp_hint or "") if part.strip())
     timestamp_ranges = parse_timestamp_hints(timestamp_text)
     return {
         "enabled": enabled,
-        "strategy": STRATEGY_NAME if enabled else None,
+        "backend": backend if enabled else None,
+        "strategy": (strategy or STRATEGY_NAME) if enabled else None,
+        "private_safe": private_safe if enabled else True,
+        "external_transport": "none" if enabled else None,
         "weights": _round_mapping(_normalize_weights(weights or DEFAULT_WEIGHTS)) if enabled else None,
         "query_term_count": len(_tokenize(query)) if enabled else None,
         "timestamp_hint_provided": bool(timestamp_hint and timestamp_hint.strip()),
@@ -163,7 +366,15 @@ def _score_bundle(
             "weight": round(weight, 4),
             "contribution": round(contribution, 4),
         }
-    return total, {"total": round(total, 4), "signals": weighted}
+    breakdown = {
+        "total": round(total, 4),
+        "score": round(total, 4),
+        "original_rank": original_rank,
+        "used_fields": _bundle_used_fields(bundle),
+        "signals": weighted,
+    }
+    breakdown["explanation"] = _human_explanation(breakdown)
+    return total, breakdown
 
 
 def _original_signal(
@@ -192,15 +403,35 @@ def _original_signal(
 def _query_overlap_signal(*, bundle: dict[str, Any], query_terms: set[str]) -> dict[str, Any]:
     if not query_terms:
         return {"score": 0.0, "matched_terms": [], "detail": "no query terms"}
-    evidence_terms = _tokenize(" ".join(_bundle_text_parts(bundle)))
-    matched_terms = sorted(query_terms & evidence_terms)
-    score = len(matched_terms) / len(query_terms)
+    term_weights: dict[str, float] = {}
+    matched_fields: dict[str, list[str]] = {}
+    for field in _bundle_evidence_fields(bundle):
+        field_name = field["name"]
+        field_weight = FIELD_RELEVANCE_WEIGHTS.get(field_name, 0.25)
+        field_terms = _tokenize(field["text"])
+        for term in query_terms & field_terms:
+            term_weights[term] = max(term_weights.get(term, 0.0), field_weight)
+            matched_fields.setdefault(field_name, [])
+            if term not in matched_fields[field_name]:
+                matched_fields[field_name].append(term)
+    matched_terms = sorted(term_weights)
+    score = sum(term_weights.values()) / len(query_terms)
     return {
         "score": round(score, 4),
         "matched_terms": matched_terms,
+        "matched_fields": {
+            field: sorted(terms)
+            for field, terms in sorted(matched_fields.items(), key=lambda item: item[0])
+        },
+        "field_weights": {
+            term: round(weight, 4) for term, weight in sorted(term_weights.items())
+        },
         "matched_term_count": len(matched_terms),
         "query_term_count": len(query_terms),
-        "detail": f"{len(matched_terms)}/{len(query_terms)} query terms matched",
+        "detail": (
+            f"{len(matched_terms)}/{len(query_terms)} query terms matched "
+            "after field weighting"
+        ),
     }
 
 
@@ -330,9 +561,41 @@ def _distance_to_range(point: float, expected_range: tuple[float, float]) -> flo
     return min(abs(point - start), abs(point - end))
 
 
-def _bundle_text_parts(bundle: dict[str, Any]) -> list[str]:
-    parts = [str(_candidate(bundle).get("transcript_excerpt", ""))]
-    parts.extend(_target_text_parts(bundle))
+def _bundle_used_fields(bundle: dict[str, Any]) -> list[str]:
+    return sorted({field["name"] for field in _bundle_evidence_fields(bundle)})
+
+
+def _bundle_evidence_fields(bundle: dict[str, Any]) -> list[dict[str, str]]:
+    fields: list[dict[str, str]] = []
+    _append_text_field(
+        fields,
+        name="candidate.transcript_excerpt",
+        value=_candidate(bundle).get("transcript_excerpt"),
+    )
+    evidence_window = _evidence_window(bundle)
+    target_segment = evidence_window.get("target_segment")
+    if isinstance(target_segment, dict):
+        _append_text_field(
+            fields,
+            name="evidence_window.target_segment.transcript_text",
+            value=target_segment.get("transcript_text"),
+        )
+    transcript_segments = evidence_window.get("transcript_segments")
+    if isinstance(transcript_segments, list):
+        for segment in transcript_segments:
+            if not isinstance(segment, dict):
+                continue
+            _append_text_field(
+                fields,
+                name="evidence_window.transcript_segments.transcript_text",
+                value=segment.get("transcript_text"),
+            )
+    visual_entities = bundle.get("visual_entities")
+    if isinstance(visual_entities, list):
+        for entity in visual_entities:
+            if not isinstance(entity, dict):
+                continue
+            _append_text_field(fields, name="visual_entities.text", value=entity.get("text"))
     linked_entities = bundle.get("linked_entities")
     if isinstance(linked_entities, list):
         for link in linked_entities:
@@ -340,8 +603,27 @@ def _bundle_text_parts(bundle: dict[str, Any]) -> list[str]:
                 continue
             entity = link.get("entity")
             if isinstance(entity, dict):
-                parts.append(str(entity.get("text", "")))
-    return [part for part in parts if part]
+                _append_text_field(
+                    fields,
+                    name="linked_entities.entity.text",
+                    value=entity.get("text"),
+                )
+            lexical_match = link.get("lexical_match")
+            if isinstance(lexical_match, list):
+                _append_text_field(
+                    fields,
+                    name="linked_entities.lexical_match",
+                    value=" ".join(str(term) for term in lexical_match),
+                )
+    return fields
+
+
+def _append_text_field(fields: list[dict[str, str]], *, name: str, value: Any) -> None:
+    if value is None:
+        return
+    text = str(value).strip()
+    if text:
+        fields.append({"name": name, "text": text})
 
 
 def _target_text_parts(bundle: dict[str, Any]) -> list[str]:

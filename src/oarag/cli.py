@@ -43,6 +43,7 @@ from oarag.retrieval.project_query import (
     DEFAULT_HYBRID_SEMANTIC_RATIO,
     query_project,
 )
+from oarag.retrieval.rerank import DEFAULT_RERANK_BACKEND, RERANK_BACKEND_CHOICES
 from oarag.retrieval.project_index import (
     build_project_windows,
     index_project_segments,
@@ -768,6 +769,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional timestamp hint for reranking, for example '10-14s'.",
     )
     query_project.add_argument(
+        "--rerank-backend",
+        choices=RERANK_BACKEND_CHOICES,
+        default=DEFAULT_RERANK_BACKEND,
+        help="Private-safe reranker backend used by --rerank.",
+    )
+    query_project.add_argument(
         "--hybrid-retrieval",
         action="store_true",
         help=(
@@ -867,6 +874,12 @@ def build_parser() -> argparse.ArgumentParser:
     ask_project_parser.add_argument(
         "--rerank-time-hint",
         help="Optional timestamp hint for reranking, for example '10-14s'.",
+    )
+    ask_project_parser.add_argument(
+        "--rerank-backend",
+        choices=RERANK_BACKEND_CHOICES,
+        default=DEFAULT_RERANK_BACKEND,
+        help="Private-safe reranker backend used by --rerank.",
     )
     ask_project_parser.add_argument(
         "--hybrid-retrieval",
@@ -1514,6 +1527,7 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         window_after_seconds=args.window_after_seconds,
         rerank=args.rerank,
         rerank_time_hint=args.rerank_time_hint,
+        rerank_backend=args.rerank_backend,
         hybrid_retrieval=args.hybrid_retrieval,
         hybrid_embedder=args.hybrid_embedder,
         hybrid_semantic_ratio=args.hybrid_semantic_ratio,
@@ -1551,6 +1565,7 @@ def cmd_ask_project(args: argparse.Namespace) -> None:
         window_after_seconds=args.window_after_seconds,
         rerank=args.rerank,
         rerank_time_hint=args.rerank_time_hint,
+        rerank_backend=args.rerank_backend,
         hybrid_retrieval=args.hybrid_retrieval,
         hybrid_embedder=args.hybrid_embedder,
         hybrid_semantic_ratio=args.hybrid_semantic_ratio,

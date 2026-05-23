@@ -11,6 +11,7 @@ from oarag.retrieval.project_query import (
     VISUAL_ENTITY_HIT_SOURCE,
     query_project,
 )
+from oarag.retrieval.rerank import DEFAULT_RERANK_BACKEND
 
 
 ANSWER_SCHEMA_VERSION = "grounded-answer-v1"
@@ -93,6 +94,7 @@ def ask_project(
     window_after_seconds: float | None = None,
     rerank: bool = False,
     rerank_time_hint: str | None = None,
+    rerank_backend: str = DEFAULT_RERANK_BACKEND,
     hybrid_retrieval: bool = False,
     hybrid_embedder: str | None = DEFAULT_HYBRID_EMBEDDER,
     hybrid_semantic_ratio: float = DEFAULT_HYBRID_SEMANTIC_RATIO,
@@ -119,6 +121,7 @@ def ask_project(
         window_after_seconds=window_after_seconds,
         rerank=rerank,
         rerank_time_hint=rerank_time_hint,
+        rerank_backend=rerank_backend,
         hybrid_retrieval=hybrid_retrieval,
         hybrid_embedder=hybrid_embedder,
         hybrid_semantic_ratio=hybrid_semantic_ratio,

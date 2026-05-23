@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from oarag.rerank import parse_timestamp_hints, rerank_bundles
+from oarag.rerank import parse_timestamp_hints, rerank_bundles, resolve_reranker_backend
 
 
 def test_parse_timestamp_hints_extracts_ranges_and_points() -> None:
@@ -56,6 +56,75 @@ def test_rerank_bundles_uses_general_evidence_signals() -> None:
     assert top["breakdown"]["signals"]["frame_backed"]["score"] == 1.0
     assert top["breakdown"]["signals"]["entity_link"]["max_link_score"] == 1.2
     assert "query_overlap" in top["explanation"]
+    assert top["breakdown"]["score"] == top["score"]
+    assert top["breakdown"]["original_rank"] == top["original_rank"]
+    assert "used_fields" in top["breakdown"]
+
+
+def test_rerank_bundles_accepts_private_safe_stub_backend() -> None:
+    bundles = [
+        _bundle(
+            rank=1,
+            segment_id="seg_first",
+            text="introductory aside",
+            start_time=1.0,
+            end_time=3.0,
+            score=0.99,
+            frame_refs=[],
+            linked_score=None,
+        ),
+        _bundle(
+            rank=2,
+            segment_id="seg_visual",
+            text="plain transcript context",
+            start_time=5.0,
+            end_time=8.0,
+            score=0.2,
+            frame_refs=[],
+            linked_score=None,
+        ),
+    ]
+    bundles[1]["evidence_window"]["transcript_segments"].append(
+        {"segment_id": "seg_neighbor", "transcript_text": "neighbor context describes range grid"}
+    )
+    bundles[1]["visual_entities"] = [{"entity_id": "ent_grid", "text": "range grid diagram"}]
+
+    reranked, metadata = rerank_bundles(
+        bundles=bundles,
+        query="range grid diagram",
+        backend="stub",
+    )
+
+    assert metadata["enabled"] is True
+    assert metadata["backend"] == "stub"
+    assert metadata["strategy"] == "stub_evidence_overlap_v1"
+    assert metadata["private_safe"] is True
+    assert metadata["external_transport"] == "none"
+    assert [bundle["candidate"]["segment_id"] for bundle in reranked] == [
+        "seg_visual",
+        "seg_first",
+    ]
+    top = reranked[0]["rerank"]
+    assert top["backend"] == "stub"
+    assert top["breakdown"]["score"] == top["score"]
+    assert top["breakdown"]["original_rank"] == top["original_rank"]
+    assert "evidence_window.transcript_segments.transcript_text" in top["used_fields"]
+    assert "visual_entities.text" in top["used_fields"]
+    assert top["breakdown"]["signals"]["field_overlap"]["matched_terms"] == [
+        "diagram",
+        "grid",
+        "range",
+    ]
+
+
+def test_external_reranker_backends_are_disabled_by_default() -> None:
+    try:
+        resolve_reranker_backend("llm-judge")
+    except ValueError as exc:
+        assert "not enabled" in str(exc)
+        assert "external services" in str(exc)
+    else:
+        raise AssertionError("expected disabled external backend to raise ValueError")
 
 
 def _bundle(
