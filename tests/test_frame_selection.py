@@ -2,6 +2,7 @@ from oarag.frame_selection import (
     FrameSelectionConfig,
     analyze_pixels,
     select_representative_frames,
+    summarize_frame_temporal_coverage,
 )
 
 
@@ -86,6 +87,25 @@ def test_analyze_pixels_reports_contrast_and_detail_signal() -> None:
     assert signal.brightness == 0.5
     assert signal.contrast > 0.49
     assert signal.detail_score > 0.49
+
+
+def test_frame_temporal_coverage_warns_when_cap_leaves_late_segments_empty() -> None:
+    summary = summarize_frame_temporal_coverage(
+        frames=[{"frame_id": "early", "timestamp": 2.0}],
+        duration_sec=100.0,
+        frame_rate=1.0,
+        segments=[
+            {"segment_id": "seg_early", "start_time": 0.0, "end_time": 5.0},
+            {"segment_id": "seg_late", "start_time": 90.0, "end_time": 95.0},
+        ],
+    )
+
+    assert summary["temporal_coverage_ratio"] == 0.03
+    assert summary["frame_free_segment_ratio"] == 0.5
+    assert [warning["code"] for warning in summary["warnings"]] == [
+        "low_temporal_coverage",
+        "high_frame_free_segment_ratio",
+    ]
 
 
 def _frame(frame_id: str) -> dict:

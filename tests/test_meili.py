@@ -22,8 +22,8 @@ from oarag.schemas import (
 )
 
 
-EXPECTED_DEFAULT_SETTINGS_HASH = "cf3664e1c618e4b81fdfc7099cf9f2f6da7e552e48479e9127a55546af7a1abd"
-EXPECTED_VISUAL_ENTITY_SETTINGS_HASH = "bbda5dcb692e2d42d935f085654934584d4ec66ae7ce40238cb44541806770e9"
+EXPECTED_DEFAULT_SETTINGS_HASH = "f0a9515744b51f74ba52310b07940174f99f040f7f7a6935e3678a0445e95917"
+EXPECTED_VISUAL_ENTITY_SETTINGS_HASH = "5cb877a0006ff93448b2c06680fc566f41bd3d54cd527b6b2282c0e1b158ccdc"
 
 
 def test_lecture_segment_settings_payload_is_domain_agnostic_and_multilingual_safe() -> None:
@@ -67,7 +67,9 @@ def test_lecture_segment_settings_payload_is_domain_agnostic_and_multilingual_sa
         settings["displayedAttributes"].index("slide_id")
     )
     assert LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD in settings["displayedAttributes"]
+    assert LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD in settings["filterableAttributes"]
     assert "frame_refs" in settings["displayedAttributes"]
+    assert "visual_entities" in settings["displayedAttributes"]
     assert "source_video_path" not in settings["displayedAttributes"]
 
 
@@ -132,8 +134,10 @@ def test_visual_entity_settings_payload_indexes_direct_visual_evidence() -> None
         "entity_type",
         "source",
         "source_model",
+        "semantic_source_fields",
         "timestamp",
     ]
+    assert "semantic_source_fields" in settings["displayedAttributes"]
     assert "frame_path" in settings["displayedAttributes"]
     assert "source_video_path" not in settings["displayedAttributes"]
     assert settings["rankingRules"] == [

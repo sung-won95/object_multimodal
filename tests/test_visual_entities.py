@@ -565,6 +565,38 @@ def test_filter_visual_entities_keeps_vlm_description_without_text() -> None:
     assert summary["dropped_visual_entities"] == 0
 
 
+def test_filter_visual_entities_applies_low_confidence_policy_to_ocr_only() -> None:
+    base = {
+        "project_id": "sample_project",
+        "frame_id": "frame_000001",
+        "timestamp": 1.0,
+        "frame_path": "/tmp/frame.jpg",
+        "bbox": None,
+        "confidence": 0.32,
+    }
+    ocr_entity = VisualEntity(
+        entity_id="ent_ocr",
+        text="CALL",
+        entity_type="ocr_text",
+        source="ocr:tesseract",
+        **base,
+    )
+    vlm_entity = VisualEntity(
+        entity_id="ent_vlm",
+        text="",
+        entity_type="diagram",
+        source="vlm:stub-vlm",
+        visual_description="A low-confidence but useful visual description",
+        **base,
+    )
+
+    filtered, summary = filter_visual_entities([ocr_entity, vlm_entity])
+
+    assert [entity.entity_id for entity in filtered] == ["ent_vlm"]
+    assert summary["filter_reasons"]["low_confidence"] == 1
+    assert summary["policy"]["ocr_only_confidence_filters"] is True
+
+
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")

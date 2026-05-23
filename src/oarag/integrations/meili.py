@@ -69,6 +69,7 @@ LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
             "start_time",
             "end_time",
             "timestamp_center",
+            LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
         ],
         "sortableAttributes": [
             "timestamp_center",
@@ -94,6 +95,7 @@ LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
             "normalized_text",
             "slide_id",
             "frame_refs",
+            "visual_entities",
             "mention_candidates",
             "source",
         ],
@@ -147,6 +149,7 @@ LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
             "start_time",
             "end_time",
             "timestamp_center",
+            LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
         ],
         "sortableAttributes": [
             "timestamp_center",
@@ -174,6 +177,7 @@ LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
             LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
             "slide_id",
             "frame_refs",
+            "visual_entities",
             "mention_candidates",
             "source",
         ],
@@ -219,6 +223,7 @@ VISUAL_ENTITY_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
             "entity_type",
             "source",
             "source_model",
+            "semantic_source_fields",
             "timestamp",
         ],
         "sortableAttributes": [
@@ -236,6 +241,7 @@ VISUAL_ENTITY_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
             "entity_type",
             "confidence",
             "source",
+            "semantic_source_fields",
             "visual_description",
             "position",
             "relations",
