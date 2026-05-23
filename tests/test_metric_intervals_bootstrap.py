@@ -86,6 +86,10 @@ def test_generate_metric_intervals_writes_private_safe_bootstrap_and_paired_delt
     assert run.markdown_path.exists()
     assert run.payload["schema_version"] == "paper-metric-intervals-v1"
     assert run.payload["run_id"] == "interval_fixture"
+    assert run.payload["status"] == "needs_evidence"
+    assert run.payload["summary"]["robustness_status"] == "needs_evidence"
+    assert run.payload["summary"]["paired_delta_count"] > 0
+    assert run.payload["summary"]["caveat_count"] > 0
     assert run.payload["input"] == {
         "query_results_artifact": "query_results.jsonl",
         "metrics_artifact": "metrics.json",

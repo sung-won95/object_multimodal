@@ -409,6 +409,11 @@ def _claim_robustness(
         missing: list[str] = []
         local_blockers = blockers if claim_status == BLOCKED else []
         summary = "Robustness artifact reports a passing status."
+    elif status == "needs_evidence":
+        claim_status = NEEDS_EVIDENCE
+        missing = ["uncaveated paired robustness evidence"]
+        local_blockers = []
+        summary = "Robustness artifact is present but caveated or incomplete."
     elif status == "failed":
         claim_status = BLOCKED
         missing = []
@@ -427,7 +432,13 @@ def _claim_robustness(
         evidence=[
             {
                 "artifact": context.artifacts["robustness"],
-                "fields": ["schema_version", "status", "passed", "ok"],
+                "fields": [
+                    "schema_version",
+                    "status",
+                    "summary.robustness_status",
+                    "summary.caveat_count",
+                    "paired_deltas[]",
+                ],
             }
         ],
         missing_evidence=missing,
@@ -585,19 +596,64 @@ def _robustness_status(payload: Mapping[str, Any], *, provided: bool) -> str:
         return "missing"
     if not payload:
         return "unknown"
+    if payload.get("schema_version") == "paper-metric-intervals-v1":
+        return _metric_intervals_robustness_status(payload)
     for key in ("passed", "ok", "ready"):
         if payload.get(key) is True:
             return "passed"
         if payload.get(key) is False:
             return "failed"
-    status = str(payload.get("status") or payload.get("result") or "").strip().lower()
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    for raw_status in (
+        payload.get("status"),
+        payload.get("result"),
+        summary.get("status"),
+        summary.get("robustness_status"),
+        summary.get("overall_status"),
+    ):
+        status = _normalize_robustness_status(raw_status)
+        if status != "unknown":
+            return status
+    return "unknown"
+
+
+def _metric_intervals_robustness_status(payload: Mapping[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    for raw_status in (
+        payload.get("status"),
+        summary.get("status"),
+        summary.get("robustness_status"),
+    ):
+        status = _normalize_robustness_status(raw_status)
+        if status != "unknown":
+            return status
+
+    caveats = [item for item in payload.get("caveats", []) if item]
+    paired_deltas = _list_of_dicts(payload.get("paired_deltas"))
+    row_count = _optional_int(payload.get("row_count"))
+    if row_count == 0 or caveats or not paired_deltas:
+        return "needs_evidence"
+    return "passed"
+
+
+def _normalize_robustness_status(value: Any) -> str:
+    status = str(value or "").strip().lower()
     if status in {"pass", "passed", "success", "succeeded", "ok", "ready"}:
         return "passed"
     if status in {"fail", "failed", "error", "blocked", "not_ready"}:
         return "failed"
+    if status in {"needs_evidence", "caveated", "descriptive", "partial"}:
+        return "needs_evidence"
     if status in {"skip", "skipped", "missing", "not_run"}:
         return "missing"
     return "unknown"
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _overall_status(claims: list[dict[str, Any]]) -> str:

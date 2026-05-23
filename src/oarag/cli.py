@@ -9,6 +9,7 @@ from oarag.ingestion.alignment import align_segments_to_frames
 from oarag.evaluation.benchmark import run_benchmark
 from oarag.evaluation.claims import build_paper_claims
 from oarag.evaluation.experiment import run_paper_experiment
+from oarag.evaluation.paper_bundle import run_paper_bundle
 from oarag.evaluation.paper_registry import build_paper_artifact_registry
 from oarag.evaluation.quality_gate import check_retrieval_quality_gate
 from oarag.evaluation.readiness import audit_paper_readiness
@@ -1103,6 +1104,62 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paper_experiment.set_defaults(func=cmd_run_paper_experiment)
 
+    paper_bundle = subparsers.add_parser(
+        "run-paper-bundle",
+        help="Run the full paper experiment, robustness, readiness, claims, and registry bundle",
+    )
+    paper_bundle.add_argument("--manifest", required=True, type=Path)
+    paper_bundle.add_argument("--output-dir", required=True, type=Path)
+    paper_bundle.add_argument(
+        "--run-id",
+        help="Optional run ID override. Defaults to the manifest run_id or a timestamp.",
+    )
+    paper_bundle.add_argument(
+        "--gate-config",
+        type=Path,
+        help="Optional retrieval quality gate config JSON.",
+    )
+    paper_bundle.add_argument(
+        "--baseline-variant-id",
+        help="Baseline variant_id or mode for paired variant-minus-baseline deltas.",
+    )
+    paper_bundle.add_argument(
+        "--metric",
+        action="append",
+        dest="metrics",
+        help="Metric name to summarize. Repeat or pass comma-separated values.",
+    )
+    paper_bundle.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Bootstrap RNG seed.",
+    )
+    paper_bundle.add_argument(
+        "--sample-count",
+        type=int,
+        default=1000,
+        help="Bootstrap resample count.",
+    )
+    paper_bundle.add_argument(
+        "--confidence-level",
+        type=float,
+        default=0.95,
+        help="Bootstrap percentile interval confidence level.",
+    )
+    paper_bundle.add_argument(
+        "--diagnostic-top-k",
+        type=int,
+        default=None,
+        help="Write sanitized per-candidate diagnostics for EduVidQA benchmark suites.",
+    )
+    paper_bundle.add_argument(
+        "--no-fail-on-gate",
+        action="store_true",
+        help="Write gate results and continue bundle generation when thresholds fail.",
+    )
+    paper_bundle.set_defaults(func=cmd_run_paper_bundle)
+
     paper_readiness = subparsers.add_parser(
         "audit-paper-readiness",
         help="Generate a private-safe paper readiness checklist and gap report",
@@ -2078,6 +2135,43 @@ def cmd_run_paper_experiment(args: argparse.Namespace) -> None:
                 "paper_report": str(run.report.output_dir),
                 "quality_gate_result": str(run.quality_gate_result_path),
                 "experiment_manifest": str(run.experiment_manifest_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+def cmd_run_paper_bundle(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    run = run_paper_bundle(
+        client=client,
+        manifest_path=args.manifest,
+        output_dir=args.output_dir,
+        run_id=args.run_id,
+        gate_config_path=args.gate_config,
+        baseline_variant_id=args.baseline_variant_id,
+        metrics=args.metrics,
+        seed=args.seed,
+        sample_count=args.sample_count,
+        confidence_level=args.confidence_level,
+        repo_root=default_paths().repo_root,
+        diagnostic_top_k=args.diagnostic_top_k,
+        fail_on_gate=not args.no_fail_on_gate,
+        command=["oarag", *sys.argv[1:]],
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": run.run_id,
+                "output_dir": str(run.output_dir),
+                "paper_bundle_result": str(run.result_path),
+                "experiment_manifest": str(run.experiment.experiment_manifest_path),
+                "metric_intervals": str(run.metric_intervals.json_path),
+                "readiness_audit": str(run.readiness.json_path),
+                "claim_matrix": str(run.claims.json_path),
+                "artifact_registry": str(run.registry.json_path),
+                "status": run.registry.payload.get("status"),
             },
             ensure_ascii=False,
             indent=2,

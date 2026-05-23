@@ -105,9 +105,30 @@ def generate_metric_intervals(
         baseline_variant_id=baseline_variant_id,
         variants=variants,
     )
+    robustness_status = _robustness_status(
+        row_count=len(rows),
+        variants=variants,
+        paired_deltas=paired_deltas,
+        baseline_variant_id=baseline_variant_id,
+        caveats=caveats,
+    )
     payload = {
         "schema_version": PAPER_METRIC_INTERVALS_SCHEMA_VERSION,
         "run_id": run_id,
+        "status": robustness_status,
+        "summary": {
+            "robustness_status": robustness_status,
+            "row_count": len(rows),
+            "variant_count": len(variants),
+            "metric_count": len(metric_names),
+            "paired_delta_count": len(paired_deltas),
+            "baseline_variant_configured": baseline_variant_id is not None,
+            "baseline_variant_found": baseline_variant_id in variants
+            if baseline_variant_id is not None
+            else False,
+            "caveat_count": len(caveats),
+            "interpretation": _robustness_interpretation(robustness_status),
+        },
         "input": {
             "query_results_artifact": _artifact_name(resolved_query_results_path),
             "metrics_artifact": _artifact_name(resolved_metrics_path),
@@ -180,9 +201,20 @@ def metric_intervals_markdown(payload: Mapping[str, Any]) -> str:
         "Aggregate-only bootstrap confidence intervals and paired deltas for paper metrics.",
         "Raw queries, answers, transcripts, candidate evidence, query IDs, and local paths are excluded.",
         "",
-        "## Caveats",
+        "## Robustness Status",
         "",
     ]
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    lines.extend(
+        [
+            f"- Status: `{payload.get('status') or summary.get('robustness_status') or 'unknown'}`",
+            f"- Paired delta rows: {summary.get('paired_delta_count', 0)}",
+            f"- Caveat count: {summary.get('caveat_count', 0)}",
+            f"- Interpretation: {summary.get('interpretation') or 'unknown'}",
+            "",
+        ]
+    )
+    lines.extend(["## Caveats", ""])
     caveats = [str(item) for item in payload.get("caveats", []) if item]
     if caveats:
         for caveat in caveats:
@@ -302,6 +334,36 @@ def _variant_summary(
         "query_count": len(rows),
         "metrics": metrics,
     }
+
+
+def _robustness_status(
+    *,
+    row_count: int,
+    variants: list[str],
+    paired_deltas: list[dict[str, Any]],
+    baseline_variant_id: str | None,
+    caveats: list[str],
+) -> str:
+    if row_count <= 0 or not variants:
+        return "needs_evidence"
+    if baseline_variant_id is None or baseline_variant_id not in variants:
+        return "needs_evidence"
+    if not paired_deltas:
+        return "needs_evidence"
+    if caveats:
+        return "needs_evidence"
+    return "passed"
+
+
+def _robustness_interpretation(status: str) -> str:
+    if status == "passed":
+        return "Paired baseline deltas are available without generated caveats."
+    if status == "needs_evidence":
+        return (
+            "Intervals are descriptive or incomplete; do not treat them as confirmatory "
+            "robustness evidence."
+        )
+    return "Robustness status could not be determined from aggregate intervals."
 
 
 def _paired_delta_summaries(
