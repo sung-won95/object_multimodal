@@ -1,0 +1,26 @@
+{
+  "run_id": "public_retrieval_answer_matrix_fixture",
+  "deltas": [5, 10, 15],
+  "suites": [
+    {
+      "suite_id": "public_matrix",
+      "type": "retrieval_answer_matrix",
+      "domain": "public_synthetic",
+      "project_dir": ".",
+      "queries": "queries.jsonl",
+      "index": "public_segments",
+      "window_index": "public_windows",
+      "visual_index": "public_visual_entities",
+      "domain_lexicon": "domain_lexicon.json",
+      "limit": 3,
+      "neighbor_count": 0,
+      "include_answer": true,
+      "dataset_descriptor": {
+        "dataset_id": "public_fixture_matrix",
+        "split": "schema_smoke",
+        "version": "1",
+        "privacy": "public_fixture_aggregate_only"
+      }
+    }
+  ]
+}

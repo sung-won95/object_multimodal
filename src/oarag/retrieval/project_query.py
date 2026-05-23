@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any
 import urllib.error
 
-from oarag.core.domain_lexicon import QueryExpansion, load_domain_lexicon, normalize_term
+from oarag.core.domain_lexicon import (
+    DomainLexicon,
+    QueryExpansion,
+    load_domain_lexicon,
+    normalize_term,
+)
 from oarag.retrieval.evidence import (
     frame_id,
     make_evidence_window,
@@ -64,6 +69,7 @@ def query_project(
     visual_entities_path: Path | None = None,
     entity_links_path: Path | None = None,
     domain_lexicon_path: Path | None = None,
+    disable_domain_lexicon: bool = False,
     window_seconds: float | None = None,
     neighbor_count: int = 1,
     previous_neighbor_count: int | None = None,
@@ -82,9 +88,13 @@ def query_project(
         raise ValueError(f"Unknown retrieval_index_kind: {retrieval_index_kind}. Valid kinds: {valid}")
 
     resolved_project_dir = project_dir.expanduser().resolve()
-    domain_lexicon = load_domain_lexicon(
-        project_dir=resolved_project_dir,
-        domain_lexicon_path=domain_lexicon_path,
+    domain_lexicon = (
+        DomainLexicon()
+        if disable_domain_lexicon
+        else load_domain_lexicon(
+            project_dir=resolved_project_dir,
+            domain_lexicon_path=domain_lexicon_path,
+        )
     )
     resolved_segments_path = segment_artifact_path(resolved_project_dir, segments=segments_path)
     resolved_frames_manifest_path = resolve_project_path(
