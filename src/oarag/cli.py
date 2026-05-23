@@ -9,6 +9,7 @@ from oarag.ingestion.alignment import align_segments_to_frames
 from oarag.evaluation.benchmark import run_benchmark
 from oarag.evaluation.experiment import run_paper_experiment
 from oarag.evaluation.quality_gate import check_retrieval_quality_gate
+from oarag.evaluation.readiness import audit_paper_readiness
 from oarag.evaluation.reporting import generate_evaluation_report
 from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
 from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
@@ -1080,6 +1081,44 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paper_experiment.set_defaults(func=cmd_run_paper_experiment)
 
+    paper_readiness = subparsers.add_parser(
+        "audit-paper-readiness",
+        help="Generate a private-safe paper readiness checklist and gap report",
+    )
+    paper_readiness.add_argument("--experiment-manifest", required=True, type=Path)
+    paper_readiness.add_argument("--output-dir", required=True, type=Path)
+    paper_readiness.add_argument(
+        "--metrics",
+        type=Path,
+        help="Optional metrics.json override. Defaults to the experiment manifest artifact.",
+    )
+    paper_readiness.add_argument(
+        "--query-results",
+        type=Path,
+        help="Optional query_results.jsonl override for semantic evidence checks.",
+    )
+    paper_readiness.add_argument(
+        "--quality-gate-result",
+        type=Path,
+        help="Optional quality_gate_result.json override.",
+    )
+    paper_readiness.add_argument(
+        "--reproducibility",
+        type=Path,
+        help="Optional reproducibility.json override.",
+    )
+    paper_readiness.add_argument(
+        "--semantic-smoke",
+        type=Path,
+        help="Optional sanitized semantic live-smoke summary JSON.",
+    )
+    paper_readiness.add_argument(
+        "--fail-on-gap",
+        action="store_true",
+        help="Exit non-zero after writing outputs when readiness gaps are present.",
+    )
+    paper_readiness.set_defaults(func=cmd_audit_paper_readiness)
+
     lecture_smoke = subparsers.add_parser(
         "lecture-smoke",
         help="Run a private-safe lecture smoke suite from a manifest",
@@ -1890,6 +1929,33 @@ def cmd_run_paper_experiment(args: argparse.Namespace) -> None:
             indent=2,
         )
     )
+
+
+def cmd_audit_paper_readiness(args: argparse.Namespace) -> None:
+    audit = audit_paper_readiness(
+        experiment_manifest_path=args.experiment_manifest,
+        output_dir=args.output_dir,
+        metrics_path=args.metrics,
+        query_results_path=args.query_results,
+        quality_gate_result_path=args.quality_gate_result,
+        reproducibility_path=args.reproducibility,
+        semantic_smoke_path=args.semantic_smoke,
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": audit.payload.get("run_id"),
+                "ready": audit.payload.get("ready"),
+                "gap_count": audit.payload.get("gap_count"),
+                "json": str(audit.json_path) if audit.json_path is not None else None,
+                "markdown": str(audit.markdown_path) if audit.markdown_path is not None else None,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    if args.fail_on_gap and not audit.payload.get("ready"):
+        raise SystemExit(1)
 
 
 def cmd_lecture_smoke(args: argparse.Namespace) -> None:
