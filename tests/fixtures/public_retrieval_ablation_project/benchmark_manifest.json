@@ -1,0 +1,17 @@
+{
+  "run_id": "public_retrieval_ablation_fixture",
+  "deltas": [5, 10, 15],
+  "suites": [
+    {
+      "suite_id": "public_ablation",
+      "type": "retrieval_ablation",
+      "domain": "public_synthetic",
+      "project_dir": ".",
+      "queries": "queries.jsonl",
+      "index": "public_segments",
+      "visual_index": "public_visual_entities",
+      "limit": 3,
+      "modes": ["transcript-only", "visual-only", "time-aligned", "object-aligned"]
+    }
+  ]
+}

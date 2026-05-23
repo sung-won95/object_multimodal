@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import time
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -11,11 +13,39 @@ from typing import Any, Protocol
 from oarag.ingestion.eduvidqa import iter_records
 from oarag.evaluation.eval import evaluate_query, summarize
 from oarag.core.io import write_json, write_jsonl
+from oarag.retrieval.evidence import (
+    frame_id,
+    read_jsonl,
+    resolve_project_path,
+    segment_window,
+)
+from oarag.retrieval.project_index import segment_artifact_path
 from oarag.retrieval.project_query import query_project
 from oarag.core.schemas import EduVidQARecord, SearchCandidate
 
 
 DEFAULT_DELTAS = [5, 10, 15]
+PUBLIC_ABLATION_SCHEMA_VERSION = "retrieval-ablation-public-v1"
+DEFAULT_ABLATION_MODES = [
+    "transcript-only",
+    "visual-only",
+    "time-aligned",
+    "object-aligned",
+]
+ABLATION_MODE_ALIASES = {
+    "transcript": "transcript-only",
+    "transcript_only": "transcript-only",
+    "transcript-only": "transcript-only",
+    "visual": "visual-only",
+    "visual_only": "visual-only",
+    "visual-only": "visual-only",
+    "time": "time-aligned",
+    "time_aligned": "time-aligned",
+    "time-aligned": "time-aligned",
+    "object": "object-aligned",
+    "object_aligned": "object-aligned",
+    "object-aligned": "object-aligned",
+}
 
 
 class SearchClient(Protocol):
@@ -30,6 +60,18 @@ class BenchmarkRun:
     query_results_path: Path
     summary_path: Path
     metrics: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class AblationProject:
+    project_dir: Path
+    segments: list[dict[str, Any]]
+    segment_lookup: dict[str, dict[str, Any]]
+    frame_lookup: dict[str, dict[str, Any]]
+    visual_entities: list[dict[str, Any]]
+    entity_lookup: dict[str, dict[str, Any]]
+    links_by_segment: dict[str, list[dict[str, Any]]]
+    links_by_entity: dict[str, list[dict[str, Any]]]
 
 
 def run_benchmark(
@@ -70,6 +112,15 @@ def run_benchmark(
                 repo_root=resolved_repo_root,
                 deltas=deltas,
             )
+        elif suite_type == "retrieval_ablation":
+            metrics, results = run_retrieval_ablation_suite(
+                client=client,
+                suite=suite,
+                base_dir=base_dir,
+                repo_root=resolved_repo_root,
+                run_id=run_id,
+                deltas=deltas,
+            )
         else:
             raise ValueError(f"Unsupported benchmark suite type: {suite_type}")
         suite_metrics.append(metrics)
@@ -100,6 +151,90 @@ def run_benchmark(
         summary_path=summary_path,
         metrics=metrics_payload,
     )
+
+
+def run_retrieval_ablation_suite(
+    *,
+    client: SearchClient,
+    suite: dict[str, Any],
+    base_dir: Path,
+    repo_root: Path,
+    run_id: str,
+    deltas: list[int],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    suite_id = str(suite.get("suite_id") or suite.get("project_id") or "retrieval_ablation")
+    domain = str(suite.get("domain") or "public_synthetic")
+    project = _load_ablation_project(suite=suite, base_dir=base_dir, repo_root=repo_root)
+    queries = _read_ablation_queries(base_dir=base_dir, suite=suite)
+    index_uid = str(suite["index"])
+    visual_index_uid = _optional_str(suite.get("visual_index"))
+    limit = int(suite.get("limit", 5))
+    modes = _ablation_modes(suite)
+
+    rows: list[dict[str, Any]] = []
+    for query_index, query_row in enumerate(queries, start=1):
+        query_text = _query_text(query_row, query_index=query_index)
+        query_id = _query_id(query_row, query_index=query_index)
+        expected_ranges = _expected_ranges(query_row)
+        for mode in modes:
+            if mode == "visual-only" and visual_index_uid is None:
+                raise ValueError("retrieval_ablation visual-only mode requires visual_index")
+            row = _run_ablation_query(
+                client=client,
+                project=project,
+                run_id=run_id,
+                suite_id=suite_id,
+                domain=domain,
+                index_uid=index_uid,
+                visual_index_uid=visual_index_uid,
+                query_id=query_id,
+                query_row=query_row,
+                query_text=query_text,
+                expected_ranges=expected_ranges,
+                mode=mode,
+                limit=limit,
+                deltas=deltas,
+            )
+            rows.append(row)
+
+    mode_metrics = [
+        _ablation_mode_metrics(
+            mode=mode,
+            rows=[row for row in rows if row.get("mode") == mode],
+            deltas=deltas,
+        )
+        for mode in modes
+    ]
+    metric: dict[str, Any] = {
+        "schema_version": PUBLIC_ABLATION_SCHEMA_VERSION,
+        "suite_id": suite_id,
+        "suite_type": "retrieval_ablation",
+        "domain": domain,
+        "query_count": len(queries),
+        "result_count": len(rows),
+        "mode_count": len(mode_metrics),
+        "modes": mode_metrics,
+        "mode_metrics": {str(item["mode"]): item for item in mode_metrics},
+        "privacy": _public_ablation_privacy_payload(),
+    }
+    for delta in deltas:
+        metric[f"hit_at_{delta}s"] = _mean_or_none(
+            item.get(f"hit_at_{delta}s") for item in mode_metrics
+        )
+    metric["evidence_coverage_ratio"] = _mean_or_none(
+        item.get("evidence_coverage_ratio") for item in mode_metrics
+    )
+    metric["frame_backed_ratio"] = _mean_or_none(
+        item.get("frame_backed_ratio") for item in mode_metrics
+    )
+    metric["linked_entity_ratio"] = _mean_or_none(
+        item.get("linked_entity_ratio") for item in mode_metrics
+    )
+    metric["linked_entity_backed_ratio"] = metric["linked_entity_ratio"]
+    metric["mean_processing_time_ms"] = _mean_or_none(
+        item.get("mean_processing_time_ms") for item in mode_metrics
+    )
+    return metric, rows
 
 
 def run_eduvidqa_suite(
@@ -324,6 +459,705 @@ def run_local_project_suite(
     return metric, rows
 
 
+def _run_ablation_query(
+    *,
+    client: SearchClient,
+    project: AblationProject,
+    run_id: str,
+    suite_id: str,
+    domain: str,
+    index_uid: str,
+    visual_index_uid: str | None,
+    query_id: str,
+    query_row: dict[str, Any],
+    query_text: str,
+    expected_ranges: list[tuple[float, float]],
+    mode: str,
+    limit: int,
+    deltas: list[int],
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    search_responses: list[dict[str, Any]] = []
+    raw_hit_count = 0
+    candidates: list[dict[str, Any]] = []
+
+    if mode in {"transcript-only", "time-aligned", "object-aligned"}:
+        response = client.search(index_uid, query_text, limit=limit)
+        search_responses.append(response)
+        hits = _list_of_dicts(response.get("hits"))
+        raw_hit_count += len(hits)
+        candidates.extend(
+            _segment_candidates_from_hits(
+                hits=hits,
+                project=project,
+                mode=mode,
+                index_uid=index_uid,
+            )
+        )
+
+    if mode in {"visual-only", "object-aligned"} and visual_index_uid is not None:
+        response = client.search(visual_index_uid, query_text, limit=limit)
+        search_responses.append(response)
+        hits = _list_of_dicts(response.get("hits"))
+        raw_hit_count += len(hits)
+        candidates.extend(
+            _visual_candidates_from_hits(
+                hits=hits,
+                project=project,
+                mode=mode,
+                index_uid=visual_index_uid,
+            )
+        )
+
+    if mode == "object-aligned":
+        candidates = _merge_ablation_candidates(candidates, limit=limit)
+    else:
+        candidates = sorted(candidates, key=lambda item: _candidate_mode_sort_key(item, mode))[
+            :limit
+        ]
+
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 4)
+    candidate_errors = [_ablation_candidate_error(candidate, expected_ranges) for candidate in candidates]
+    best_error = min((error for error in candidate_errors if error is not None), default=None)
+    top_error = candidate_errors[0] if candidate_errors else None
+    hit_by_delta = {
+        str(delta): best_error is not None and best_error <= delta for delta in deltas
+    }
+    frame_backed = any(candidate.get("frame_backed") for candidate in candidates)
+    linked_entity_backed = any(candidate.get("linked_entity_backed") for candidate in candidates)
+    evidence_covered = _mode_evidence_covered(mode=mode, candidates=candidates)
+    top_candidate = candidates[0] if candidates else None
+
+    return {
+        "schema_version": PUBLIC_ABLATION_SCHEMA_VERSION,
+        "run_id": run_id,
+        "suite_id": suite_id,
+        "suite_type": "retrieval_ablation",
+        "domain": domain,
+        "mode": mode,
+        "query_id": query_id,
+        "query_label": _optional_public_label(query_row),
+        "privacy": _public_ablation_privacy_payload(),
+        "index_ref": f"index:{_short_hash(index_uid)}",
+        "visual_index_ref": f"index:{_short_hash(visual_index_uid)}"
+        if visual_index_uid is not None
+        else None,
+        "expected_time_available": bool(expected_ranges),
+        "search_hit_count": raw_hit_count,
+        "candidate_count": len(candidates),
+        "best_abs_error": best_error,
+        "top1_abs_error": top_error,
+        "hit_by_delta": hit_by_delta,
+        "mrr": _reciprocal_rank(candidate_errors, deltas=max(deltas)),
+        "evidence_covered": evidence_covered,
+        "frame_backed": frame_backed,
+        "linked_entity_backed": linked_entity_backed,
+        "top_candidate": _public_ablation_candidate(top_candidate),
+        "processing_time_ms": _combined_processing_time_ms(search_responses),
+        "elapsed_time_ms": elapsed_ms,
+    }
+
+
+def _segment_candidates_from_hits(
+    *,
+    hits: list[dict[str, Any]],
+    project: AblationProject,
+    mode: str,
+    index_uid: str,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for rank, hit in enumerate(hits, start=1):
+        segment_id = str(hit.get("segment_id") or hit.get("sample_id") or "").strip()
+        segment = project.segment_lookup.get(segment_id, hit)
+        target_segment_id = str(segment.get("segment_id") or segment_id).strip()
+        frame_ids = _segment_frame_ids(segment) if mode in {"time-aligned", "object-aligned"} else []
+        linked_entity_ids = (
+            _linked_entity_ids_for_segment(project, target_segment_id)
+            if mode == "object-aligned"
+            else []
+        )
+        candidates.append(
+            {
+                "source": "segment",
+                "index": index_uid,
+                "rank": rank,
+                "candidate_id": target_segment_id or str(hit.get("sample_id") or rank),
+                "target_segment_id": target_segment_id,
+                "score": _optional_float(hit.get("_rankingScore")),
+                "start_time": _first_float(hit.get("start_time"), segment.get("start_time")),
+                "end_time": _first_float(hit.get("end_time"), segment.get("end_time")),
+                "timestamp_center": _first_float(
+                    hit.get("timestamp_center"),
+                    segment.get("timestamp_center"),
+                ),
+                "has_transcript_evidence": bool(
+                    str(hit.get("transcript_text") or segment.get("transcript_text") or "").strip()
+                ),
+                "frame_ids": frame_ids,
+                "frame_backed": bool(frame_ids),
+                "linked_entity_ids": linked_entity_ids,
+                "linked_entity_backed": bool(linked_entity_ids),
+            }
+        )
+    return candidates
+
+
+def _visual_candidates_from_hits(
+    *,
+    hits: list[dict[str, Any]],
+    project: AblationProject,
+    mode: str,
+    index_uid: str,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for rank, hit in enumerate(hits, start=1):
+        entity = _visual_entity_for_hit(hit=hit, project=project)
+        target_segment_id, resolution_method = _resolve_visual_target_segment(
+            hit=hit,
+            entity=entity,
+            project=project,
+            use_entity_links=mode == "object-aligned",
+        )
+        target = project.segment_lookup.get(target_segment_id or "", {})
+        candidate_id = str(
+            entity.get("entity_id") or hit.get("entity_id") or hit.get("frame_id") or rank
+        )
+        frame_ids = _visual_candidate_frame_ids(hit=hit, entity=entity, target=target)
+        linked_entity_ids: list[str] = []
+        if mode == "object-aligned":
+            if resolution_method == "entity_link":
+                linked_entity_ids.extend(_entity_id_values(entity, hit))
+            if target_segment_id:
+                linked_entity_ids.extend(_linked_entity_ids_for_segment(project, target_segment_id))
+        linked_entity_ids = _unique_strings(linked_entity_ids)
+        candidates.append(
+            {
+                "source": "visual_entity",
+                "index": index_uid,
+                "rank": rank,
+                "candidate_id": candidate_id,
+                "target_segment_id": target_segment_id,
+                "target_resolution": resolution_method,
+                "score": _optional_float(hit.get("_rankingScore")),
+                "start_time": _first_float(target.get("start_time"), entity.get("timestamp")),
+                "end_time": _first_float(target.get("end_time"), entity.get("timestamp")),
+                "timestamp_center": _first_float(
+                    target.get("timestamp_center"),
+                    entity.get("timestamp"),
+                    hit.get("timestamp"),
+                ),
+                "has_transcript_evidence": bool(str(target.get("transcript_text") or "").strip()),
+                "frame_ids": frame_ids,
+                "frame_backed": bool(frame_ids),
+                "linked_entity_ids": linked_entity_ids,
+                "linked_entity_backed": bool(linked_entity_ids),
+            }
+        )
+    return candidates
+
+
+def _merge_ablation_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for candidate in candidates:
+        key = str(candidate.get("target_segment_id") or candidate.get("candidate_id") or "")
+        grouped[key].append(candidate)
+
+    merged: list[dict[str, Any]] = []
+    for key, items in grouped.items():
+        primary = sorted(items, key=lambda item: _candidate_mode_sort_key(item, "object-aligned"))[0]
+        frame_ids = _unique_strings(
+            frame_id_value
+            for item in items
+            for frame_id_value in _string_list(item.get("frame_ids"))
+        )
+        linked_entity_ids = _unique_strings(
+            entity_id
+            for item in items
+            for entity_id in _string_list(item.get("linked_entity_ids"))
+        )
+        sources = _unique_strings(item.get("source") for item in items)
+        merged_item = dict(primary)
+        merged_item["candidate_id"] = str(primary.get("candidate_id") or key)
+        merged_item["frame_ids"] = frame_ids
+        merged_item["frame_backed"] = bool(frame_ids)
+        merged_item["linked_entity_ids"] = linked_entity_ids
+        merged_item["linked_entity_backed"] = bool(linked_entity_ids)
+        merged_item["source_count"] = len(sources)
+        merged_item["sources"] = sources
+        merged.append(merged_item)
+    return sorted(merged, key=lambda item: _candidate_mode_sort_key(item, "object-aligned"))[:limit]
+
+
+def _ablation_mode_metrics(
+    *,
+    mode: str,
+    rows: list[dict[str, Any]],
+    deltas: list[int],
+) -> dict[str, Any]:
+    metric: dict[str, Any] = {
+        "mode": mode,
+        "query_count": len(rows),
+        "mean_abs_error": _mean_or_none(
+            row.get("best_abs_error") for row in rows if row.get("best_abs_error") is not None
+        ),
+        "top1_mean_abs_error": _mean_or_none(
+            row.get("top1_abs_error") for row in rows if row.get("top1_abs_error") is not None
+        ),
+        "mrr_at_max_delta": _mean_or_none(row.get("mrr") for row in rows),
+        "evidence_coverage_ratio": _ratio(rows, "evidence_covered"),
+        "evidence_coverage": _ratio(rows, "evidence_covered"),
+        "frame_backed_ratio": _ratio(rows, "frame_backed"),
+        "linked_entity_ratio": _ratio(rows, "linked_entity_backed"),
+        "linked_entity_backed_ratio": _ratio(rows, "linked_entity_backed"),
+        "mean_processing_time_ms": _mean_or_none(row.get("processing_time_ms") for row in rows),
+        "mean_elapsed_time_ms": _mean_or_none(row.get("elapsed_time_ms") for row in rows),
+        "source_counts": _source_counts(rows),
+    }
+    for delta in deltas:
+        metric[f"hit_at_{delta}s"] = _ratio_hit(rows, str(delta))
+    return metric
+
+
+def _load_ablation_project(
+    *,
+    suite: dict[str, Any],
+    base_dir: Path,
+    repo_root: Path,
+) -> AblationProject:
+    project_dir = _project_dir_from_suite(suite=suite, base_dir=base_dir, repo_root=repo_root)
+    segments_path = segment_artifact_path(project_dir, segments=_optional_path(suite.get("segments")))
+    frames_manifest_path = resolve_project_path(
+        project_dir,
+        _optional_path(suite.get("frames_manifest")),
+        default=project_dir / "manifests" / "frames_manifest.jsonl",
+    )
+    visual_entities_path = resolve_project_path(
+        project_dir,
+        _optional_path(suite.get("visual_entities")),
+        default=project_dir / "manifests" / "visual_entities.jsonl",
+    )
+    entity_links_path = resolve_project_path(
+        project_dir,
+        _optional_path(suite.get("entity_links")),
+        default=project_dir / "manifests" / "entity_links.jsonl",
+    )
+    segments = read_jsonl(segments_path)
+    frames = read_jsonl(frames_manifest_path) if frames_manifest_path.exists() else []
+    visual_entities = read_jsonl(visual_entities_path) if visual_entities_path.exists() else []
+    entity_links = read_jsonl(entity_links_path) if entity_links_path.exists() else []
+    links_by_segment: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    links_by_entity: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for link in entity_links:
+        segment_id = str(link.get("segment_id") or "").strip()
+        entity_id = str(link.get("entity_id") or "").strip()
+        if segment_id:
+            links_by_segment[segment_id].append(link)
+        if entity_id:
+            links_by_entity[entity_id].append(link)
+    return AblationProject(
+        project_dir=project_dir,
+        segments=segments,
+        segment_lookup={
+            str(segment.get("segment_id") or segment.get("sample_id") or ""): segment
+            for segment in segments
+        },
+        frame_lookup={frame_id(frame): frame for frame in frames},
+        visual_entities=visual_entities,
+        entity_lookup={
+            str(entity.get("entity_id") or ""): entity
+            for entity in visual_entities
+            if entity.get("entity_id") is not None
+        },
+        links_by_segment=dict(links_by_segment),
+        links_by_entity=dict(links_by_entity),
+    )
+
+
+def _read_ablation_queries(*, base_dir: Path, suite: dict[str, Any]) -> list[dict[str, Any]]:
+    source = suite.get("queries", suite.get("query_file"))
+    if isinstance(source, list):
+        return [dict(item) for item in source if isinstance(item, dict)]
+    if source is None:
+        raise ValueError("retrieval_ablation suite requires queries or query_file")
+    path = _resolve_path(base_dir, source)
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        return _read_query_csv(path)
+    if suffix == ".jsonl":
+        rows: list[dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                payload = json.loads(stripped)
+                if not isinstance(payload, dict):
+                    raise ValueError(f"JSONL query rows must be objects: {path}:{line_number}")
+                rows.append(payload)
+        return rows
+    if suffix == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            return [dict(item) for item in payload if isinstance(item, dict)]
+        if isinstance(payload, dict) and isinstance(payload.get("queries"), list):
+            return [dict(item) for item in payload["queries"] if isinstance(item, dict)]
+    raise ValueError(f"Unsupported retrieval_ablation query file format: {path}")
+
+
+def _ablation_modes(suite: dict[str, Any]) -> list[str]:
+    raw_modes = suite.get("modes") or DEFAULT_ABLATION_MODES
+    if isinstance(raw_modes, str):
+        raw_items: list[Any] = [item.strip() for item in raw_modes.split(",")]
+    else:
+        raw_items = list(raw_modes)
+    modes: list[str] = []
+    for raw_item in raw_items:
+        mode_value = raw_item.get("mode") if isinstance(raw_item, dict) else raw_item
+        key = str(mode_value or "").strip().lower().replace(" ", "-")
+        normalized = ABLATION_MODE_ALIASES.get(key.replace("-", "_"), ABLATION_MODE_ALIASES.get(key))
+        if normalized is None:
+            raise ValueError(f"Unsupported retrieval_ablation mode: {mode_value}")
+        if normalized not in modes:
+            modes.append(normalized)
+    if not modes:
+        raise ValueError("retrieval_ablation requires at least one mode")
+    return modes
+
+
+def _expected_ranges(query_row: dict[str, Any]) -> list[tuple[float, float]]:
+    time_hint = str(query_row.get("expected_time_hint") or query_row.get("time_hint") or "")
+    ranges = parse_time_hint(time_hint)
+    if ranges:
+        return ranges
+    start = _optional_float(query_row.get("expected_start_time"))
+    end = _optional_float(query_row.get("expected_end_time"))
+    if start is not None or end is not None:
+        if start is None:
+            start = end
+        if end is None:
+            end = start
+        if start is not None and end is not None:
+            return [(min(start, end), max(start, end))]
+    points = query_row.get("timestamp_points", query_row.get("expected_timestamp"))
+    if not isinstance(points, list):
+        points = [] if points is None else [points]
+    ranges = []
+    for point in points:
+        parsed = _optional_float(point)
+        if parsed is not None:
+            ranges.append((parsed, parsed))
+    return ranges
+
+
+def _visual_entity_for_hit(*, hit: dict[str, Any], project: AblationProject) -> dict[str, Any]:
+    entity_id = str(hit.get("entity_id") or "").strip()
+    if entity_id and entity_id in project.entity_lookup:
+        return project.entity_lookup[entity_id]
+    return hit
+
+
+def _resolve_visual_target_segment(
+    *,
+    hit: dict[str, Any],
+    entity: dict[str, Any],
+    project: AblationProject,
+    use_entity_links: bool,
+) -> tuple[str | None, str]:
+    hit_segment_id = str(hit.get("segment_id") or entity.get("segment_id") or "").strip()
+    if hit_segment_id and hit_segment_id in project.segment_lookup:
+        return hit_segment_id, "hit_segment_id"
+
+    if use_entity_links:
+        entity_ids = _entity_id_values(entity, hit)
+        linked_segments = [
+            str(link.get("segment_id") or "").strip()
+            for entity_id in entity_ids
+            for link in project.links_by_entity.get(entity_id, [])
+            if str(link.get("segment_id") or "").strip() in project.segment_lookup
+        ]
+        if linked_segments:
+            return sorted(set(linked_segments))[0], "entity_link"
+
+    frame_ids = _visual_candidate_frame_ids(hit=hit, entity=entity, target={})
+    if frame_ids:
+        for segment in project.segments:
+            segment_id = str(segment.get("segment_id") or "").strip()
+            if set(frame_ids).intersection(_segment_frame_ids(segment)) and segment_id:
+                return segment_id, "frame_ref"
+
+    timestamp = _first_float(entity.get("timestamp"), hit.get("timestamp"))
+    if timestamp is not None:
+        nearest = _nearest_segment_to_timestamp(project.segments, timestamp)
+        if nearest is not None:
+            return str(nearest.get("segment_id") or "").strip() or None, "timestamp_nearest"
+    return None, "unresolved"
+
+
+def _nearest_segment_to_timestamp(
+    segments: list[dict[str, Any]],
+    timestamp: float,
+) -> dict[str, Any] | None:
+    if not segments:
+        return None
+    return sorted(
+        segments,
+        key=lambda segment: (
+            _segment_timestamp_distance(segment, timestamp),
+            str(segment.get("segment_id") or ""),
+        ),
+    )[0]
+
+
+def _segment_timestamp_distance(segment: dict[str, Any], timestamp: float) -> float:
+    window = segment_window(segment)
+    if window is None:
+        center = _optional_float(segment.get("timestamp_center"))
+        return abs(center - timestamp) if center is not None else float("inf")
+    if window[0] <= timestamp <= window[1]:
+        return 0.0
+    return min(abs(timestamp - window[0]), abs(timestamp - window[1]))
+
+
+def _candidate_mode_sort_key(candidate: dict[str, Any], mode: str) -> tuple[Any, ...]:
+    rank = _optional_int(candidate.get("rank")) or 10**9
+    source = str(candidate.get("source") or "")
+    source_priority = 0 if source == "segment" else 1
+    if mode == "object-aligned":
+        return (
+            not bool(candidate.get("linked_entity_backed")),
+            not bool(candidate.get("frame_backed")),
+            rank,
+            source_priority,
+            str(candidate.get("candidate_id") or ""),
+        )
+    if mode == "time-aligned":
+        return (
+            not bool(candidate.get("frame_backed")),
+            rank,
+            source_priority,
+            str(candidate.get("candidate_id") or ""),
+        )
+    return (rank, source_priority, str(candidate.get("candidate_id") or ""))
+
+
+def _ablation_candidate_error(
+    candidate: dict[str, Any],
+    expected_ranges: list[tuple[float, float]],
+) -> float | None:
+    if not expected_ranges:
+        return None
+    center = _first_float(candidate.get("timestamp_center"))
+    if center is None:
+        start = _optional_float(candidate.get("start_time"))
+        end = _optional_float(candidate.get("end_time"))
+        if start is not None and end is not None:
+            center = (start + end) / 2.0
+        else:
+            center = start if start is not None else end
+    if center is None:
+        return None
+    return min(_point_to_range_distance(center, expected_range) for expected_range in expected_ranges)
+
+
+def _mode_evidence_covered(*, mode: str, candidates: list[dict[str, Any]]) -> bool:
+    if not candidates:
+        return False
+    if mode == "transcript-only":
+        return any(candidate.get("has_transcript_evidence") for candidate in candidates)
+    if mode == "visual-only":
+        return any(candidate.get("source") == "visual_entity" for candidate in candidates)
+    if mode == "time-aligned":
+        return any(candidate.get("frame_backed") for candidate in candidates)
+    if mode == "object-aligned":
+        return any(
+            candidate.get("linked_entity_backed")
+            or candidate.get("frame_backed")
+            or candidate.get("source") == "visual_entity"
+            for candidate in candidates
+        )
+    return bool(candidates)
+
+
+def _public_ablation_candidate(candidate: dict[str, Any] | None) -> dict[str, Any] | None:
+    if candidate is None:
+        return None
+    source = str(candidate.get("source") or "candidate")
+    candidate_id = str(
+        candidate.get("target_segment_id") or candidate.get("candidate_id") or "unknown"
+    )
+    return {
+        "ref": f"{source}:{_short_hash(candidate_id)}",
+        "source": source,
+        "timestamp_available": _first_float(
+            candidate.get("timestamp_center"),
+            candidate.get("start_time"),
+            candidate.get("end_time"),
+        )
+        is not None,
+        "source_count": candidate.get("source_count"),
+    }
+
+
+def _public_ablation_privacy_payload() -> dict[str, Any]:
+    return {
+        "public_outputs_are_sanitized": True,
+        "raw_query_text": "redacted",
+        "transcript_excerpt": "redacted",
+        "local_paths": "redacted",
+        "raw_candidate_ids": "hashed",
+        "raw_visual_entity_text": "redacted",
+        "raw_response_in_public_output": False,
+    }
+
+
+def _query_text(query_row: dict[str, Any], *, query_index: int) -> str:
+    value = query_row.get("query_text", query_row.get("query"))
+    if value is None or not str(value).strip():
+        raise ValueError(f"retrieval_ablation query #{query_index} is missing query_text")
+    return str(value)
+
+
+def _query_id(query_row: dict[str, Any], *, query_index: int) -> str:
+    value = query_row.get("query_id", query_row.get("id"))
+    if value is None or not str(value).strip():
+        return f"q{query_index:04d}"
+    return str(value).strip()
+
+
+def _optional_public_label(query_row: dict[str, Any]) -> str | None:
+    value = query_row.get("public_label", query_row.get("query_label"))
+    if value is None or not str(value).strip():
+        return None
+    return str(value).strip()
+
+
+def _visual_candidate_frame_ids(
+    *,
+    hit: dict[str, Any],
+    entity: dict[str, Any],
+    target: dict[str, Any],
+) -> list[str]:
+    values = [
+        hit.get("frame_id"),
+        entity.get("frame_id"),
+        *(_string_list(target.get("frame_refs")) if target else []),
+    ]
+    return _unique_strings(values)
+
+
+def _segment_frame_ids(segment: dict[str, Any]) -> list[str]:
+    return _unique_strings(segment.get("frame_refs") or [])
+
+
+def _linked_entity_ids_for_segment(project: AblationProject, segment_id: str | None) -> list[str]:
+    if not segment_id:
+        return []
+    return _unique_strings(
+        link.get("entity_id") for link in project.links_by_segment.get(segment_id, [])
+    )
+
+
+def _entity_id_values(*items: dict[str, Any]) -> list[str]:
+    return _unique_strings(item.get("entity_id") for item in items)
+
+
+def _source_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter()
+    for row in rows:
+        top = row.get("top_candidate")
+        source = top.get("source") if isinstance(top, dict) else None
+        counts[str(source or "none")] += 1
+    return dict(sorted(counts.items()))
+
+
+def _combined_processing_time_ms(responses: list[dict[str, Any]]) -> float | None:
+    values = [
+        _optional_float(response.get("processingTimeMs"))
+        for response in responses
+        if response.get("processingTimeMs") is not None
+    ]
+    values = [value for value in values if value is not None]
+    if not values:
+        return None
+    total = sum(values)
+    return int(total) if total.is_integer() else round(total, 4)
+
+
+def _ratio(rows: list[dict[str, Any]], key: str) -> float | None:
+    if not rows:
+        return None
+    return round(sum(1.0 if row.get(key) else 0.0 for row in rows) / len(rows), 4)
+
+
+def _ratio_hit(rows: list[dict[str, Any]], delta: str) -> float | None:
+    if not rows:
+        return None
+    return round(
+        sum(1.0 if (row.get("hit_by_delta") or {}).get(delta) else 0.0 for row in rows)
+        / len(rows),
+        4,
+    )
+
+
+def _mean_or_none(values: Any) -> float | None:
+    numbers = [float(value) for value in values if value is not None]
+    if not numbers:
+        return None
+    return round(sum(numbers) / len(numbers), 4)
+
+
+def _first_float(*values: Any) -> float | None:
+    for value in values:
+        parsed = _optional_float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _optional_path(value: Any) -> Path | None:
+    if value is None:
+        return None
+    return Path(str(value)).expanduser()
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _string_list(value: Any) -> list[str]:
+    raw_items = value if isinstance(value, list) else ([] if value is None else [value])
+    return [str(item).strip() for item in raw_items if str(item).strip()]
+
+
+def _unique_strings(values: Any) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _short_hash(value: str | None) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:12]
+
+
 def parse_time_hint(value: str) -> list[tuple[float, float]]:
     ranges: list[tuple[float, float]] = []
     for start, end in re_time_ranges(value):
@@ -506,6 +1340,41 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 rerank=_format_rerank(suite.get("rerank")),
             )
         )
+    ablation_modes = [
+        (suite, mode)
+        for suite in metrics["suites"]
+        for mode in suite.get("modes", [])
+        if isinstance(mode, dict)
+    ]
+    if ablation_modes:
+        lines.extend(
+            [
+                "",
+                "## Retrieval Ablation Modes",
+                "",
+                "Public ablation outputs are sanitized: raw queries, transcript excerpts, "
+                "local paths, visual labels, and raw candidate IDs are omitted.",
+                "",
+                "| suite | mode | queries | Hit@10s | evidence | frame-backed | linked-entity | latency ms |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for suite, mode in ablation_modes:
+            lines.append(
+                "| {suite_id} | {mode} | {query_count} | {hit10} | {evidence} | "
+                "{frame} | {linked} | {latency} |".format(
+                    suite_id=suite.get("suite_id"),
+                    mode=mode.get("mode"),
+                    query_count=mode.get("query_count") or 0,
+                    hit10=_format_metric(mode.get("hit_at_10s")),
+                    evidence=_format_metric(mode.get("evidence_coverage_ratio")),
+                    frame=_format_metric(mode.get("frame_backed_ratio")),
+                    linked=_format_metric(mode.get("linked_entity_ratio")),
+                    latency=_format_metric(
+                        mode.get("mean_processing_time_ms") or mode.get("mean_elapsed_time_ms")
+                    ),
+                )
+            )
     lines.extend(["", "## Anti-Overfit View", ""])
     for domain, payload in metrics["anti_overfit"]["domains"].items():
         lines.append(

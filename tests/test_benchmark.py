@@ -47,6 +47,46 @@ class FakeClient:
         return {"hits": hits[:limit], "processingTimeMs": 3, "indexUid": index_uid}
 
 
+class FakeAblationClient:
+    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+        if index_uid == "public_segments":
+            hits = [
+                {
+                    "segment_id": "seg_wrap_public",
+                    "sample_id": "seg_wrap_public",
+                    "video_id": "public_demo_video",
+                    "start_time": 30.0,
+                    "end_time": 34.0,
+                    "timestamp_center": 32.0,
+                    "transcript_text": "PUBLIC SYNTHETIC wrong transcript must not leak",
+                    "_rankingScore": 0.91,
+                },
+                {
+                    "segment_id": "seg_loss_public",
+                    "sample_id": "seg_loss_public",
+                    "video_id": "public_demo_video",
+                    "start_time": 10.0,
+                    "end_time": 14.0,
+                    "timestamp_center": 12.0,
+                    "transcript_text": "PUBLIC SYNTHETIC correct transcript must not leak",
+                    "_rankingScore": 0.8,
+                },
+            ]
+            return {"hits": hits[:limit], "processingTimeMs": 5, "indexUid": index_uid}
+        if index_uid == "public_visual_entities":
+            hits = [
+                {
+                    "entity_id": "ent_loss_public",
+                    "frame_id": "frame_loss_public",
+                    "timestamp": 12.0,
+                    "text": "PUBLIC VISUAL LABEL loss curve",
+                    "_rankingScore": 0.97,
+                }
+            ]
+            return {"hits": hits[:limit], "processingTimeMs": 7, "indexUid": index_uid}
+        return {"hits": [], "processingTimeMs": 1, "indexUid": index_uid}
+
+
 def test_parse_time_hint_extracts_multiple_ranges() -> None:
     assert parse_time_hint("95-102s or 126-131s") == [(95.0, 102.0), (126.0, 131.0)]
 
@@ -218,6 +258,71 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
     assert "| local_suite | local_project | local_pilot | on (domain_lexicon.json) |" in summary
     assert "on (deterministic_evidence_v1)" in summary
     assert "Anti-Overfit View" in summary
+
+
+def test_retrieval_ablation_public_fixture_outputs_are_sanitized(tmp_path: Path) -> None:
+    fixture_dir = Path("tests/fixtures/public_retrieval_ablation_project").resolve()
+    run = run_benchmark(
+        client=FakeAblationClient(),
+        manifest_path=fixture_dir / "benchmark_manifest.json",
+        output_dir=tmp_path / "ablation",
+        repo_root=Path.cwd(),
+    )
+
+    assert run.metrics_path.exists()
+    assert run.query_results_path.exists()
+    assert run.summary_path.exists()
+    assert run.metrics["query_count"] == 4
+    suite = run.metrics["suites"][0]
+    assert suite["schema_version"] == "retrieval-ablation-public-v1"
+    assert suite["query_count"] == 1
+    assert suite["mode_count"] == 4
+    mode_metrics = suite["mode_metrics"]
+    assert mode_metrics["transcript-only"]["hit_at_5s"] == 1.0
+    assert mode_metrics["transcript-only"]["frame_backed_ratio"] == 0.0
+    assert mode_metrics["transcript-only"]["linked_entity_ratio"] == 0.0
+    assert mode_metrics["visual-only"]["frame_backed_ratio"] == 1.0
+    assert mode_metrics["visual-only"]["linked_entity_ratio"] == 0.0
+    assert mode_metrics["time-aligned"]["frame_backed_ratio"] == 1.0
+    assert mode_metrics["object-aligned"]["linked_entity_ratio"] == 1.0
+
+    rows = [
+        json.loads(line)
+        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert {row["mode"] for row in rows} == {
+        "transcript-only",
+        "visual-only",
+        "time-aligned",
+        "object-aligned",
+    }
+    assert all("query_text" not in row for row in rows)
+    assert all(row["privacy"]["raw_query_text"] == "redacted" for row in rows)
+    assert all(row["top_candidate"]["ref"] for row in rows)
+
+    public_text = "\n".join(
+        [
+            run.metrics_path.read_text(encoding="utf-8"),
+            run.query_results_path.read_text(encoding="utf-8"),
+            run.summary_path.read_text(encoding="utf-8"),
+        ]
+    )
+    for sensitive in [
+        "PUBLIC RAW QUERY",
+        "loss curve slope should stay private-safe",
+        "PUBLIC SYNTHETIC",
+        "PUBLIC VISUAL LABEL",
+        "seg_loss_public",
+        "seg_wrap_public",
+        "ent_loss_public",
+        "frame_loss_public",
+        "frames/frame_loss_public.jpg",
+        str(fixture_dir),
+    ]:
+        assert sensitive not in public_text
+    assert "Retrieval Ablation Modes" in public_text
+    assert "raw_query_text" in public_text
+    assert "redacted" in public_text
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
