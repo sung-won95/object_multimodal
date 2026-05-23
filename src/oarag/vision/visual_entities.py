@@ -15,6 +15,7 @@ from oarag.core.schemas import VLMVisualObservation, VisualEntity, slugify
 
 OCR_MIN_CONFIDENCE = 0.40
 OCR_SHORT_TEXT_MIN_CONFIDENCE = 0.85
+OCR_SHORT_TEXT_MAX_ALNUM_CHARS = 1
 VLM_OBSERVATIONS_BACKEND = "vlm-observations"
 VLM_OBSERVATION_SUCCESS_STATUS = "success"
 
@@ -378,6 +379,12 @@ def filter_visual_entities(
         "visual_entities": len(filtered),
         "dropped_visual_entities": len(entities) - len(filtered),
         "filter_reasons": reasons,
+        "policy": {
+            "ocr_min_confidence": OCR_MIN_CONFIDENCE,
+            "ocr_short_text_min_confidence": OCR_SHORT_TEXT_MIN_CONFIDENCE,
+            "ocr_short_text_max_alnum_chars": OCR_SHORT_TEXT_MAX_ALNUM_CHARS,
+            "ocr_only_confidence_filters": True,
+        },
     }
 
 
@@ -464,14 +471,25 @@ def _visual_entity_drop_reason(entity: VisualEntity) -> str | None:
     if not normalized:
         return "empty_text"
     confidence = entity.confidence
-    if confidence is not None and confidence < OCR_MIN_CONFIDENCE:
+    is_ocr = _is_ocr_entity(entity)
+    if is_ocr and confidence is not None and confidence < OCR_MIN_CONFIDENCE:
         return "low_confidence"
     alnum_count = sum(1 for char in normalized if char.isalnum())
     if alnum_count == 0:
         return "no_alnum"
-    if alnum_count == 1 and (confidence is None or confidence < OCR_SHORT_TEXT_MIN_CONFIDENCE):
+    if (
+        is_ocr
+        and alnum_count <= OCR_SHORT_TEXT_MAX_ALNUM_CHARS
+        and (confidence is None or confidence < OCR_SHORT_TEXT_MIN_CONFIDENCE)
+    ):
         return "short_low_confidence"
     return None
+
+
+def _is_ocr_entity(entity: VisualEntity) -> bool:
+    source = (entity.source or "").casefold()
+    entity_type = (entity.entity_type or "").casefold()
+    return source.startswith("ocr:") or entity_type == "ocr_text"
 
 
 def _entity_duplicate_key(entity: VisualEntity) -> tuple[Any, ...]:
@@ -625,6 +643,7 @@ def _update_project_manifest(
         "visual_entities": entities_total,
         "dropped_visual_entities": filter_summary["dropped_visual_entities"],
         "filter_reasons": filter_summary["filter_reasons"],
+        "filter_policy": filter_summary["policy"],
     }
     write_json(manifest_path, payload)
 
