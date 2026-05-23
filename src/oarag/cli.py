@@ -7,6 +7,7 @@ from pathlib import Path
 
 from oarag.ingestion.alignment import align_segments_to_frames
 from oarag.evaluation.benchmark import run_benchmark
+from oarag.evaluation.experiment import run_paper_experiment
 from oarag.evaluation.quality_gate import check_retrieval_quality_gate
 from oarag.evaluation.reporting import generate_evaluation_report
 from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
@@ -1030,6 +1031,34 @@ def build_parser() -> argparse.ArgumentParser:
     retrieval_gate.add_argument("--config", required=True, type=Path)
     retrieval_gate.set_defaults(func=cmd_check_retrieval_gate)
 
+    paper_experiment = subparsers.add_parser(
+        "run-paper-experiment",
+        help="Run benchmark, paper report generation, optional gate, and experiment manifest",
+    )
+    paper_experiment.add_argument("--manifest", required=True, type=Path)
+    paper_experiment.add_argument("--output-dir", required=True, type=Path)
+    paper_experiment.add_argument(
+        "--run-id",
+        help="Optional run ID override. Defaults to the manifest run_id or a timestamp.",
+    )
+    paper_experiment.add_argument(
+        "--gate-config",
+        type=Path,
+        help="Optional retrieval quality gate config JSON.",
+    )
+    paper_experiment.add_argument(
+        "--diagnostic-top-k",
+        type=int,
+        default=None,
+        help="Write sanitized per-candidate diagnostics for EduVidQA benchmark suites.",
+    )
+    paper_experiment.add_argument(
+        "--no-fail-on-gate",
+        action="store_true",
+        help="Write gate results but keep the command successful when thresholds fail.",
+    )
+    paper_experiment.set_defaults(func=cmd_run_paper_experiment)
+
     lecture_smoke = subparsers.add_parser(
         "lecture-smoke",
         help="Run a private-safe lecture smoke suite from a manifest",
@@ -1804,6 +1833,38 @@ def cmd_check_retrieval_gate(args: argparse.Namespace) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result["passed"]:
         raise SystemExit(1)
+
+
+def cmd_run_paper_experiment(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    run = run_paper_experiment(
+        client=client,
+        manifest_path=args.manifest,
+        output_dir=args.output_dir,
+        run_id=args.run_id,
+        gate_config_path=args.gate_config,
+        repo_root=default_paths().repo_root,
+        diagnostic_top_k=args.diagnostic_top_k,
+        fail_on_gate=not args.no_fail_on_gate,
+        command=["oarag", *sys.argv[1:]],
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": run.run_id,
+                "output_dir": str(run.output_dir),
+                "metrics": str(run.benchmark.metrics_path),
+                "metrics_summary": str(run.benchmark.metrics_csv_path),
+                "query_results": str(run.benchmark.query_results_path),
+                "summary": str(run.benchmark.summary_path),
+                "paper_report": str(run.report.output_dir),
+                "quality_gate_result": str(run.quality_gate_result_path),
+                "experiment_manifest": str(run.experiment_manifest_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def cmd_lecture_smoke(args: argparse.Namespace) -> None:

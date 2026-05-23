@@ -465,6 +465,11 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["window"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["rerank"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["rerank"]["grounded_answer_ratio"] == 1.0
+    assert suite["variant_metrics"]["window"]["answer_citation_precision"] == 1.0
+    assert suite["variant_metrics"]["window"]["answer_citation_recall"] == 1.0
+    assert suite["variant_metrics"]["window"]["expected_citation_hit_ratio"] == 1.0
+    assert suite["variant_metrics"]["window"]["mean_unsupported_claim_count"] == 0.0
+    assert suite["variant_metrics"]["rerank"]["mean_unsupported_claim_count"] == 2.0
     assert any(search[2] == "semantic" for search in client.searches)
 
     rows = [
@@ -476,12 +481,17 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert all(row["privacy"]["answer_text"] == "redacted" for row in rows)
     assert all(row["top_candidate"]["ref"] for row in rows)
     assert all(row["answer"]["answer_type"] for row in rows)
+    assert all(row["answer_grounding"]["expected_available"] is True for row in rows)
+    assert all(row["answer_grounding"]["expected_citation_hit"] is True for row in rows)
+    assert all(row["answer_grounding"]["citation_recall"] is not None for row in rows)
     assert all(row["config"]["index_ref"].startswith("index:") for row in rows)
 
     metrics_csv = run.metrics_csv_path.read_text(encoding="utf-8")
     assert "variant,segment_lexical" in metrics_csv
+    assert "answer_citation_precision" in metrics_csv
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "Retrieval/Answer Matrix" in summary
+    assert "deterministic expected hint overlap" in summary
 
     gate_config = json.loads(
         (fixture_dir / "retrieval_quality_gate.json").read_text(encoding="utf-8")
