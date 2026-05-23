@@ -599,11 +599,34 @@ def test_benchmark_retrieval_cli_accepts_manifest_and_output_dir() -> None:
             "benchmarks/retrieval.json",
             "--output-dir",
             "reports/perf_runs/dev",
+            "--diagnostic-top-k",
+            "10",
         ]
     )
 
     assert str(args.manifest) == "benchmarks/retrieval.json"
     assert str(args.output_dir) == "reports/perf_runs/dev"
+    assert args.diagnostic_top_k == 10
+
+
+def test_eval_eduvidqa_cli_accepts_diagnostic_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "eval-eduvidqa",
+            "--input",
+            "eduvidqa.jsonl",
+            "--index",
+            "edu_segments",
+            "--diagnostic-top-k",
+            "50",
+            "--allow-private-output",
+        ]
+    )
+
+    assert str(args.input) == "eduvidqa.jsonl"
+    assert args.index == "edu_segments"
+    assert args.diagnostic_top_k == 50
+    assert args.allow_private_output is True
 
 
 def test_lecture_smoke_cli_accepts_manifest_and_output_dir() -> None:
