@@ -399,29 +399,40 @@ def test_query_project_expands_query_when_domain_lexicon_exists(tmp_path: Path) 
         json.dumps({"aliases": {"bet": ["wager"], "size": ["sizing"]}}),
         encoding="utf-8",
     )
-    client = FakeClient(
-        hits=[
-            {
-                "segment_id": "seg_1",
-                "sample_id": "seg_1",
-                "video_id": "video",
-                "start_time": 0.0,
-                "end_time": 2.0,
-                "timestamp_center": 1.0,
-                "transcript_text": "Wager sizing",
-            }
-        ]
+    client = MultiIndexFakeClient(
+        {
+            "local_segments": [
+                {
+                    "segment_id": "seg_1",
+                    "sample_id": "seg_1",
+                    "video_id": "video",
+                    "start_time": 0.0,
+                    "end_time": 2.0,
+                    "timestamp_center": 1.0,
+                    "transcript_text": "Wager sizing",
+                }
+            ],
+            "local_visual_entities": [],
+        }
     )
 
     response = query_project(
         client=client,
         index_uid="local_segments",
+        visual_index_uid="local_visual_entities",
         project_dir=project_dir,
         query="wager sizing",
         neighbor_count=0,
     )
 
-    assert client.queries == ["wager sizing size bet"]
+    assert client.searches == [
+        ("local_segments", "wager sizing", 5),
+        ("local_segments", "bet", 5),
+        ("local_segments", "size", 5),
+        ("local_visual_entities", "wager sizing", 5),
+        ("local_visual_entities", "bet", 5),
+        ("local_visual_entities", "size", 5),
+    ]
     assert response["query"] == "wager sizing"
     assert response["domain_lexicon"]["enabled"] is True
     assert response["domain_lexicon"]["source_path"] == str(
@@ -431,6 +442,23 @@ def test_query_project_expands_query_when_domain_lexicon_exists(tmp_path: Path) 
         "enabled": True,
         "applied": True,
         "added_term_count": 2,
+        "expanded_query": "wager sizing bet size",
+        "source_path": str((project_dir / "domain_lexicon.json").resolve()),
+        "search_queries": ["wager sizing", "bet", "size"],
+        "terms": [
+            {
+                "term": "bet",
+                "source": "domain_lexicon",
+                "canonical": "bet",
+                "matched_terms": ["wager"],
+            },
+            {
+                "term": "size",
+                "source": "domain_lexicon",
+                "canonical": "size",
+                "matched_terms": ["sizing"],
+            },
+        ],
     }
 
 
