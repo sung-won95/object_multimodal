@@ -210,6 +210,7 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
                         "input": str(eduvidqa_path),
                         "index": "edu_index",
                         "limit": 3,
+                        "diagnostic_top_k": 2,
                     },
                     {
                         "suite_id": "local_suite",
@@ -238,6 +239,17 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
     local_metrics = next(
         suite for suite in run.metrics["suites"] if suite["suite_id"] == "local_suite"
     )
+    edu_metrics = next(
+        suite for suite in run.metrics["suites"] if suite["suite_id"] == "edu_suite"
+    )
+    assert edu_metrics["top1_recall"] == 1.0
+    assert edu_metrics["top5_recall"] == 1.0
+    assert edu_metrics["top10_recall"] == 1.0
+    assert edu_metrics["top50_recall"] == 1.0
+    assert edu_metrics["median_abs_error"] == 1.0
+    assert edu_metrics["p75_abs_error"] == 1.0
+    assert edu_metrics["p90_abs_error"] == 1.0
+    assert edu_metrics["diagnostic_top_k"] == 2
     assert local_metrics["frame_backed_ratio"] == 1.0
     assert local_metrics["linked_entity_backed_ratio"] == 1.0
     assert local_metrics["top1_mean_abs_error"] == 0.0
@@ -252,12 +264,27 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
         for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
     ]
     local_row = next(row for row in query_rows if row["suite_id"] == "local_suite")
+    edu_row = next(row for row in query_rows if row["suite_id"] == "edu_suite")
+    assert edu_row["topk_recall"] == {"1": True, "5": True, "10": True, "50": True}
+    assert edu_row["diagnostic_candidates"] == [
+        {
+            "rank": 1,
+            "segment_id": "seg_gravity",
+            "sample_id": "sample_gravity",
+            "video_id": "edu_video",
+            "timestamp_center": 101.0,
+            "abs_error": 1.0,
+            "same_sample": True,
+            "same_video": True,
+        }
+    ]
     assert local_row["top_candidate"]["segment_id"] == "seg_local_1"
     assert local_row["top_rerank"]["original_rank"] == 2
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "| local_suite | local_project | local_pilot | on (domain_lexicon.json) |" in summary
     assert "on (deterministic_evidence_v1)" in summary
     assert "Anti-Overfit View" in summary
+    assert "Retrieval Diagnostics" in summary
 
 
 def test_retrieval_ablation_public_fixture_outputs_are_sanitized(tmp_path: Path) -> None:
