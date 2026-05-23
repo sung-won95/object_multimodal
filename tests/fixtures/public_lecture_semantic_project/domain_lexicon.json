@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "aliases": {
+    "loss curve": ["loss-curve", "로스 커브"],
+    "gradient": ["gradient-descent", "경사"],
+    "l2": ["l-2", "엘투"]
+  }
+}
