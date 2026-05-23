@@ -1,0 +1,1 @@
+{"link_id": "link_loss_public", "project_id": "public_retrieval_ablation", "segment_id": "seg_loss_public", "entity_id": "ent_loss_public", "frame_id": "frame_loss_public", "link_type": "time_overlap+lexical_match", "score": 0.9, "evidence": ["time_overlap", "lexical_match"], "time_overlap": true, "lexical_match": ["loss", "curve"], "mention_candidate": []}

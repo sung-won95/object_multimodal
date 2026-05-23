@@ -144,6 +144,7 @@ Manifest shape:
 ```
 
 The command writes `metrics.json`, `query_results.jsonl`, and `summary.md`. Reports include per-domain metrics so retrieval changes can be checked for overfitting instead of only improving one pilot video.
+For public-safe object-aligned retrieval ablations, use a `retrieval_ablation` suite with `modes` such as `transcript-only`, `visual-only`, `time-aligned`, and `object-aligned`; the public outputs omit raw queries, transcript excerpts, visual labels, local paths, and raw candidate IDs.
 
 ## Private-Safe Lecture Smoke
 
