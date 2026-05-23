@@ -26,6 +26,7 @@ from oarag.core.schemas import EntityLink, SearchCandidate, VisualEntity
 
 
 SEGMENT_HIT_SOURCE = "segment"
+WINDOW_HIT_SOURCE = "window"
 VISUAL_ENTITY_HIT_SOURCE = "visual_entity"
 LEXICAL_RETRIEVAL_MODE = "lexical"
 SEMANTIC_RETRIEVAL_MODE = "semantic"
@@ -33,6 +34,7 @@ DEFAULT_HYBRID_EMBEDDER = "default"
 DEFAULT_HYBRID_SEMANTIC_RATIO = 1.0
 SOURCE_PRIORITY = {
     SEGMENT_HIT_SOURCE: 0,
+    WINDOW_HIT_SOURCE: 0,
     VISUAL_ENTITY_HIT_SOURCE: 1,
 }
 RETRIEVAL_MODE_PRIORITY = {
@@ -41,9 +43,11 @@ RETRIEVAL_MODE_PRIORITY = {
 }
 SOURCE_MODALITY = {
     SEGMENT_HIT_SOURCE: "transcript",
+    WINDOW_HIT_SOURCE: "transcript",
     VISUAL_ENTITY_HIT_SOURCE: "visual",
 }
 HYBRID_RRF_RANK_CONSTANT = 60
+PRIMARY_INDEX_KINDS = {SEGMENT_HIT_SOURCE, WINDOW_HIT_SOURCE}
 
 
 def query_project(
@@ -52,6 +56,7 @@ def query_project(
     index_uid: str,
     project_dir: Path,
     query: str,
+    retrieval_index_kind: str = SEGMENT_HIT_SOURCE,
     visual_index_uid: str | None = None,
     limit: int = 5,
     segments_path: Path | None = None,
@@ -71,6 +76,10 @@ def query_project(
     hybrid_embedder: str | None = DEFAULT_HYBRID_EMBEDDER,
     hybrid_semantic_ratio: float = DEFAULT_HYBRID_SEMANTIC_RATIO,
 ) -> dict[str, Any]:
+    if retrieval_index_kind not in PRIMARY_INDEX_KINDS:
+        valid = ", ".join(sorted(PRIMARY_INDEX_KINDS))
+        raise ValueError(f"Unknown retrieval_index_kind: {retrieval_index_kind}. Valid kinds: {valid}")
+
     resolved_project_dir = project_dir.expanduser().resolve()
     domain_lexicon = load_domain_lexicon(
         project_dir=resolved_project_dir,
@@ -129,8 +138,8 @@ def query_project(
         limit=limit,
         channels=search_channels,
     )
-    segment_hit_records = _search_hit_records(search_response)
-    segment_hits = [record["hit"] for record in segment_hit_records]
+    primary_hit_records = _search_hit_records(search_response)
+    primary_hits = [record["hit"] for record in primary_hit_records]
 
     bundles: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
@@ -159,12 +168,16 @@ def query_project(
             )
 
     retrieval_entries: list[dict[str, Any]] = []
-    for rank, record in enumerate(segment_hit_records, start=1):
+    for rank, record in enumerate(primary_hit_records, start=1):
         hit = record["hit"]
-        candidate = SearchCandidate.from_hit(rank=rank, hit=hit).to_dict()
+        candidate = _primary_candidate_from_hit(
+            rank=rank,
+            hit=hit,
+            retrieval_index_kind=retrieval_index_kind,
+        )
         _attach_retrieval_metadata(
             candidate,
-            source=SEGMENT_HIT_SOURCE,
+            source=retrieval_index_kind,
             index_uid=index_uid,
             aggregate_rank=rank,
             record=record,
@@ -173,8 +186,8 @@ def query_project(
         candidates.append(candidate)
         retrieval_entries.append(
             {
-                "source": SEGMENT_HIT_SOURCE,
-                "modality": SOURCE_MODALITY[SEGMENT_HIT_SOURCE],
+                "source": retrieval_index_kind,
+                "modality": SOURCE_MODALITY[retrieval_index_kind],
                 "index": index_uid,
                 "rank": rank,
                 "score": candidate.get("score"),
@@ -186,13 +199,17 @@ def query_project(
                 "fusion_score": record.get("fusion_score"),
                 "matches": _record_match_summaries(
                     record=record,
-                    source=SEGMENT_HIT_SOURCE,
+                    source=retrieval_index_kind,
                     index_uid=index_uid,
                     include_match_details=hybrid_retrieval,
                 ),
                 "hit": hit,
                 "candidate": candidate,
-                "target_segment_id": candidate.get("segment_id"),
+                "target_segment_id": _primary_target_segment_id(
+                    hit=hit,
+                    candidate=candidate,
+                    retrieval_index_kind=retrieval_index_kind,
+                ),
             }
         )
 
@@ -403,6 +420,7 @@ def query_project(
     return {
         "query": query,
         "index": index_uid,
+        "index_kind": retrieval_index_kind,
         "visual_index": visual_index_uid,
         "project_id": _project_id(segments=segments, project_dir=resolved_project_dir),
         "processing_time_ms": _combined_processing_time_ms(
@@ -430,11 +448,17 @@ def query_project(
         },
         "retrieval_context": {
             "indexes": {
-                "segment": index_uid,
+                "segment": index_uid if retrieval_index_kind == SEGMENT_HIT_SOURCE else None,
+                "window": index_uid if retrieval_index_kind == WINDOW_HIT_SOURCE else None,
                 "visual_entity": visual_index_uid,
             },
             "searches": {
-                "segment": _search_metadata(search_response, index_uid),
+                "segment": _search_metadata(search_response, index_uid)
+                if retrieval_index_kind == SEGMENT_HIT_SOURCE
+                else None,
+                "window": _search_metadata(search_response, index_uid)
+                if retrieval_index_kind == WINDOW_HIT_SOURCE
+                else None,
                 "visual_entity": _search_metadata(visual_search_response, visual_index_uid)
                 if visual_index_uid
                 else None,
@@ -447,8 +471,13 @@ def query_project(
             "rerank": rerank_context,
         },
         "counts": {
-            "search_hits": len(segment_hits) + len(visual_hits),
-            "segment_search_hits": len(segment_hits),
+            "search_hits": len(primary_hits) + len(visual_hits),
+            "segment_search_hits": len(primary_hits)
+            if retrieval_index_kind == SEGMENT_HIT_SOURCE
+            else 0,
+            "window_search_hits": len(primary_hits)
+            if retrieval_index_kind == WINDOW_HIT_SOURCE
+            else 0,
             "visual_entity_search_hits": len(visual_hits),
             "merged_candidate_targets": len(entries_by_target),
             "bundles": len(bundles),
@@ -465,6 +494,59 @@ def query_project(
         "candidates": candidates,
         "bundles": bundles,
     }
+
+
+def _primary_candidate_from_hit(
+    *,
+    rank: int,
+    hit: dict[str, Any],
+    retrieval_index_kind: str,
+) -> dict[str, Any]:
+    if retrieval_index_kind == WINDOW_HIT_SOURCE:
+        return _window_candidate_from_hit(rank=rank, hit=hit)
+    return SearchCandidate.from_hit(rank=rank, hit=hit).to_dict()
+
+
+def _primary_target_segment_id(
+    *,
+    hit: dict[str, Any],
+    candidate: dict[str, Any],
+    retrieval_index_kind: str,
+) -> str:
+    if retrieval_index_kind == WINDOW_HIT_SOURCE:
+        return str(hit.get("target_segment_id") or candidate.get("segment_id") or "")
+    return str(candidate.get("segment_id") or "")
+
+
+def _window_candidate_from_hit(*, rank: int, hit: dict[str, Any]) -> dict[str, Any]:
+    transcript = str(hit.get("transcript_window_text") or hit.get("transcript_text") or "")
+    excerpt = transcript[:360] + ("..." if len(transcript) > 360 else "")
+    target_segment_id = str(hit.get("target_segment_id") or hit.get("segment_id") or "")
+    candidate = {
+        "rank": rank,
+        "segment_id": target_segment_id,
+        "target_segment_id": target_segment_id,
+        "window_id": str(hit.get("window_id", "")),
+        "sample_id": str(hit.get("sample_id", "")),
+        "video_id": str(hit.get("video_id", hit.get("video_name", ""))),
+        "start_time": optional_float(hit.get("start_time")),
+        "end_time": optional_float(hit.get("end_time")),
+        "timestamp_center": optional_float(hit.get("timestamp_center")),
+        "target_segment_start_time": optional_float(hit.get("target_start_time")),
+        "target_segment_end_time": optional_float(hit.get("target_end_time")),
+        "target_segment_timestamp_center": optional_float(hit.get("target_timestamp_center")),
+        "transcript_excerpt": excerpt,
+        "score": optional_float(hit.get("_rankingScore")),
+        "semantic_source_fields": _semantic_source_fields(hit.get("semantic_source_fields")),
+        "source_segment_ids": _semantic_source_fields(hit.get("source_segment_ids")),
+    }
+    return {key: value for key, value in candidate.items() if value not in (None, "", [])}
+
+
+def _semantic_source_fields(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item not in (None, "")]
 
 
 def _visual_entity_from_hit(
@@ -690,6 +772,13 @@ def _retrieval_source_summary(entry: dict[str, Any]) -> dict[str, Any]:
                 "timestamp": candidate.get("timestamp_center"),
                 "visual_entity_text": candidate.get("visual_entity_text"),
                 "target_resolution": entry.get("target_resolution"),
+            }
+        )
+    if entry.get("source") == WINDOW_HIT_SOURCE:
+        summary.update(
+            {
+                "window_id": candidate.get("window_id"),
+                "source_segment_ids": candidate.get("source_segment_ids"),
             }
         )
     return summary
@@ -1114,7 +1203,7 @@ def _search_metadata(response: dict[str, Any] | None, index_uid: str | None) -> 
 
 
 def _search_hit_key(hit: dict[str, Any]) -> str:
-    for field in ("segment_id", "sample_id", "entity_id", "id"):
+    for field in ("window_id", "target_segment_id", "segment_id", "sample_id", "entity_id", "id"):
         value = hit.get(field)
         if value is not None:
             return f"{field}:{value}"

@@ -8,16 +8,22 @@ import pytest
 from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+    LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     MeiliTaskError,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     lecture_segment_settings_hash,
+    lecture_window_settings_hash,
     visual_entity_settings_hash,
 )
 from oarag.project_index import (
+    build_project_windows,
+    build_window_index_documents,
     index_project_segments,
     index_project_visual_entities,
+    index_project_windows,
     segment_artifact_path,
     visual_entity_artifact_path,
+    window_artifact_path,
 )
 from oarag.schemas import (
     LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
@@ -119,6 +125,105 @@ def test_visual_entity_artifact_uses_default_manifest_path(tmp_path: Path) -> No
     selected = visual_entity_artifact_path(project_dir)
 
     assert selected == visual_entities
+
+
+def test_window_artifact_uses_default_segment_path(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    windows = project_dir / "segments" / "lecture_windows.jsonl"
+    write_jsonl(windows, [{"window_id": "window_seg_1"}])
+
+    selected = window_artifact_path(project_dir)
+
+    assert selected == windows
+
+
+def test_build_window_index_documents_serializes_context_and_semantic_text() -> None:
+    segments = [
+        _segment("seg_1", 1, 0.0, 2.0, "alpha intro", ["frame_000001"]),
+        _segment("seg_2", 2, 3.0, 5.0, "beta target", ["frame_000002"]),
+        _segment("seg_3", 3, 7.0, 9.0, "gamma outro", ["frame_000003"]),
+    ]
+    frames = [
+        {"frame_id": "frame_000001", "timestamp": 1.0, "frame_path": "frames/1.jpg"},
+        {"frame_id": "frame_000002", "timestamp": 4.0, "frame_path": "frames/2.jpg"},
+        {"frame_id": "frame_000003", "timestamp": 8.0, "frame_path": "frames/3.jpg"},
+    ]
+    visual_entities = [
+        {
+            **_visual_entity("entity_beta", "frame_000002", "matrix beta", 4.0),
+            "segment_id": "seg_2",
+            "visual_description": "A beta matrix is highlighted.",
+        }
+    ]
+
+    documents = build_window_index_documents(
+        segments,
+        frames=frames,
+        visual_entities=visual_entities,
+        neighbor_count=1,
+    )
+
+    document = next(item for item in documents if item["target_segment_id"] == "seg_2")
+    assert document["window_id"].startswith("window_seg_2_")
+    assert document["segment_id"] == "seg_2"
+    assert document["source_segment_ids"] == ["seg_1", "seg_2", "seg_3"]
+    assert document["start_time"] == 0.0
+    assert document["end_time"] == 9.0
+    assert document["timestamp_center"] == 4.5
+    assert document["target_start_time"] == 3.0
+    assert document["transcript_window_text"] == "alpha intro beta target gamma outro"
+    assert document[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] == (
+        "alpha intro beta target gamma outro matrix beta A beta matrix is highlighted."
+    )
+    assert document[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] == [
+        "transcript_window_text",
+        "visual_entities.text",
+        "visual_entities.visual_description",
+    ]
+    assert [frame["frame_path"] for frame in document["frame_refs"]] == [
+        "frames/1.jpg",
+        "frames/2.jpg",
+        "frames/3.jpg",
+    ]
+    assert document["visual_entities"][0]["entity_id"] == "entity_beta"
+    assert document["evidence_window"]["target_segment"]["segment_id"] == "seg_2"
+    assert document["window_config"] == {
+        "mode": "neighbors",
+        "neighbor_count": 1,
+        "previous_neighbor_count": 1,
+        "next_neighbor_count": 1,
+    }
+
+
+def test_build_project_windows_writes_jsonl_and_updates_manifest(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    manifest_path = project_dir / "manifests" / "project_manifest.json"
+    write_jsonl(
+        segments_path,
+        [
+            _segment("seg_1", 1, 0.0, 2.0, "alpha", []),
+            _segment("seg_2", 2, 3.0, 5.0, "beta", []),
+        ],
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps({"artifacts": {}, "counts": {}}), encoding="utf-8")
+
+    summary = build_project_windows(project_dir=project_dir, neighbor_count=0)
+
+    windows_path = project_dir / "segments" / "lecture_windows.jsonl"
+    rows = [
+        json.loads(line)
+        for line in windows_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert summary["counts"]["windows_total"] == 2
+    assert rows[0]["target_segment_id"] == "seg_1"
+    assert rows[0]["source_segment_ids"] == ["seg_1"]
+    assert manifest["artifacts"]["lecture_windows"] == str(windows_path)
+    assert manifest["counts"]["lecture_windows"] == 2
+    assert manifest["window_indexing"]["window_config"]["neighbor_count"] == 0
 
 
 def test_index_project_segments_batches_documents(tmp_path: Path) -> None:
@@ -310,6 +415,49 @@ def test_index_project_segments_reset_propagates_non_missing_delete_failure(
     assert ("create_index", "broken_segments", "segment_id") not in client.calls
 
 
+def test_index_project_windows_batches_documents_with_window_settings(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(
+        segments_path,
+        [
+            _segment("seg_1", 1, 0.0, 2.0, "alpha", []),
+            _segment("seg_2", 2, 3.0, 5.0, "beta", []),
+            _segment("seg_3", 3, 6.0, 8.0, "gamma", []),
+        ],
+    )
+    client = FakeMeiliClient()
+
+    summary = index_project_windows(
+        client,
+        index_uid="local_windows",
+        project_dir=project_dir,
+        batch_size=2,
+        reset=True,
+        neighbor_count=0,
+    )
+
+    add_calls = [call for call in client.calls if call[0] == "add_documents"]
+    settings_call = next(call for call in client.calls if call[0] == "update_settings")
+    assert len(add_calls) == 2
+    assert add_calls[0][1] == "local_windows"
+    assert [document["target_segment_id"] for document in add_calls[0][2]] == ["seg_1", "seg_2"]
+    assert [document["target_segment_id"] for document in add_calls[1][2]] == ["seg_3"]
+    assert all(document["source_segment_ids"] == [document["target_segment_id"]] for document in add_calls[0][2])
+    assert ("delete_index", "local_windows") in client.calls
+    assert ("create_index", "local_windows", "window_id") in client.calls
+    assert settings_call[1] == "local_windows"
+    assert "transcript_window_text" in settings_call[2]["searchableAttributes"]
+    assert summary["index"] == "local_windows"
+    assert summary["indexed_documents"] == 3
+    assert summary["indexed_batches"] == 2
+    assert summary["windows_path"] is None
+    assert summary["segments_path"] == str(segments_path)
+    assert summary["settings_profile"] == LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE
+    assert summary["settings_hash"] == lecture_window_settings_hash(settings_call[2])
+    assert summary["semantic_source_field_counts"] == {"transcript_window_text": 3}
+
+
 def test_index_project_visual_entities_batches_documents(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     visual_entities_path = project_dir / "manifests" / "visual_entities.jsonl"
@@ -371,6 +519,30 @@ def test_index_project_visual_entities_preserves_optional_segment_hint(tmp_path:
     add_call = next(call for call in client.calls if call[0] == "add_documents")
     assert add_call[2][0]["segment_id"] == "seg_1"
     assert add_call[2][0]["video_id"] == "video_1"
+
+
+def _segment(
+    segment_id: str,
+    sample_index: int,
+    start_time: float,
+    end_time: float,
+    transcript_text: str,
+    frame_refs: list[str],
+) -> dict:
+    return {
+        "segment_id": segment_id,
+        "project_id": "project",
+        "video_id": "video",
+        "video_name": "Lecture video",
+        "sample_id": segment_id,
+        "sample_index": sample_index,
+        "start_time": start_time,
+        "end_time": end_time,
+        "timestamp_center": (start_time + end_time) / 2,
+        "transcript_text": transcript_text,
+        "frame_refs": frame_refs,
+        "source": "test",
+    }
 
 
 def _visual_entity(entity_id: str, frame_id: str, text: str, timestamp: float) -> dict:

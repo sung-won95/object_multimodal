@@ -6,13 +6,16 @@ import pytest
 from oarag.cli import (
     build_parser,
     build_vlm_alignment_parser,
+    cmd_build_project_windows,
     cmd_index_project,
     cmd_index_project_visual_entities,
+    cmd_index_project_windows,
     parse_vlm_options,
 )
 from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
+    LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
 )
 
@@ -146,6 +149,139 @@ def test_cmd_index_project_forwards_settings_profile(monkeypatch, capsys) -> Non
     assert calls["index_kwargs"]["settings_profile"] == LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
     assert json.loads(capsys.readouterr().out)["settings_profile"] == (
         LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
+    )
+
+
+def test_build_project_windows_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        ["build-project-windows", "--project-id", "sample_project"]
+    )
+
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.segments is None
+    assert args.frames_manifest is None
+    assert args.visual_entities is None
+    assert args.output is None
+    assert args.manifest is None
+    assert args.neighbor_count == 1
+    assert args.window_seconds is None
+    assert args.previous_neighbor_count is None
+    assert args.next_neighbor_count is None
+
+
+def test_cmd_build_project_windows_forwards_window_options(monkeypatch, capsys) -> None:
+    calls = {}
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_build_project_windows(**kwargs):
+        calls["build_kwargs"] = kwargs
+        return {"counts": {"windows_total": 1}, "window_config": {"mode": "neighbors"}}
+
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr("oarag.cli.build_project_windows", fake_build_project_windows)
+
+    args = build_parser().parse_args(
+        [
+            "build-project-windows",
+            "--project-dir",
+            str(project_dir),
+            "--segments",
+            "segments/custom.jsonl",
+            "--output",
+            "segments/lecture_windows.jsonl",
+            "--previous-neighbor-count",
+            "2",
+            "--next-neighbor-count",
+            "0",
+        ]
+    )
+
+    cmd_build_project_windows(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["build_kwargs"]["project_dir"] == Path("/tmp/project")
+    assert calls["build_kwargs"]["segments"].as_posix() == "segments/custom.jsonl"
+    assert calls["build_kwargs"]["output_path"].as_posix() == "segments/lecture_windows.jsonl"
+    assert calls["build_kwargs"]["previous_neighbor_count"] == 2
+    assert calls["build_kwargs"]["next_neighbor_count"] == 0
+    assert json.loads(capsys.readouterr().out)["counts"]["windows_total"] == 1
+
+
+def test_index_project_windows_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        [
+            "index-project-windows",
+            "--index",
+            "local_windows",
+            "--project-id",
+            "sample_project",
+        ]
+    )
+
+    assert args.index == "local_windows"
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.windows is None
+    assert args.segments is None
+    assert args.frames_manifest is None
+    assert args.visual_entities is None
+    assert args.batch_size == 500
+    assert args.reset is False
+    assert args.settings_profile == LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE
+    assert args.neighbor_count == 1
+
+
+def test_cmd_index_project_windows_forwards_settings_profile(monkeypatch, capsys) -> None:
+    calls = {}
+    fake_client = object()
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_index_project_windows(client, **kwargs):
+        calls["client"] = client
+        calls["index_kwargs"] = kwargs
+        return {"settings_profile": kwargs["settings_profile"]}
+
+    monkeypatch.setattr("oarag.cli.client_from_args", lambda args: fake_client)
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr("oarag.cli.index_project_windows", fake_index_project_windows)
+
+    args = build_parser().parse_args(
+        [
+            "index-project-windows",
+            "--index",
+            "local_windows",
+            "--project-dir",
+            str(project_dir),
+            "--windows",
+            "segments/lecture_windows.jsonl",
+            "--settings-profile",
+            LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
+            "--window-before-seconds",
+            "3",
+            "--window-after-seconds",
+            "5",
+        ]
+    )
+
+    cmd_index_project_windows(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["client"] is fake_client
+    assert calls["index_kwargs"]["settings_profile"] == LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE
+    assert calls["index_kwargs"]["windows"].as_posix() == "segments/lecture_windows.jsonl"
+    assert calls["index_kwargs"]["window_before_seconds"] == 3.0
+    assert calls["index_kwargs"]["window_after_seconds"] == 5.0
+    assert json.loads(capsys.readouterr().out)["settings_profile"] == (
+        LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE
     )
 
 
@@ -434,6 +570,7 @@ def test_query_project_cli_defaults() -> None:
     )
 
     assert args.index == "sample_segments"
+    assert args.index_kind == "segment"
     assert args.visual_index is None
     assert args.project_id == "sample_project"
     assert args.project_dir is None
@@ -518,6 +655,25 @@ def test_query_project_cli_accepts_hybrid_options() -> None:
     assert args.hybrid_retrieval is True
     assert args.hybrid_embedder == "lecture_embedder"
     assert args.hybrid_semantic_ratio == 0.75
+
+
+def test_query_project_cli_accepts_window_index_kind() -> None:
+    args = build_parser().parse_args(
+        [
+            "query-project",
+            "--index",
+            "sample_windows",
+            "--index-kind",
+            "window",
+            "--project-id",
+            "sample_project",
+            "--query",
+            "range grid",
+        ]
+    )
+
+    assert args.index == "sample_windows"
+    assert args.index_kind == "window"
 
 
 def test_ask_project_cli_defaults() -> None:
