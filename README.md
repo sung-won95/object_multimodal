@@ -146,6 +146,16 @@ Manifest shape:
 The command writes `metrics.json`, `query_results.jsonl`, and `summary.md`. Reports include per-domain metrics so retrieval changes can be checked for overfitting instead of only improving one pilot video.
 For public-safe object-aligned retrieval ablations, use a `retrieval_ablation` suite with `modes` such as `transcript-only`, `visual-only`, `time-aligned`, and `object-aligned`; the public outputs omit raw queries, transcript excerpts, visual labels, local paths, and raw candidate IDs.
 
+Check the public fixture retrieval regression gate against aggregate metrics:
+
+```bash
+PYTHONPATH=src python -m oarag check-retrieval-gate \
+  --metrics reports/perf_runs/public_fixture/metrics.json \
+  --config tests/fixtures/public_retrieval_ablation_project/retrieval_quality_gate.json
+```
+
+The gate thresholds are only a public fixture regression guard, not paper claim thresholds. The payload is aggregate-only and excludes raw query, transcript, and evidence text.
+
 ## Private-Safe Lecture Smoke
 
 Run a manifest-driven smoke suite for private/local lectures:

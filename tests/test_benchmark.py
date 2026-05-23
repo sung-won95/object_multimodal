@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from oarag.benchmark import parse_time_hint, run_benchmark
+from oarag.evaluation.quality_gate import evaluate_retrieval_quality_gate
 
 
 class FakeClient:
@@ -481,6 +482,13 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert "variant,segment_lexical" in metrics_csv
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "Retrieval/Answer Matrix" in summary
+
+    gate_config = json.loads(
+        (fixture_dir / "retrieval_quality_gate.json").read_text(encoding="utf-8")
+    )
+    gate_result = evaluate_retrieval_quality_gate(metrics=run.metrics, config=gate_config)
+    assert gate_result["passed"] is True
+    assert gate_result["privacy"]["query_content"] == "excluded"
 
     public_text = "\n".join(
         [
