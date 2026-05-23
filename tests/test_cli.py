@@ -933,6 +933,38 @@ def test_run_paper_experiment_cli_accepts_manifest_gate_output_and_run_id() -> N
     assert args.no_fail_on_gate is True
 
 
+def test_audit_paper_readiness_cli_accepts_bundle_paths() -> None:
+    args = build_parser().parse_args(
+        [
+            "audit-paper-readiness",
+            "--experiment-manifest",
+            "reports/paper/dev/experiment_manifest.json",
+            "--output-dir",
+            "reports/paper/dev/readiness",
+            "--metrics",
+            "reports/paper/dev/metrics.json",
+            "--query-results",
+            "reports/paper/dev/query_results.jsonl",
+            "--quality-gate-result",
+            "reports/paper/dev/quality_gate_result.json",
+            "--reproducibility",
+            "reports/paper/dev/paper_report/reproducibility.json",
+            "--semantic-smoke",
+            "reports/paper/dev/semantic_smoke.json",
+            "--fail-on-gap",
+        ]
+    )
+
+    assert str(args.experiment_manifest) == "reports/paper/dev/experiment_manifest.json"
+    assert str(args.output_dir) == "reports/paper/dev/readiness"
+    assert str(args.metrics) == "reports/paper/dev/metrics.json"
+    assert str(args.query_results) == "reports/paper/dev/query_results.jsonl"
+    assert str(args.quality_gate_result) == "reports/paper/dev/quality_gate_result.json"
+    assert str(args.reproducibility) == "reports/paper/dev/paper_report/reproducibility.json"
+    assert str(args.semantic_smoke) == "reports/paper/dev/semantic_smoke.json"
+    assert args.fail_on_gap is True
+
+
 def test_eval_eduvidqa_cli_accepts_diagnostic_options() -> None:
     args = build_parser().parse_args(
         [
