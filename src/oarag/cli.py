@@ -7,6 +7,7 @@ from pathlib import Path
 
 from oarag.ingestion.alignment import align_segments_to_frames
 from oarag.evaluation.benchmark import run_benchmark
+from oarag.evaluation.reporting import generate_evaluation_report
 from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
 from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
 from oarag.evaluation.eval import candidate_diagnostics, evaluate_query, summarize
@@ -1004,6 +1005,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark.set_defaults(func=cmd_benchmark_retrieval)
 
+    report_eval = subparsers.add_parser(
+        "report-evaluation",
+        help="Generate paper tables and a reproducibility report from benchmark metrics",
+    )
+    report_eval.add_argument("--metrics", required=True, type=Path)
+    report_eval.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Output directory. Defaults to paper_report next to metrics.json.",
+    )
+    report_eval.set_defaults(func=cmd_report_evaluation)
+
     lecture_smoke = subparsers.add_parser(
         "lecture-smoke",
         help="Run a private-safe lecture smoke suite from a manifest",
@@ -1690,8 +1703,31 @@ def cmd_benchmark_retrieval(args: argparse.Namespace) -> None:
                 "run_id": run.run_id,
                 "output_dir": str(run.output_dir),
                 "metrics": str(run.metrics_path),
+                "metrics_csv": str(run.metrics_csv_path),
                 "query_results": str(run.query_results_path),
                 "summary": str(run.summary_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+def cmd_report_evaluation(args: argparse.Namespace) -> None:
+    report = generate_evaluation_report(
+        metrics_path=args.metrics,
+        output_dir=args.output_dir,
+        repo_root=default_paths().repo_root,
+        command=["oarag", *sys.argv[1:]],
+    )
+    print(
+        json.dumps(
+            {
+                "output_dir": str(report.output_dir),
+                "paper_table_csv": str(report.paper_table_csv_path),
+                "paper_table_markdown": str(report.paper_table_markdown_path),
+                "reproducibility_json": str(report.reproducibility_json_path),
+                "reproducibility_markdown": str(report.reproducibility_markdown_path),
             },
             ensure_ascii=False,
             indent=2,

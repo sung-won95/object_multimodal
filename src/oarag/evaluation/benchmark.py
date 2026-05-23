@@ -24,10 +24,13 @@ from oarag.retrieval.evidence import (
     resolve_project_path,
     segment_window,
 )
+from oarag.retrieval.answer import compose_answer
 from oarag.retrieval.project_index import segment_artifact_path
 from oarag.retrieval.project_query import (
     DEFAULT_HYBRID_EMBEDDER,
     DEFAULT_HYBRID_SEMANTIC_RATIO,
+    SEGMENT_HIT_SOURCE,
+    WINDOW_HIT_SOURCE,
     query_project,
 )
 from oarag.core.schemas import EduVidQARecord, SearchCandidate
@@ -40,6 +43,48 @@ DEFAULT_ABLATION_MODES = [
     "visual-only",
     "time-aligned",
     "object-aligned",
+]
+MATRIX_SCHEMA_VERSION = "retrieval-answer-ablation-matrix-v1"
+DEFAULT_MATRIX_VARIANTS = [
+    {
+        "variant_id": "segment_lexical",
+        "label": "Segment lexical baseline",
+        "index_kind": SEGMENT_HIT_SOURCE,
+        "use_domain_lexicon": False,
+    },
+    {
+        "variant_id": "domain_lexicon",
+        "label": "Domain lexicon expansion",
+        "index_kind": SEGMENT_HIT_SOURCE,
+        "use_domain_lexicon": True,
+    },
+    {
+        "variant_id": "hybrid",
+        "label": "Hybrid retrieval",
+        "index_kind": SEGMENT_HIT_SOURCE,
+        "hybrid_retrieval": True,
+        "use_domain_lexicon": False,
+    },
+    {
+        "variant_id": "window",
+        "label": "Window retrieval",
+        "index_kind": WINDOW_HIT_SOURCE,
+        "use_domain_lexicon": False,
+    },
+    {
+        "variant_id": "window_hybrid",
+        "label": "Window + hybrid retrieval",
+        "index_kind": WINDOW_HIT_SOURCE,
+        "hybrid_retrieval": True,
+        "use_domain_lexicon": False,
+    },
+    {
+        "variant_id": "rerank",
+        "label": "Deterministic rerank",
+        "index_kind": SEGMENT_HIT_SOURCE,
+        "rerank": True,
+        "use_domain_lexicon": False,
+    },
 ]
 ABLATION_MODE_ALIASES = {
     "transcript": "transcript-only",
@@ -66,6 +111,7 @@ class BenchmarkRun:
     run_id: str
     output_dir: Path
     metrics_path: Path
+    metrics_csv_path: Path
     query_results_path: Path
     summary_path: Path
     metrics: dict[str, Any]
@@ -140,6 +186,15 @@ def run_benchmark(
                 run_id=run_id,
                 deltas=deltas,
             )
+        elif suite_type == "retrieval_answer_matrix":
+            metrics, results = run_retrieval_answer_matrix_suite(
+                client=client,
+                suite=suite,
+                base_dir=base_dir,
+                repo_root=resolved_repo_root,
+                run_id=run_id,
+                deltas=deltas,
+            )
         else:
             raise ValueError(f"Unsupported benchmark suite type: {suite_type}")
         suite_metrics.append(metrics)
@@ -155,9 +210,11 @@ def run_benchmark(
     }
 
     metrics_path = resolved_output_dir / "metrics.json"
+    metrics_csv_path = resolved_output_dir / "metrics_summary.csv"
     query_results_path = resolved_output_dir / "query_results.jsonl"
     summary_path = resolved_output_dir / "summary.md"
     write_json(metrics_path, metrics_payload)
+    _write_metrics_summary_csv(metrics_csv_path, metrics_payload)
     write_jsonl(query_results_path, all_results)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(_summary_markdown(metrics_payload), encoding="utf-8")
@@ -166,6 +223,7 @@ def run_benchmark(
         run_id=run_id,
         output_dir=resolved_output_dir,
         metrics_path=metrics_path,
+        metrics_csv_path=metrics_csv_path,
         query_results_path=query_results_path,
         summary_path=summary_path,
         metrics=metrics_payload,
@@ -253,6 +311,93 @@ def run_retrieval_ablation_suite(
     metric["mean_processing_time_ms"] = _mean_or_none(
         item.get("mean_processing_time_ms") for item in mode_metrics
     )
+    return metric, rows
+
+
+def run_retrieval_answer_matrix_suite(
+    *,
+    client: SearchClient,
+    suite: dict[str, Any],
+    base_dir: Path,
+    repo_root: Path,
+    run_id: str,
+    deltas: list[int],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    suite_id = str(suite.get("suite_id") or suite.get("project_id") or "retrieval_answer_matrix")
+    domain = str(suite.get("domain") or "public_synthetic")
+    project_dir = _project_dir_from_suite(suite=suite, base_dir=base_dir, repo_root=repo_root)
+    queries = _read_ablation_queries(base_dir=base_dir, suite=suite)
+    variants = _matrix_variants(suite)
+    include_answer = _bool_config(suite, "include_answer", default=True)
+
+    rows: list[dict[str, Any]] = []
+    for query_index, query_row in enumerate(queries, start=1):
+        query_text = _query_text(query_row, query_index=query_index)
+        query_id = _query_id(query_row, query_index=query_index)
+        expected_ranges = _expected_ranges(query_row)
+        expected_segment_ids = _expected_segment_ids(query_row)
+        for variant in variants:
+            rows.append(
+                _run_matrix_query(
+                    client=client,
+                    suite=suite,
+                    variant=variant,
+                    project_dir=project_dir,
+                    run_id=run_id,
+                    suite_id=suite_id,
+                    domain=domain,
+                    query_id=query_id,
+                    query_row=query_row,
+                    query_text=query_text,
+                    expected_ranges=expected_ranges,
+                    expected_segment_ids=expected_segment_ids,
+                    include_answer=include_answer,
+                    deltas=deltas,
+                )
+            )
+
+    variant_metrics = [
+        _matrix_variant_metrics(
+            variant=variant,
+            rows=[row for row in rows if row.get("variant_id") == variant["variant_id"]],
+            deltas=deltas,
+        )
+        for variant in variants
+    ]
+    metric: dict[str, Any] = {
+        "schema_version": MATRIX_SCHEMA_VERSION,
+        "suite_id": suite_id,
+        "suite_type": "retrieval_answer_matrix",
+        "domain": domain,
+        "query_count": len(queries),
+        "result_count": len(rows),
+        "variant_count": len(variant_metrics),
+        "supported_variant_ids": [variant["variant_id"] for variant in _matrix_variants({})],
+        "variants": variant_metrics,
+        "variant_metrics": {str(item["variant_id"]): item for item in variant_metrics},
+        "dataset_descriptor": _dataset_descriptor(
+            suite=suite,
+            suite_id=suite_id,
+            suite_type="retrieval_answer_matrix",
+            domain=domain,
+            query_count=len(queries),
+        ),
+        "privacy": _matrix_privacy_payload(),
+    }
+    for delta in deltas:
+        metric[f"hit_at_{delta}s"] = _mean_or_none(
+            item.get(f"hit_at_{delta}s") for item in variant_metrics
+        )
+    for key in (
+        "mrr_at_max_delta",
+        "evidence_coverage_ratio",
+        "frame_backed_ratio",
+        "linked_entity_backed_ratio",
+        "grounded_answer_ratio",
+        "citation_coverage_ratio",
+        "mean_processing_time_ms",
+    ):
+        metric[key] = _mean_or_none(item.get(key) for item in variant_metrics)
     return metric, rows
 
 
@@ -877,6 +1022,218 @@ def _ablation_modes(suite: dict[str, Any]) -> list[str]:
     return modes
 
 
+def _matrix_variants(suite: dict[str, Any]) -> list[dict[str, Any]]:
+    default_by_id = {
+        str(variant["variant_id"]): dict(variant) for variant in DEFAULT_MATRIX_VARIANTS
+    }
+    raw_variants = suite.get("variants") or DEFAULT_MATRIX_VARIANTS
+    if isinstance(raw_variants, str):
+        raw_items: list[Any] = [item.strip() for item in raw_variants.split(",")]
+    else:
+        raw_items = list(raw_variants)
+
+    variants: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_item in raw_items:
+        if isinstance(raw_item, str):
+            variant_id = raw_item.strip()
+            if variant_id not in default_by_id:
+                raise ValueError(f"Unsupported retrieval_answer_matrix variant: {variant_id}")
+            variant = dict(default_by_id[variant_id])
+        elif isinstance(raw_item, dict):
+            raw_variant_id = raw_item.get("variant_id", raw_item.get("id", raw_item.get("name")))
+            variant_id = str(raw_variant_id or "").strip()
+            if not variant_id:
+                raise ValueError("retrieval_answer_matrix variant requires variant_id")
+            variant = dict(default_by_id.get(variant_id, {}))
+            variant.update(raw_item)
+            variant["variant_id"] = variant_id
+        else:
+            raise ValueError(f"Invalid retrieval_answer_matrix variant: {raw_item!r}")
+
+        variant["variant_id"] = str(variant["variant_id"]).strip()
+        variant["label"] = str(variant.get("label") or variant["variant_id"]).strip()
+        variant["index_kind"] = _normalize_index_kind(variant.get("index_kind", SEGMENT_HIT_SOURCE))
+        if variant["variant_id"] in seen:
+            raise ValueError(f"Duplicate retrieval_answer_matrix variant_id: {variant['variant_id']}")
+        seen.add(variant["variant_id"])
+        variants.append(variant)
+    if not variants:
+        raise ValueError("retrieval_answer_matrix requires at least one variant")
+    return variants
+
+
+def _run_matrix_query(
+    *,
+    client: SearchClient,
+    suite: dict[str, Any],
+    variant: dict[str, Any],
+    project_dir: Path,
+    run_id: str,
+    suite_id: str,
+    domain: str,
+    query_id: str,
+    query_row: dict[str, Any],
+    query_text: str,
+    expected_ranges: list[tuple[float, float]],
+    expected_segment_ids: list[str],
+    include_answer: bool,
+    deltas: list[int],
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    index_kind = _normalize_index_kind(variant.get("index_kind", SEGMENT_HIT_SOURCE))
+    index_uid = _matrix_index_uid(suite=suite, variant=variant, index_kind=index_kind)
+    visual_index_uid = _optional_str(_variant_value(suite, variant, "visual_index"))
+    use_domain_lexicon = _bool_config(variant, "use_domain_lexicon", default=False)
+    domain_lexicon_path = (
+        _optional_path(_variant_value(suite, variant, "domain_lexicon"))
+        if use_domain_lexicon
+        else None
+    )
+    rerank_time_hint = _matrix_rerank_time_hint(suite=suite, variant=variant, query_row=query_row)
+    response = query_project(
+        client=client,
+        index_uid=index_uid,
+        retrieval_index_kind=index_kind,
+        visual_index_uid=visual_index_uid,
+        project_dir=project_dir,
+        query=query_text,
+        limit=int(_variant_value(suite, variant, "limit") or 5),
+        segments_path=_optional_path(_variant_value(suite, variant, "segments")),
+        frames_manifest_path=_optional_path(_variant_value(suite, variant, "frames_manifest")),
+        visual_entities_path=_optional_path(_variant_value(suite, variant, "visual_entities")),
+        entity_links_path=_optional_path(_variant_value(suite, variant, "entity_links")),
+        domain_lexicon_path=domain_lexicon_path,
+        disable_domain_lexicon=not use_domain_lexicon,
+        window_seconds=_optional_float(_variant_value(suite, variant, "window_seconds")),
+        neighbor_count=int(_variant_value(suite, variant, "neighbor_count") or 1),
+        previous_neighbor_count=_optional_int(
+            _variant_value(suite, variant, "previous_neighbor_count")
+        ),
+        next_neighbor_count=_optional_int(_variant_value(suite, variant, "next_neighbor_count")),
+        window_before_seconds=_optional_float(
+            _variant_value(suite, variant, "window_before_seconds")
+        ),
+        window_after_seconds=_optional_float(_variant_value(suite, variant, "window_after_seconds")),
+        rerank=_bool_config(variant, "rerank", default=False),
+        rerank_time_hint=rerank_time_hint,
+        rerank_backend=str(_variant_value(suite, variant, "rerank_backend") or "deterministic"),
+        hybrid_retrieval=_bool_config(variant, "hybrid_retrieval", default=False),
+        hybrid_embedder=str(
+            _variant_value(suite, variant, "hybrid_embedder") or DEFAULT_HYBRID_EMBEDDER
+        ),
+        hybrid_semantic_ratio=(
+            _optional_float(_variant_value(suite, variant, "hybrid_semantic_ratio"))
+            or DEFAULT_HYBRID_SEMANTIC_RATIO
+        ),
+    )
+    answer_enabled = _bool_config(variant, "include_answer", default=include_answer)
+    answer = compose_answer(response) if answer_enabled else None
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 4)
+    bundles = _list_of_dicts(response.get("bundles"))
+    candidate_errors = [
+        _local_candidate_error(
+            bundle.get("candidate") if isinstance(bundle.get("candidate"), dict) else None,
+            expected_ranges,
+        )
+        for bundle in bundles
+    ]
+    best_error = min((error for error in candidate_errors if error is not None), default=None)
+    top_error = candidate_errors[0] if candidate_errors else None
+    hit_by_delta = {
+        str(delta): best_error is not None and best_error <= delta for delta in deltas
+    }
+    top_bundle = bundles[0] if bundles else None
+    top_candidate = (
+        top_bundle.get("candidate")
+        if isinstance(top_bundle, dict) and isinstance(top_bundle.get("candidate"), dict)
+        else None
+    )
+
+    return {
+        "schema_version": MATRIX_SCHEMA_VERSION,
+        "run_id": run_id,
+        "suite_id": suite_id,
+        "suite_type": "retrieval_answer_matrix",
+        "domain": domain,
+        "variant_id": variant["variant_id"],
+        "variant_label": variant["label"],
+        "query_id": query_id,
+        "query_label": _optional_public_label(query_row),
+        "privacy": _matrix_privacy_payload(),
+        "config": _public_matrix_config(
+            suite=suite,
+            variant=variant,
+            index_uid=index_uid,
+            visual_index_uid=visual_index_uid,
+            index_kind=index_kind,
+            use_domain_lexicon=use_domain_lexicon,
+        ),
+        "expected_time_available": bool(expected_ranges),
+        "expected_segment_available": bool(expected_segment_ids),
+        "search_hit_count": (response.get("counts") or {}).get("search_hits"),
+        "bundle_count": len(bundles),
+        "best_abs_error": best_error,
+        "top1_abs_error": top_error,
+        "top1_expected_segment_match": _top_candidate_matches(
+            top_candidate=top_candidate,
+            expected_segment_ids=expected_segment_ids,
+        ),
+        "hit_by_delta": hit_by_delta,
+        "mrr": _reciprocal_rank(candidate_errors, deltas=max(deltas)),
+        "evidence_covered": bool(bundles),
+        "frame_backed": _bundles_have_frames(bundles),
+        "linked_entity_backed": _bundles_have_linked_entities(bundles),
+        "query_expansion": _public_query_expansion(response.get("query_expansion")),
+        "top_candidate": _public_matrix_candidate(top_bundle),
+        "answer": _public_answer_summary(answer),
+        "processing_time_ms": response.get("processing_time_ms"),
+        "elapsed_time_ms": elapsed_ms,
+        "warning_count": len(response.get("warnings") or []),
+    }
+
+
+def _matrix_variant_metrics(
+    *,
+    variant: dict[str, Any],
+    rows: list[dict[str, Any]],
+    deltas: list[int],
+) -> dict[str, Any]:
+    metric: dict[str, Any] = {
+        "schema_version": MATRIX_SCHEMA_VERSION,
+        "variant_id": variant["variant_id"],
+        "label": variant["label"],
+        "query_count": len(rows),
+        "config": _public_matrix_variant_config(variant),
+        "mean_abs_error": _mean_or_none(
+            row.get("best_abs_error") for row in rows if row.get("best_abs_error") is not None
+        ),
+        "top1_mean_abs_error": _mean_or_none(
+            row.get("top1_abs_error") for row in rows if row.get("top1_abs_error") is not None
+        ),
+        "mrr_at_max_delta": _mean_or_none(row.get("mrr") for row in rows),
+        "evidence_coverage_ratio": _ratio(rows, "evidence_covered"),
+        "frame_backed_ratio": _ratio(rows, "frame_backed"),
+        "linked_entity_backed_ratio": _ratio(rows, "linked_entity_backed"),
+        "top1_expected_segment_match_ratio": _ratio(rows, "top1_expected_segment_match"),
+        "grounded_answer_ratio": _answer_ratio(rows, "grounded_answer"),
+        "candidate_evidence_only_ratio": _answer_ratio(rows, "candidate_evidence_only"),
+        "citation_coverage_ratio": _answer_count_ratio(rows, "citation_count"),
+        "mean_answer_citation_count": _mean_or_none(
+            (row.get("answer") or {}).get("citation_count")
+            for row in rows
+            if isinstance(row.get("answer"), dict)
+        ),
+        "mean_processing_time_ms": _mean_or_none(row.get("processing_time_ms") for row in rows),
+        "mean_elapsed_time_ms": _mean_or_none(row.get("elapsed_time_ms") for row in rows),
+        "warning_ratio": _ratio(rows, "warning_count"),
+        "source_counts": _source_counts(rows),
+    }
+    for delta in deltas:
+        metric[f"hit_at_{delta}s"] = _ratio_hit(rows, str(delta))
+    return metric
+
+
 def _expected_ranges(query_row: dict[str, Any]) -> list[tuple[float, float]]:
     time_hint = str(query_row.get("expected_time_hint") or query_row.get("time_hint") or "")
     ranges = parse_time_hint(time_hint)
@@ -900,6 +1257,277 @@ def _expected_ranges(query_row: dict[str, Any]) -> list[tuple[float, float]]:
         if parsed is not None:
             ranges.append((parsed, parsed))
     return ranges
+
+
+def _expected_segment_ids(query_row: dict[str, Any]) -> list[str]:
+    values = query_row.get(
+        "expected_segment_ids",
+        query_row.get("expected_segment_id", query_row.get("target_segment_id")),
+    )
+    return _string_list(values)
+
+
+def _normalize_index_kind(value: Any) -> str:
+    normalized = str(value or SEGMENT_HIT_SOURCE).strip().lower().replace("_", "-")
+    aliases = {
+        "segment": SEGMENT_HIT_SOURCE,
+        "segments": SEGMENT_HIT_SOURCE,
+        "segment-lexical": SEGMENT_HIT_SOURCE,
+        "window": WINDOW_HIT_SOURCE,
+        "windows": WINDOW_HIT_SOURCE,
+        "lecture-window": WINDOW_HIT_SOURCE,
+    }
+    result = aliases.get(normalized)
+    if result is None:
+        valid = ", ".join(sorted({SEGMENT_HIT_SOURCE, WINDOW_HIT_SOURCE}))
+        raise ValueError(f"Unsupported retrieval_answer_matrix index_kind: {value}. Valid: {valid}")
+    return result
+
+
+def _variant_value(suite: dict[str, Any], variant: dict[str, Any], key: str) -> Any:
+    return variant[key] if key in variant else suite.get(key)
+
+
+def _bool_config(config: dict[str, Any], key: str, *, default: bool) -> bool:
+    if key not in config:
+        return default
+    value = config[key]
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(value)
+
+
+def _matrix_index_uid(*, suite: dict[str, Any], variant: dict[str, Any], index_kind: str) -> str:
+    explicit = _optional_str(variant.get("index"))
+    if explicit:
+        return explicit
+    if index_kind == WINDOW_HIT_SOURCE:
+        window_index = _optional_str(variant.get("window_index", suite.get("window_index")))
+        if window_index:
+            return window_index
+        raise ValueError("retrieval_answer_matrix window variant requires window_index")
+    index = _optional_str(suite.get("index"))
+    if not index:
+        raise ValueError("retrieval_answer_matrix suite requires index")
+    return index
+
+
+def _matrix_rerank_time_hint(
+    *,
+    suite: dict[str, Any],
+    variant: dict[str, Any],
+    query_row: dict[str, Any],
+) -> str | None:
+    field = _optional_str(_variant_value(suite, variant, "rerank_time_hint_field"))
+    if field and query_row.get(field):
+        return str(query_row[field])
+    value = _variant_value(suite, variant, "rerank_time_hint")
+    if value is not None:
+        return str(value)
+    if _bool_config(variant, "rerank", default=False):
+        return str(query_row.get("expected_time_hint") or "") or None
+    return None
+
+
+def _public_matrix_config(
+    *,
+    suite: dict[str, Any],
+    variant: dict[str, Any],
+    index_uid: str,
+    visual_index_uid: str | None,
+    index_kind: str,
+    use_domain_lexicon: bool,
+) -> dict[str, Any]:
+    return {
+        **_public_matrix_variant_config(variant),
+        "index_kind": index_kind,
+        "index_ref": f"index:{_short_hash(index_uid)}",
+        "visual_index_ref": f"index:{_short_hash(visual_index_uid)}"
+        if visual_index_uid is not None
+        else None,
+        "limit": int(_variant_value(suite, variant, "limit") or 5),
+        "domain_lexicon_enabled": use_domain_lexicon,
+    }
+
+
+def _public_matrix_variant_config(variant: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "index_kind": _normalize_index_kind(variant.get("index_kind", SEGMENT_HIT_SOURCE)),
+        "domain_lexicon": _bool_config(variant, "use_domain_lexicon", default=False),
+        "hybrid_retrieval": _bool_config(variant, "hybrid_retrieval", default=False),
+        "rerank": _bool_config(variant, "rerank", default=False),
+        "answer": _bool_config(variant, "include_answer", default=True),
+    }
+
+
+def _public_query_expansion(value: Any) -> dict[str, Any]:
+    metadata = value if isinstance(value, dict) else {}
+    return {
+        "enabled": bool(metadata.get("enabled")),
+        "applied": bool(metadata.get("applied")),
+        "added_term_count": int(metadata.get("added_term_count") or 0),
+        "search_query_count": len(metadata.get("search_queries") or []),
+    }
+
+
+def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(bundle, dict):
+        return None
+    candidate = bundle.get("candidate")
+    if not isinstance(candidate, dict):
+        return None
+    source = str(candidate.get("source") or "candidate")
+    candidate_id = str(
+        candidate.get("segment_id")
+        or candidate.get("target_segment_id")
+        or candidate.get("window_id")
+        or candidate.get("sample_id")
+        or "unknown"
+    )
+    evidence_window = bundle.get("evidence_window") if isinstance(bundle, dict) else {}
+    frame_refs = []
+    if isinstance(evidence_window, dict):
+        frame_refs = _list_of_dicts(evidence_window.get("frame_refs"))
+    return {
+        "ref": f"{source}:{_short_hash(candidate_id)}",
+        "source": source,
+        "modality": candidate.get("modality"),
+        "rank": candidate.get("rank"),
+        "retrieval_mode": candidate.get("retrieval_mode"),
+        "timestamp_available": _first_float(
+            candidate.get("timestamp_center"),
+            candidate.get("start_time"),
+            candidate.get("end_time"),
+        )
+        is not None,
+        "frame_backed": bool(frame_refs),
+        "linked_entity_backed": bool(bundle.get("linked_entities")),
+        "source_count": (bundle.get("merge") or {}).get("source_count")
+        if isinstance(bundle.get("merge"), dict)
+        else None,
+    }
+
+
+def _public_answer_summary(answer: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(answer, dict):
+        return {"enabled": False}
+    policy = answer.get("no_answer_policy") if isinstance(answer.get("no_answer_policy"), dict) else {}
+    llm = answer.get("llm") if isinstance(answer.get("llm"), dict) else {}
+    return {
+        "enabled": True,
+        "schema_version": answer.get("schema_version"),
+        "answer_type": answer.get("answer_type"),
+        "claim_count": len(_list_of_dicts(answer.get("claims"))),
+        "citation_count": len(_list_of_dicts(answer.get("citations"))),
+        "candidate_evidence_count": len(_list_of_dicts(answer.get("candidate_evidence"))),
+        "policy_reason": policy.get("reason"),
+        "llm_enabled": bool(llm.get("enabled")),
+    }
+
+
+def _top_candidate_matches(
+    *,
+    top_candidate: dict[str, Any] | None,
+    expected_segment_ids: list[str],
+) -> bool | None:
+    if not expected_segment_ids:
+        return None
+    if not isinstance(top_candidate, dict):
+        return False
+    candidate_ids = _string_list(
+        [
+            top_candidate.get("segment_id"),
+            top_candidate.get("target_segment_id"),
+            top_candidate.get("sample_id"),
+        ]
+    )
+    return bool(set(candidate_ids).intersection(expected_segment_ids))
+
+
+def _bundles_have_frames(bundles: list[dict[str, Any]]) -> bool:
+    for bundle in bundles:
+        evidence_window = bundle.get("evidence_window")
+        if isinstance(evidence_window, dict) and evidence_window.get("frame_refs"):
+            return True
+    return False
+
+
+def _bundles_have_linked_entities(bundles: list[dict[str, Any]]) -> bool:
+    return any(bool(bundle.get("linked_entities")) for bundle in bundles)
+
+
+def _answer_ratio(rows: list[dict[str, Any]], answer_type: str) -> float | None:
+    answer_rows = [row for row in rows if isinstance(row.get("answer"), dict)]
+    if not answer_rows:
+        return None
+    return round(
+        sum(
+            1.0
+            if (row.get("answer") or {}).get("answer_type") == answer_type
+            else 0.0
+            for row in answer_rows
+        )
+        / len(answer_rows),
+        4,
+    )
+
+
+def _answer_count_ratio(rows: list[dict[str, Any]], key: str) -> float | None:
+    answer_rows = [row for row in rows if isinstance(row.get("answer"), dict)]
+    if not answer_rows:
+        return None
+    return round(
+        sum(1.0 if ((row.get("answer") or {}).get(key) or 0) > 0 else 0.0 for row in answer_rows)
+        / len(answer_rows),
+        4,
+    )
+
+
+def _matrix_privacy_payload() -> dict[str, Any]:
+    return {
+        "public_outputs_are_sanitized": True,
+        "raw_query_text": "redacted",
+        "answer_text": "redacted",
+        "claim_text": "redacted",
+        "candidate_evidence_text": "redacted",
+        "transcript_excerpt": "redacted",
+        "local_paths": "redacted",
+        "raw_candidate_ids": "hashed",
+        "raw_response_in_public_output": False,
+    }
+
+
+def _dataset_descriptor(
+    *,
+    suite: dict[str, Any],
+    suite_id: str,
+    suite_type: str,
+    domain: str,
+    query_count: int,
+) -> dict[str, Any]:
+    raw = suite.get("dataset_descriptor") if isinstance(suite.get("dataset_descriptor"), dict) else {}
+    descriptor = {
+        "suite_id": suite_id,
+        "suite_type": suite_type,
+        "domain": domain,
+        "query_count": query_count,
+        "descriptor_id": str(raw.get("descriptor_id") or raw.get("dataset_id") or suite_id),
+        "split": raw.get("split"),
+        "version": raw.get("version"),
+        "privacy": raw.get("privacy", "aggregate_only"),
+    }
+    if suite.get("project_id") is not None:
+        descriptor["project_id"] = str(suite["project_id"])
+    elif suite.get("project_dir") is not None:
+        descriptor["project_ref"] = f"project:{_short_hash(str(suite['project_dir']))}"
+    return {key: value for key, value in descriptor.items() if value is not None}
 
 
 def _visual_entity_for_hit(*, hit: dict[str, Any], project: AblationProject) -> dict[str, Any]:
@@ -1416,6 +2044,45 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                     ),
                 )
             )
+    matrix_variants = [
+        (suite, variant)
+        for suite in metrics["suites"]
+        for variant in suite.get("variants", [])
+        if isinstance(variant, dict)
+    ]
+    if matrix_variants:
+        lines.extend(
+            [
+                "",
+                "## Retrieval/Answer Matrix",
+                "",
+                "Matrix outputs are aggregate and public-safe: raw queries, answer text, "
+                "candidate evidence, transcript excerpts, local paths, and raw candidate IDs "
+                "are omitted.",
+                "",
+                "| suite | variant | queries | Hit@10s | MRR | frame-backed | linked-backed | grounded | citations | latency ms |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for suite, variant in matrix_variants:
+            lines.append(
+                "| {suite_id} | {variant_id} | {query_count} | {hit10} | {mrr} | "
+                "{frame} | {linked} | {grounded} | {citations} | {latency} |".format(
+                    suite_id=suite.get("suite_id"),
+                    variant_id=variant.get("variant_id"),
+                    query_count=variant.get("query_count") or 0,
+                    hit10=_format_metric(variant.get("hit_at_10s")),
+                    mrr=_format_metric(variant.get("mrr_at_max_delta")),
+                    frame=_format_metric(variant.get("frame_backed_ratio")),
+                    linked=_format_metric(variant.get("linked_entity_backed_ratio")),
+                    grounded=_format_metric(variant.get("grounded_answer_ratio")),
+                    citations=_format_metric(variant.get("citation_coverage_ratio")),
+                    latency=_format_metric(
+                        variant.get("mean_processing_time_ms")
+                        or variant.get("mean_elapsed_time_ms")
+                    ),
+                )
+            )
     diagnostic_suites = [
         suite
         for suite in metrics["suites"]
@@ -1453,6 +2120,112 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
         )
     lines.append("")
     return "\n".join(lines)
+
+
+def _write_metrics_summary_csv(path: Path, metrics: dict[str, Any]) -> None:
+    rows = _metrics_summary_rows(metrics)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "run_id",
+        "suite_id",
+        "suite_type",
+        "domain",
+        "row_type",
+        "variant_or_mode",
+        "query_count",
+        "hit_at_5s",
+        "hit_at_10s",
+        "hit_at_15s",
+        "mrr_at_max_delta",
+        "top1_mean_abs_error",
+        "frame_backed_ratio",
+        "linked_entity_backed_ratio",
+        "grounded_answer_ratio",
+        "citation_coverage_ratio",
+        "mean_processing_time_ms",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field) for field in fieldnames})
+
+
+def _metrics_summary_rows(metrics: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    run_id = metrics.get("run_id")
+    for suite in metrics.get("suites", []):
+        if not isinstance(suite, dict):
+            continue
+        base = {
+            "run_id": run_id,
+            "suite_id": suite.get("suite_id"),
+            "suite_type": suite.get("suite_type"),
+            "domain": suite.get("domain"),
+        }
+        variants = [item for item in suite.get("variants", []) if isinstance(item, dict)]
+        modes = [item for item in suite.get("modes", []) if isinstance(item, dict)]
+        if variants:
+            for variant in variants:
+                rows.append(
+                    _metrics_summary_row(
+                        base=base,
+                        item=variant,
+                        row_type="variant",
+                        variant_or_mode=variant.get("variant_id"),
+                    )
+                )
+        elif modes:
+            for mode in modes:
+                rows.append(
+                    _metrics_summary_row(
+                        base=base,
+                        item=mode,
+                        row_type="mode",
+                        variant_or_mode=mode.get("mode"),
+                    )
+                )
+        else:
+            rows.append(
+                _metrics_summary_row(
+                    base=base,
+                    item=suite,
+                    row_type="suite",
+                    variant_or_mode=None,
+                )
+            )
+    return rows
+
+
+def _metrics_summary_row(
+    *,
+    base: dict[str, Any],
+    item: dict[str, Any],
+    row_type: str,
+    variant_or_mode: Any,
+) -> dict[str, Any]:
+    return {
+        **base,
+        "row_type": row_type,
+        "variant_or_mode": variant_or_mode,
+        "query_count": item.get("query_count") or item.get("count") or 0,
+        "hit_at_5s": item.get("hit_at_5s"),
+        "hit_at_10s": item.get("hit_at_10s"),
+        "hit_at_15s": item.get("hit_at_15s"),
+        "mrr_at_max_delta": item.get("mrr_at_max_delta"),
+        "top1_mean_abs_error": item.get("top1_mean_abs_error"),
+        "frame_backed_ratio": item.get("frame_backed_ratio"),
+        "linked_entity_backed_ratio": item.get(
+            "linked_entity_backed_ratio",
+            item.get("linked_entity_ratio"),
+        ),
+        "grounded_answer_ratio": item.get("grounded_answer_ratio"),
+        "citation_coverage_ratio": item.get("citation_coverage_ratio"),
+        "mean_processing_time_ms": item.get(
+            "mean_processing_time_ms",
+            item.get("mean_elapsed_time_ms"),
+        ),
+    }
 
 
 def _empty_domain_lexicon_metadata() -> dict[str, Any]:

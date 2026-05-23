@@ -87,6 +87,82 @@ class FakeAblationClient:
         return {"hits": [], "processingTimeMs": 1, "indexUid": index_uid}
 
 
+class FakeMatrixClient:
+    def __init__(self) -> None:
+        self.searches: list[tuple[str, str, str]] = []
+
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        hybrid: dict | None = None,
+    ) -> dict:
+        mode = "semantic" if hybrid else "lexical"
+        self.searches.append((index_uid, query, mode))
+        if index_uid == "public_windows":
+            hits = [
+                {
+                    "window_id": "window_loss_public",
+                    "target_segment_id": "seg_loss_public",
+                    "sample_id": "seg_loss_public",
+                    "video_id": "public_demo_video",
+                    "start_time": 0.0,
+                    "end_time": 34.0,
+                    "timestamp_center": 12.0,
+                    "target_start_time": 10.0,
+                    "target_end_time": 14.0,
+                    "target_timestamp_center": 12.0,
+                    "source_segment_ids": [
+                        "seg_intro_public",
+                        "seg_loss_public",
+                        "seg_wrap_public",
+                    ],
+                    "transcript_window_text": "PUBLIC SYNTHETIC window must not leak",
+                    "_rankingScore": 0.89,
+                }
+            ]
+            return {"hits": hits[:limit], "processingTimeMs": 4, "indexUid": index_uid}
+        if index_uid == "public_visual_entities":
+            hits = [
+                {
+                    "entity_id": "ent_loss_public",
+                    "frame_id": "frame_loss_public",
+                    "timestamp": 12.0,
+                    "text": "PUBLIC VISUAL LABEL loss curve",
+                    "_rankingScore": 0.9,
+                }
+            ]
+            return {"hits": hits[:limit], "processingTimeMs": 2, "indexUid": index_uid}
+        if index_uid == "public_segments":
+            hits = [
+                {
+                    "segment_id": "seg_wrap_public",
+                    "sample_id": "seg_wrap_public",
+                    "video_id": "public_demo_video",
+                    "start_time": 30.0,
+                    "end_time": 34.0,
+                    "timestamp_center": 32.0,
+                    "transcript_text": "PUBLIC SYNTHETIC wrong transcript must not leak",
+                    "_rankingScore": 0.95 if mode == "lexical" else 0.7,
+                },
+                {
+                    "segment_id": "seg_loss_public",
+                    "sample_id": "seg_loss_public",
+                    "video_id": "public_demo_video",
+                    "start_time": 10.0,
+                    "end_time": 14.0,
+                    "timestamp_center": 12.0,
+                    "transcript_text": "PUBLIC SYNTHETIC correct transcript must not leak",
+                    "_rankingScore": 0.55 if mode == "lexical" else 0.96,
+                },
+            ]
+            if "validation loss" in query:
+                hits = list(reversed(hits))
+            return {"hits": hits[:limit], "processingTimeMs": 5, "indexUid": index_uid}
+        return {"hits": [], "processingTimeMs": 1, "indexUid": index_uid}
+
+
 def test_parse_time_hint_extracts_multiple_ranges() -> None:
     assert parse_time_hint("95-102s or 126-131s") == [(95.0, 102.0), (126.0, 131.0)]
 
@@ -350,6 +426,85 @@ def test_retrieval_ablation_public_fixture_outputs_are_sanitized(tmp_path: Path)
     assert "Retrieval Ablation Modes" in public_text
     assert "raw_query_text" in public_text
     assert "redacted" in public_text
+
+
+def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path) -> None:
+    fixture_dir = Path("tests/fixtures/public_retrieval_ablation_project").resolve()
+    client = FakeMatrixClient()
+    run = run_benchmark(
+        client=client,
+        manifest_path=fixture_dir / "benchmark_matrix_manifest.json",
+        output_dir=tmp_path / "matrix",
+        repo_root=Path.cwd(),
+    )
+
+    assert run.metrics_path.exists()
+    assert run.metrics_csv_path.exists()
+    assert run.query_results_path.exists()
+    assert run.summary_path.exists()
+    assert run.metrics["query_count"] == 6
+    suite = run.metrics["suites"][0]
+    assert suite["schema_version"] == "retrieval-answer-ablation-matrix-v1"
+    assert suite["query_count"] == 1
+    assert suite["variant_count"] == 6
+    assert set(suite["variant_metrics"]) == {
+        "segment_lexical",
+        "domain_lexicon",
+        "hybrid",
+        "window",
+        "window_hybrid",
+        "rerank",
+    }
+    assert suite["variant_metrics"]["segment_lexical"]["config"]["domain_lexicon"] is False
+    assert suite["variant_metrics"]["domain_lexicon"]["config"]["domain_lexicon"] is True
+    assert suite["variant_metrics"]["hybrid"]["config"]["hybrid_retrieval"] is True
+    assert suite["variant_metrics"]["window"]["config"]["index_kind"] == "window"
+    assert suite["variant_metrics"]["window_hybrid"]["config"]["hybrid_retrieval"] is True
+    assert suite["variant_metrics"]["rerank"]["config"]["rerank"] is True
+    assert suite["variant_metrics"]["window"]["hit_at_10s"] == 1.0
+    assert suite["variant_metrics"]["rerank"]["hit_at_10s"] == 1.0
+    assert suite["variant_metrics"]["rerank"]["grounded_answer_ratio"] == 1.0
+    assert any(search[2] == "semantic" for search in client.searches)
+
+    rows = [
+        json.loads(line)
+        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert {row["variant_id"] for row in rows} == set(suite["variant_metrics"])
+    assert all("query_text" not in row for row in rows)
+    assert all(row["privacy"]["answer_text"] == "redacted" for row in rows)
+    assert all(row["top_candidate"]["ref"] for row in rows)
+    assert all(row["answer"]["answer_type"] for row in rows)
+    assert all(row["config"]["index_ref"].startswith("index:") for row in rows)
+
+    metrics_csv = run.metrics_csv_path.read_text(encoding="utf-8")
+    assert "variant,segment_lexical" in metrics_csv
+    summary = run.summary_path.read_text(encoding="utf-8")
+    assert "Retrieval/Answer Matrix" in summary
+
+    public_text = "\n".join(
+        [
+            run.metrics_path.read_text(encoding="utf-8"),
+            run.metrics_csv_path.read_text(encoding="utf-8"),
+            run.query_results_path.read_text(encoding="utf-8"),
+            run.summary_path.read_text(encoding="utf-8"),
+        ]
+    )
+    for sensitive in [
+        "PUBLIC RAW QUERY",
+        "loss curve slope should stay private-safe",
+        "PUBLIC SYNTHETIC",
+        "PUBLIC VISUAL LABEL",
+        "seg_loss_public",
+        "seg_wrap_public",
+        "ent_loss_public",
+        "frame_loss_public",
+        "frames/frame_loss_public.jpg",
+        str(fixture_dir),
+    ]:
+        assert sensitive not in public_text
+    assert "raw_candidate_ids" in public_text
+    assert "hashed" in public_text
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
