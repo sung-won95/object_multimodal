@@ -48,10 +48,12 @@ def test_align_segments_to_frames_with_overlap_and_margin(tmp_path: Path) -> Non
         "segments_with_frames": 2,
         "segments_without_frames": 0,
         "segment_frame_coverage_ratio": 1.0,
+        "frame_free_segment_ratio": 0.0,
         "frame_refs_total": 5,
         "unique_frames_referenced": 5,
         "available_frames": 5,
         "available_frame_time_span_sec": 20.69,
+        "available_frame_temporal_coverage_ratio": 0.9852,
     }
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -60,6 +62,7 @@ def test_align_segments_to_frames_with_overlap_and_margin(tmp_path: Path) -> Non
     )
     assert manifest["counts"]["lecture_segments_aligned"] == 2
     assert manifest["alignment"]["segments_with_frames"] == 2
+    assert manifest["alignment"]["frame_free_segment_ratio"] == 0.0
 
 
 def test_align_segments_to_frames_includes_start_and_end_boundaries(tmp_path: Path) -> None:
@@ -102,7 +105,36 @@ def test_align_segments_to_frames_with_no_frames(tmp_path: Path) -> None:
     assert aligned_rows[0]["frame_refs"] == []
     assert summary["counts"]["segments_with_frames"] == 0
     assert summary["counts"]["segments_without_frames"] == 1
+    assert summary["counts"]["frame_free_segment_ratio"] == 1.0
     assert summary["counts"]["frame_refs_total"] == 0
+
+
+def test_align_segments_to_frames_reports_late_frame_backed_segment(tmp_path: Path) -> None:
+    output_root = tmp_path / "artifacts" / "projects"
+    project_id = "late_segment"
+    project_dir = output_root / project_id
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments.jsonl",
+        [
+            {"segment_id": "seg_early", "start_time": 0.0, "end_time": 10.0},
+            {"segment_id": "seg_late", "start_time": 880.0, "end_time": 890.0},
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {"frame_id": "frame_early", "timestamp": 5.0},
+            {"frame_id": "frame_late", "timestamp": 885.0},
+        ],
+    )
+
+    summary = align_segments_to_frames(project_id=project_id, output_root=output_root)
+
+    aligned_rows = _read_jsonl(project_dir / "segments" / "lecture_segments_aligned.jsonl")
+    assert aligned_rows[1]["frame_refs"] == ["frame_late"]
+    assert summary["counts"]["segments_with_frames"] == 2
+    assert summary["counts"]["frame_free_segment_ratio"] == 0.0
+    assert summary["counts"]["available_frame_temporal_coverage_ratio"] == 0.9888
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

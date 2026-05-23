@@ -57,6 +57,38 @@ def test_uniform_frame_sampling_spreads_cap_across_duration() -> None:
     assert timestamps == [0.0, 100.0, 199.0, 299.0]
 
 
+def test_uniform_frame_sampling_uses_segment_distribution_under_cap() -> None:
+    timestamps = select_frame_timestamps(
+        duration_sec=900.0,
+        frame_rate=1.0,
+        max_frames=4,
+        frame_sampling="uniform",
+        segments=[
+            {"segment_id": "seg_1", "start_time": 0.0, "end_time": 10.0},
+            {"segment_id": "seg_2", "start_time": 300.0, "end_time": 310.0},
+            {"segment_id": "seg_3", "start_time": 600.0, "end_time": 610.0},
+            {"segment_id": "seg_4", "start_time": 880.0, "end_time": 890.0},
+        ],
+    )
+
+    assert timestamps == [5.0, 305.0, 605.0, 885.0]
+
+
+def test_uniform_frame_sampling_refills_after_segment_uniform_dedupe() -> None:
+    timestamps = select_frame_timestamps(
+        duration_sec=300.0,
+        frame_rate=1.0,
+        max_frames=4,
+        frame_sampling="uniform",
+        segments=[
+            {"start_time": 0.0, "end_time": 0.0},
+            {"start_time": 299.0, "end_time": 299.0},
+        ],
+    )
+
+    assert timestamps == [0.0, 100.0, 199.0, 299.0]
+
+
 def test_prefix_frame_sampling_keeps_existing_front_loaded_behavior() -> None:
     timestamps = select_frame_timestamps(
         duration_sec=300.0,
@@ -86,6 +118,39 @@ def test_frame_sampling_summary_reports_temporal_coverage() -> None:
     assert summary["covered_until_sec"] == 300.0
     assert summary["timestamp_span_sec"] == 299.0
     assert summary["temporal_coverage_ratio"] == 1.0
+    assert summary["segment_coverage"] == {
+        "segment_count": 0,
+        "segments_with_frames": 0,
+        "segments_without_frames": 0,
+        "segment_frame_coverage_ratio": None,
+        "frame_free_segment_ratio": None,
+    }
+
+
+def test_frame_sampling_summary_reports_late_segment_frame_coverage() -> None:
+    summary = summarize_frame_sampling(
+        frames=[
+            {"frame_id": "early", "timestamp": 5.0},
+            {"frame_id": "late", "timestamp": 885.0},
+        ],
+        segments=[
+            {"segment_id": "seg_1", "start_time": 0.0, "end_time": 10.0},
+            {"segment_id": "seg_2", "start_time": 880.0, "end_time": 890.0},
+        ],
+        duration_sec=900.0,
+        frame_rate=1.0,
+        max_frames=2,
+        frame_sampling="uniform",
+    )
+
+    assert summary["temporal_coverage_ratio"] == 0.9844
+    assert summary["segment_coverage"] == {
+        "segment_count": 2,
+        "segments_with_frames": 2,
+        "segments_without_frames": 0,
+        "segment_frame_coverage_ratio": 1.0,
+        "frame_free_segment_ratio": 0.0,
+    }
 
 
 def test_batch_ingest_skips_existing_by_default_and_force_reingests(tmp_path: Path) -> None:
