@@ -199,6 +199,57 @@ def test_index_project_segments_adds_semantic_contract_to_segment_only_documents
     ]
 
 
+def test_index_project_segments_appends_visual_entities_to_semantic_text(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    visual_entities_path = project_dir / "manifests" / "visual_entities.jsonl"
+    write_jsonl(
+        segments_path,
+        [
+            {
+                "segment_id": "s1",
+                "transcript_text": "The determinant is introduced.",
+                "frame_refs": ["frame_000001"],
+            }
+        ],
+    )
+    write_jsonl(
+        visual_entities_path,
+        [
+            {
+                **_visual_entity("entity_a", "frame_000001", "det A", 1.0),
+                "visual_description": "A determinant equation on the slide",
+                "frame_path": "frames/frame_000001.jpg",
+                "source": "vlm:stub-vlm",
+            }
+        ],
+    )
+    client = FakeMeiliClient()
+
+    summary = index_project_segments(
+        client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+    )
+
+    add_call = next(call for call in client.calls if call[0] == "add_documents")
+    document = add_call[2][0]
+    assert document[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] == (
+        "The determinant is introduced. det A A determinant equation on the slide"
+    )
+    assert document[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] == [
+        "transcript_text",
+        "visual_entities.text",
+        "visual_entities.visual_description",
+    ]
+    assert document["visual_entities"][0]["source"] == "vlm:stub-vlm"
+    assert "frame_path" not in document["visual_entities"][0]
+    assert summary["embedded_visual_entities"] == 1
+    assert summary["semantic_source_field_counts"]["visual_entities.visual_description"] == 1
+
+
 def test_index_project_segments_can_use_legacy_settings_profile(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     segments_path = project_dir / "segments" / "lecture_segments.jsonl"
@@ -291,6 +342,11 @@ def test_index_project_visual_entities_batches_documents(tmp_path: Path) -> None
     assert summary["indexed_documents"] == 3
     assert summary["indexed_batches"] == 2
     assert summary["visual_entities_path"] == str(visual_entities_path)
+    assert summary["semantic_source_field_counts"] == {
+        "text": 3,
+        "visual_description": 3,
+    }
+    assert summary["source_counts"] == {"test": 3}
     assert summary["settings_profile"] == VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
     assert summary["settings_hash"] == visual_entity_settings_hash(settings_call[2])
 
@@ -334,4 +390,5 @@ def _visual_entity(entity_id: str, frame_id: str, text: str, timestamp: float) -
         "relations": [],
         "parser_version": "test-v1",
         "source_model": "stub-vlm",
+        "semantic_source_fields": ["text", "visual_description"],
     }

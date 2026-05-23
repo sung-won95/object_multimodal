@@ -189,14 +189,28 @@ def ensure_lecture_segment_semantic_contract(payload: dict[str, Any]) -> dict[st
     computed_text, computed_source_fields = build_lecture_segment_semantic_text(document)
 
     existing_text = _compact_text(str(document.get(LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD) or ""))
-    document[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] = existing_text or computed_text
-
     existing_source_fields = _semantic_source_field_list(
         document.get(LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD)
     )
-    document[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] = (
-        existing_source_fields or computed_source_fields
-    )
+    source_fields = existing_source_fields or computed_source_fields
+
+    semantic_text = existing_text or computed_text
+    if existing_text and existing_source_fields:
+        missing_source_fields = [
+            source_field
+            for source_field in computed_source_fields
+            if source_field not in existing_source_fields
+        ]
+        append_values: list[Any] = []
+        for source_field in missing_source_fields:
+            append_values.extend(_semantic_source_values(document, source_field))
+            source_fields.append(source_field)
+        append_text = _compact_text(" ".join(_unique_text_values(append_values)))
+        if append_text:
+            semantic_text = _compact_text(f"{existing_text} {append_text}")
+
+    document[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] = semantic_text
+    document[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] = source_fields
     return document
 
 

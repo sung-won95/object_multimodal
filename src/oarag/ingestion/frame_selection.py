@@ -11,6 +11,8 @@ FRAME_SELECTION_STRATEGIES = {"none", "representative"}
 DEFAULT_DUPLICATE_DISTANCE_THRESHOLD = 0.025
 DEFAULT_MIN_CONTRAST = 0.015
 DEFAULT_MIN_DETAIL_SCORE = 0.003
+DEFAULT_MIN_TEMPORAL_COVERAGE_RATIO = 0.8
+DEFAULT_MAX_FRAME_FREE_SEGMENT_RATIO = 0.2
 ANALYSIS_SIZE = 32
 
 
@@ -41,6 +43,91 @@ class FrameSignal:
 
 
 FrameAnalyzer = Callable[[dict[str, Any]], FrameSignal]
+
+
+def summarize_frame_temporal_coverage(
+    *,
+    frames: list[dict[str, Any]],
+    duration_sec: float | None,
+    frame_rate: float,
+    segments: list[dict[str, Any]] | None = None,
+    min_temporal_coverage_ratio: float = DEFAULT_MIN_TEMPORAL_COVERAGE_RATIO,
+    max_frame_free_segment_ratio: float = DEFAULT_MAX_FRAME_FREE_SEGMENT_RATIO,
+) -> dict[str, Any]:
+    if frame_rate <= 0:
+        raise ValueError("frame_rate must be greater than 0")
+
+    timestamps = [
+        timestamp
+        for timestamp in (_optional_float(frame.get("timestamp")) for frame in frames)
+        if timestamp is not None
+    ]
+    first_timestamp = min(timestamps) if timestamps else None
+    last_timestamp = max(timestamps) if timestamps else None
+    timestamp_span = (
+        round(last_timestamp - first_timestamp, 3)
+        if first_timestamp is not None and last_timestamp is not None
+        else None
+    )
+
+    covered_until = None
+    coverage_ratio = None
+    if duration_sec is not None and duration_sec > 0 and last_timestamp is not None:
+        covered_until = round(min(duration_sec, last_timestamp + (1 / frame_rate)), 3)
+        coverage_ratio = round(min(1.0, covered_until / duration_sec), 4)
+
+    segment_coverage = summarize_segment_frame_coverage(
+        frames=frames,
+        segments=segments or [],
+    )
+    frame_free_segment_ratio = segment_coverage["frame_free_segment_ratio"]
+    warnings = _coverage_warnings(
+        temporal_coverage_ratio=coverage_ratio,
+        frame_free_segment_ratio=frame_free_segment_ratio,
+        min_temporal_coverage_ratio=min_temporal_coverage_ratio,
+        max_frame_free_segment_ratio=max_frame_free_segment_ratio,
+    )
+    return {
+        "first_timestamp": first_timestamp,
+        "last_timestamp": last_timestamp,
+        "covered_until_sec": covered_until,
+        "timestamp_span_sec": timestamp_span,
+        "temporal_coverage_ratio": coverage_ratio,
+        "segment_coverage": segment_coverage,
+        "frame_free_segment_ratio": frame_free_segment_ratio,
+        "warnings": warnings,
+    }
+
+
+def summarize_segment_frame_coverage(
+    *,
+    frames: list[dict[str, Any]],
+    segments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    segment_windows = [
+        window for window in (_segment_window(segment) for segment in segments) if window is not None
+    ]
+    frame_timestamps = [
+        timestamp
+        for timestamp in (_optional_float(frame.get("timestamp")) for frame in frames)
+        if timestamp is not None
+    ]
+    segments_with_frames = 0
+    for start, end in segment_windows:
+        if any(start <= timestamp <= end for timestamp in frame_timestamps):
+            segments_with_frames += 1
+
+    segment_count = len(segment_windows)
+    segments_without_frames = max(0, segment_count - segments_with_frames)
+    coverage_ratio = round(segments_with_frames / segment_count, 4) if segment_count else None
+    frame_free_ratio = round(segments_without_frames / segment_count, 4) if segment_count else None
+    return {
+        "segment_count": segment_count,
+        "segments_with_frames": segments_with_frames,
+        "segments_without_frames": segments_without_frames,
+        "segment_frame_coverage_ratio": coverage_ratio,
+        "frame_free_segment_ratio": frame_free_ratio,
+    }
 
 
 def select_representative_frames(
@@ -387,3 +474,67 @@ def _empty_drop_reasons() -> dict[str, int]:
 
 def _round_optional(value: float | None) -> float | None:
     return None if value is None else round(value, 4)
+
+
+def _coverage_warnings(
+    *,
+    temporal_coverage_ratio: float | None,
+    frame_free_segment_ratio: float | None,
+    min_temporal_coverage_ratio: float,
+    max_frame_free_segment_ratio: float,
+) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    if (
+        temporal_coverage_ratio is not None
+        and temporal_coverage_ratio < min_temporal_coverage_ratio
+    ):
+        warnings.append(
+            {
+                "code": "low_temporal_coverage",
+                "severity": "warning",
+                "metric": "temporal_coverage_ratio",
+                "value": temporal_coverage_ratio,
+                "threshold": min_temporal_coverage_ratio,
+                "message": "Frame sampling does not cover enough of the video duration.",
+            }
+        )
+    if (
+        frame_free_segment_ratio is not None
+        and frame_free_segment_ratio > max_frame_free_segment_ratio
+    ):
+        warnings.append(
+            {
+                "code": "high_frame_free_segment_ratio",
+                "severity": "warning",
+                "metric": "frame_free_segment_ratio",
+                "value": frame_free_segment_ratio,
+                "threshold": max_frame_free_segment_ratio,
+                "message": "Frame sampling leaves too many transcript segments without nearby frames.",
+            }
+        )
+    return warnings
+
+
+def _segment_window(segment: dict[str, Any]) -> tuple[float, float] | None:
+    start = _optional_float(segment.get("start_time"))
+    end = _optional_float(segment.get("end_time"))
+    if start is None and end is None:
+        return None
+    if start is None:
+        start = end
+    if end is None:
+        end = start
+    if start is None or end is None:
+        return None
+    if end < start:
+        start, end = end, start
+    return start, end
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

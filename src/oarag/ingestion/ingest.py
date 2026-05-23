@@ -14,6 +14,7 @@ from oarag.ingestion.frame_selection import (
     FRAME_SELECTION_STRATEGIES,
     FrameSelectionConfig,
     select_representative_frames,
+    summarize_frame_temporal_coverage,
 )
 from oarag.core.io import write_json, write_jsonl
 from oarag.core.schemas import LectureSegment, slugify
@@ -506,29 +507,14 @@ def summarize_frame_sampling(
     frame_sampling: str,
     segments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    timestamps = [
-        timestamp
-        for timestamp in (_optional_float(frame.get("timestamp")) for frame in frames)
-        if timestamp is not None
-    ]
-    first_timestamp = min(timestamps) if timestamps else None
-    last_timestamp = max(timestamps) if timestamps else None
-    timestamp_span = (
-        round(last_timestamp - first_timestamp, 3)
-        if first_timestamp is not None and last_timestamp is not None
-        else None
-    )
-    covered_until = None
-    coverage_ratio = None
-    if duration_sec is not None and duration_sec > 0 and last_timestamp is not None:
-        covered_until = round(min(duration_sec, last_timestamp + (1 / frame_rate)), 3)
-        coverage_ratio = round(min(1.0, covered_until / duration_sec), 4)
     candidate_count = (
         math.ceil(duration_sec * frame_rate) if duration_sec and duration_sec > 0 else None
     )
     cap = max_frames if max_frames is not None and max_frames > 0 else None
-    segment_coverage = summarize_segment_frame_coverage(
+    coverage = summarize_frame_temporal_coverage(
         frames=frames,
+        duration_sec=duration_sec,
+        frame_rate=frame_rate,
         segments=segments or [],
     )
     return {
@@ -539,12 +525,19 @@ def summarize_frame_sampling(
         "candidate_frame_count": candidate_count,
         "selected_frame_count": len(frames),
         "capped": bool(cap is not None and candidate_count is not None and candidate_count > cap),
-        "first_timestamp": first_timestamp,
-        "last_timestamp": last_timestamp,
-        "covered_until_sec": covered_until,
-        "timestamp_span_sec": timestamp_span,
-        "temporal_coverage_ratio": coverage_ratio,
-        "segment_coverage": segment_coverage,
+        "first_timestamp": coverage["first_timestamp"],
+        "last_timestamp": coverage["last_timestamp"],
+        "covered_until_sec": coverage["covered_until_sec"],
+        "timestamp_span_sec": coverage["timestamp_span_sec"],
+        "temporal_coverage_ratio": coverage["temporal_coverage_ratio"],
+        "frame_free_segment_ratio": coverage["frame_free_segment_ratio"],
+        "segment_coverage": coverage["segment_coverage"],
+        "coverage": {
+            "temporal_coverage_ratio": coverage["temporal_coverage_ratio"],
+            "frame_free_segment_ratio": coverage["frame_free_segment_ratio"],
+            "warnings": coverage["warnings"],
+        },
+        "warnings": coverage["warnings"],
         "skipped": False,
     }
 
@@ -566,38 +559,6 @@ def _empty_frame_sampling_summary(
     )
     summary["skipped"] = skipped
     return summary
-
-
-def summarize_segment_frame_coverage(
-    *,
-    frames: list[dict[str, Any]],
-    segments: list[dict[str, Any]],
-) -> dict[str, Any]:
-    segment_windows = [
-        window for window in (_segment_window(segment) for segment in segments) if window is not None
-    ]
-    frame_timestamps = [
-        timestamp
-        for timestamp in (_optional_float(frame.get("timestamp")) for frame in frames)
-        if timestamp is not None
-    ]
-    segments_with_frames = 0
-    for start, end in segment_windows:
-        if any(start <= timestamp <= end for timestamp in frame_timestamps):
-            segments_with_frames += 1
-
-    segment_count = len(segment_windows)
-    segments_without_frames = max(0, segment_count - segments_with_frames)
-    coverage_ratio = round(segments_with_frames / segment_count, 4) if segment_count else None
-    return {
-        "segment_count": segment_count,
-        "segments_with_frames": segments_with_frames,
-        "segments_without_frames": segments_without_frames,
-        "segment_frame_coverage_ratio": coverage_ratio,
-        "frame_free_segment_ratio": (
-            round(segments_without_frames / segment_count, 4) if segment_count else None
-        ),
-    }
 
 
 def _segment_representative_timestamps(

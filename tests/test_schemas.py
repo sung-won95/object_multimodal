@@ -377,6 +377,34 @@ def test_semantic_contract_preserves_precomputed_fields() -> None:
     ]
 
 
+def test_semantic_contract_appends_new_visual_fields_to_precomputed_text() -> None:
+    document = ensure_lecture_segment_semantic_contract(
+        {
+            "segment_id": "seg_1",
+            "transcript_text": "Transcript text",
+            "mention_candidates": ["here"],
+            "semantic_text": "Transcript text here",
+            "semantic_source_fields": ["transcript_text", "mention_candidates"],
+            "visual_entities": [
+                {
+                    "text": "det A",
+                    "visual_description": "A determinant equation on the slide",
+                }
+            ],
+        }
+    )
+
+    assert document[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] == (
+        "Transcript text here det A A determinant equation on the slide"
+    )
+    assert document[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] == [
+        "transcript_text",
+        "mention_candidates",
+        "visual_entities.text",
+        "visual_entities.visual_description",
+    ]
+
+
 def test_evidence_window_keeps_additive_fields_optional() -> None:
     window = EvidenceWindow(
         target_segment_id="seg_1",
