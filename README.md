@@ -68,6 +68,17 @@ python -m pytest
 
 The pytest configuration adds `src` to the test import path, so `PYTHONPATH=src` is not required for tests.
 
+Run the public-safe RAG readiness suite:
+
+```bash
+python -m pytest tests/test_rag_readiness_smoke.py -q -rs
+```
+
+The suite always checks `query-project` candidate/evidence plumbing with a
+synthetic local fixture. It also checks `ask-project` when that command exists
+on the current branch, and reports a clear skip when Meilisearch is unavailable
+for the optional live smoke.
+
 Run the public synthetic Meilisearch semantic retrieval smoke:
 
 ```bash
