@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import copy
+import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 import urllib.error
 
-from oarag.core.domain_lexicon import load_domain_lexicon
+from oarag.core.domain_lexicon import QueryExpansion, load_domain_lexicon, normalize_term
 from oarag.retrieval.evidence import (
     frame_id,
     make_evidence_window,
@@ -98,8 +99,14 @@ def query_project(
         links_by_segment[link.segment_id].append(link)
         links_by_entity[link.entity_id].append(link)
 
-    search_query = domain_lexicon.expand_query(query)
-    search_response = client.search(index_uid, search_query, limit=limit)
+    query_expansion = domain_lexicon.expand_query_result(query)
+    search_queries = _search_queries_for_expansion(query=query, query_expansion=query_expansion)
+    search_response = _search_with_expanded_queries(
+        client=client,
+        index_uid=index_uid,
+        queries=search_queries,
+        limit=limit,
+    )
     segment_hits = search_response.get("hits", [])
 
     bundles: list[dict[str, Any]] = []
@@ -113,7 +120,12 @@ def query_project(
     visual_hits: list[dict[str, Any]] = []
     if visual_index_uid:
         try:
-            visual_search_response = client.search(visual_index_uid, search_query, limit=limit)
+            visual_search_response = _search_with_expanded_queries(
+                client=client,
+                index_uid=visual_index_uid,
+                queries=search_queries,
+                limit=limit,
+            )
             visual_hits = visual_search_response.get("hits", [])
         except urllib.error.HTTPError as exc:
             if exc.code != 404:
@@ -322,7 +334,10 @@ def query_project(
             "domain_lexicon": domain_lexicon.metadata()["source_path"],
         },
         "domain_lexicon": domain_lexicon.metadata(),
-        "query_expansion": domain_lexicon.query_expansion_metadata(query),
+        "query_expansion": {
+            **query_expansion.metadata(),
+            "search_queries": search_queries,
+        },
         "artifact_availability": {
             "frames_manifest": resolved_frames_manifest_path.exists(),
             "visual_entities": resolved_visual_entities_path.exists(),
@@ -608,13 +623,10 @@ def _add_visual_hit_frames_to_window(
     frame_refs.sort(key=lambda frame: (optional_float(frame.get("timestamp")) is None, optional_float(frame.get("timestamp")) or 0.0, str(frame.get("frame_id", ""))))
 
 
-def _combined_processing_time_ms(
-    segment_response: dict[str, Any],
-    visual_response: dict[str, Any] | None,
-) -> int | float | None:
+def _combined_processing_time_ms(*responses: dict[str, Any] | None) -> int | float | None:
     values = [
         optional_float(response.get("processingTimeMs"))
-        for response in (segment_response, visual_response)
+        for response in responses
         if isinstance(response, dict) and response.get("processingTimeMs") is not None
     ]
     if not values:
@@ -623,14 +635,97 @@ def _combined_processing_time_ms(
     return int(total) if total.is_integer() else total
 
 
+def _search_queries_for_expansion(*, query: str, query_expansion: QueryExpansion) -> list[str]:
+    queries: list[str] = []
+    seen: set[str] = set()
+    for candidate in [query, *(term.term for term in query_expansion.terms)]:
+        normalized = normalize_term(candidate)
+        if not normalized or normalized in seen:
+            continue
+        queries.append(candidate)
+        seen.add(normalized)
+    return queries
+
+
+def _search_with_expanded_queries(
+    *,
+    client: MeiliClient,
+    index_uid: str,
+    queries: list[str],
+    limit: int,
+) -> dict[str, Any]:
+    responses: list[dict[str, Any]] = []
+    hit_records: list[dict[str, Any]] = []
+    hit_positions: dict[str, int] = {}
+
+    for query_index, search_query in enumerate(queries):
+        response = client.search(index_uid, search_query, limit=limit)
+        responses.append(response)
+        for rank, hit in enumerate(response.get("hits", []), start=1):
+            hit_key = _search_hit_key(hit)
+            score = _hit_score(hit)
+            if hit_key in hit_positions:
+                existing_index = hit_positions[hit_key]
+                if score > hit_records[existing_index]["score"]:
+                    hit_records[existing_index]["hit"] = hit
+                    hit_records[existing_index]["score"] = score
+                    hit_records[existing_index]["query_index"] = query_index
+                    hit_records[existing_index]["rank"] = rank
+                continue
+            hit_positions[hit_key] = len(hit_records)
+            hit_records.append(
+                {
+                    "hit": hit,
+                    "score": score,
+                    "query_index": query_index,
+                    "rank": rank,
+                    "first_seen": len(hit_records),
+                }
+            )
+
+    aggregate = copy.deepcopy(responses[0]) if responses else {}
+    ranked_hit_records = sorted(hit_records, key=_expanded_hit_record_sort_key)
+    aggregate["hits"] = [record["hit"] for record in ranked_hit_records[:limit]]
+    aggregate["processingTimeMs"] = _combined_processing_time_ms(*responses)
+    aggregate["query"] = queries[0] if len(queries) == 1 else queries
+    aggregate["queries"] = queries
+    aggregate["hitCountBeforeLimit"] = len(hit_records)
+    return aggregate
+
+
 def _search_metadata(response: dict[str, Any] | None, index_uid: str | None) -> dict[str, Any] | None:
     if response is None:
         return None
-    return {
+    metadata = {
         "index": index_uid,
         "processing_time_ms": response.get("processingTimeMs"),
         "hit_count": len(response.get("hits", [])),
     }
+    if "queries" in response:
+        metadata["queries"] = response["queries"]
+    return metadata
+
+
+def _search_hit_key(hit: dict[str, Any]) -> str:
+    for field in ("segment_id", "sample_id", "entity_id", "id"):
+        value = hit.get(field)
+        if value is not None:
+            return f"{field}:{value}"
+    return json.dumps(hit, ensure_ascii=False, sort_keys=True)
+
+
+def _hit_score(hit: dict[str, Any]) -> float:
+    score = optional_float(hit.get("_rankingScore"))
+    return score if score is not None else float("-inf")
+
+
+def _expanded_hit_record_sort_key(record: dict[str, Any]) -> tuple[float, int, int, int]:
+    return (
+        -float(record["score"]),
+        int(record["query_index"]),
+        int(record["rank"]),
+        int(record["first_seen"]),
+    )
 
 
 def _visual_entity_text(entity: VisualEntity) -> str:

@@ -36,6 +36,21 @@ class MultiIndexFakeClient:
         }
 
 
+class QueryAwareFakeClient:
+    def __init__(self, hits_by_query: dict[str, list[dict]]) -> None:
+        self.hits_by_query = hits_by_query
+        self.queries: list[str] = []
+
+    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+        self.queries.append(query)
+        return {
+            "hits": self.hits_by_query.get(query, [])[:limit],
+            "processingTimeMs": 2,
+            "indexUid": index_uid,
+            "query": query,
+        }
+
+
 def test_query_project_returns_multimodal_bundle(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     _write_jsonl(
@@ -399,29 +414,40 @@ def test_query_project_expands_query_when_domain_lexicon_exists(tmp_path: Path) 
         json.dumps({"aliases": {"bet": ["wager"], "size": ["sizing"]}}),
         encoding="utf-8",
     )
-    client = FakeClient(
-        hits=[
-            {
-                "segment_id": "seg_1",
-                "sample_id": "seg_1",
-                "video_id": "video",
-                "start_time": 0.0,
-                "end_time": 2.0,
-                "timestamp_center": 1.0,
-                "transcript_text": "Wager sizing",
-            }
-        ]
+    client = MultiIndexFakeClient(
+        {
+            "local_segments": [
+                {
+                    "segment_id": "seg_1",
+                    "sample_id": "seg_1",
+                    "video_id": "video",
+                    "start_time": 0.0,
+                    "end_time": 2.0,
+                    "timestamp_center": 1.0,
+                    "transcript_text": "Wager sizing",
+                }
+            ],
+            "local_visual_entities": [],
+        }
     )
 
     response = query_project(
         client=client,
         index_uid="local_segments",
+        visual_index_uid="local_visual_entities",
         project_dir=project_dir,
         query="wager sizing",
         neighbor_count=0,
     )
 
-    assert client.queries == ["wager sizing size bet"]
+    assert client.searches == [
+        ("local_segments", "wager sizing", 5),
+        ("local_segments", "bet", 5),
+        ("local_segments", "size", 5),
+        ("local_visual_entities", "wager sizing", 5),
+        ("local_visual_entities", "bet", 5),
+        ("local_visual_entities", "size", 5),
+    ]
     assert response["query"] == "wager sizing"
     assert response["domain_lexicon"]["enabled"] is True
     assert response["domain_lexicon"]["source_path"] == str(
@@ -431,7 +457,81 @@ def test_query_project_expands_query_when_domain_lexicon_exists(tmp_path: Path) 
         "enabled": True,
         "applied": True,
         "added_term_count": 2,
+        "expanded_query": "wager sizing bet size",
+        "source_path": str((project_dir / "domain_lexicon.json").resolve()),
+        "search_queries": ["wager sizing", "bet", "size"],
+        "terms": [
+            {
+                "term": "bet",
+                "source": "domain_lexicon",
+                "canonical": "bet",
+                "matched_terms": ["wager"],
+            },
+            {
+                "term": "size",
+                "source": "domain_lexicon",
+                "canonical": "size",
+                "matched_terms": ["sizing"],
+            },
+        ],
     }
+
+
+def test_query_project_expansion_hits_can_enter_top_limit(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_original", 1, 0.0, 2.0, "Generic introduction", []),
+            _segment("seg_alias", 2, 3.0, 5.0, "Bet size explanation", []),
+        ],
+    )
+    (project_dir / "domain_lexicon.json").write_text(
+        json.dumps({"aliases": {"bet": ["wager"]}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    client = QueryAwareFakeClient(
+        {
+            "wager": [
+                {
+                    "segment_id": "seg_original",
+                    "sample_id": "seg_original",
+                    "video_id": "video",
+                    "start_time": 0.0,
+                    "end_time": 2.0,
+                    "timestamp_center": 1.0,
+                    "transcript_text": "Generic introduction",
+                    "_rankingScore": 0.1,
+                }
+            ],
+            "bet": [
+                {
+                    "segment_id": "seg_alias",
+                    "sample_id": "seg_alias",
+                    "video_id": "video",
+                    "start_time": 3.0,
+                    "end_time": 5.0,
+                    "timestamp_center": 4.0,
+                    "transcript_text": "Bet size explanation",
+                    "_rankingScore": 0.9,
+                }
+            ],
+        }
+    )
+
+    response = query_project(
+        client=client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        query="wager",
+        limit=1,
+        neighbor_count=0,
+    )
+
+    assert client.queries == ["wager", "bet"]
+    assert response["query_expansion"]["search_queries"] == ["wager", "bet"]
+    assert response["retrieval_context"]["searches"]["segment"]["hit_count"] == 1
+    assert response["bundles"][0]["candidate"]["segment_id"] == "seg_alias"
 
 
 def test_query_project_rerank_reorders_bundles_and_records_breakdown(tmp_path: Path) -> None:
