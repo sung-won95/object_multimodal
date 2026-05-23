@@ -494,6 +494,31 @@ def test_query_project_cli_accepts_visual_index() -> None:
     assert args.visual_index == "sample_visual_entities"
 
 
+def test_ask_project_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        [
+            "ask-project",
+            "--index",
+            "sample_segments",
+            "--project-id",
+            "sample_project",
+            "--query",
+            "bet size",
+            "--format",
+            "json",
+        ]
+    )
+
+    assert args.index == "sample_segments"
+    assert args.visual_index is None
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.query == "bet size"
+    assert args.limit == 5
+    assert args.output_format == "json"
+    assert args.output is None
+
+
 def test_graph_query_cli_defaults() -> None:
     args = build_parser().parse_args(
         ["graph-query", "--index", "sample_segments", "--project-id", "sample_project", "--query", "아까 개념"]

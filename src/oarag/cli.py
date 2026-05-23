@@ -35,6 +35,7 @@ from oarag.integrations.meili import (
     visual_entity_settings_profile_names,
 )
 from oarag.integrations.neo4j import check_neo4j_health
+from oarag.retrieval.answer import ask_project, format_answer_text
 from oarag.retrieval.project_query import query_project
 from oarag.retrieval.project_index import (
     index_project_segments,
@@ -617,6 +618,95 @@ def build_parser() -> argparse.ArgumentParser:
     query_project.add_argument("--output", type=Path, help="Optional JSON output path.")
     query_project.set_defaults(func=cmd_query_project)
 
+    ask_project_parser = subparsers.add_parser(
+        "ask-project",
+        help="Search a local project and compose a grounded answer with citations",
+    )
+    ask_project_parser.add_argument("--index", required=True)
+    ask_project_parser.add_argument(
+        "--visual-index",
+        help="Optional Meilisearch index containing visual_entities documents.",
+    )
+    location = ask_project_parser.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    ask_project_parser.add_argument("--query", required=True)
+    ask_project_parser.add_argument("--limit", type=int, default=5)
+    ask_project_parser.add_argument(
+        "--segments",
+        type=Path,
+        help="Optional segment JSONL path. Relative paths are resolved from project dir.",
+    )
+    ask_project_parser.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Optional frames manifest JSONL path. Relative paths are resolved from project dir.",
+    )
+    ask_project_parser.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Optional visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    ask_project_parser.add_argument(
+        "--entity-links",
+        type=Path,
+        help="Optional entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    ask_project_parser.add_argument(
+        "--domain-lexicon",
+        type=Path,
+        help="Optional domain_lexicon.json path. Relative paths are resolved from project dir.",
+    )
+    ask_project_parser.add_argument(
+        "--window-seconds",
+        type=float,
+        help="Include segments whose timestamps overlap this many seconds around the matched hit.",
+    )
+    ask_project_parser.add_argument(
+        "--neighbor-count",
+        type=int,
+        default=1,
+        help="Neighboring segments to include on each side when --window-seconds is omitted.",
+    )
+    ask_project_parser.add_argument(
+        "--previous-neighbor-count",
+        type=int,
+        help="Neighboring segments to include before the target when using neighbor mode.",
+    )
+    ask_project_parser.add_argument(
+        "--next-neighbor-count",
+        type=int,
+        help="Neighboring segments to include after the target when using neighbor mode.",
+    )
+    ask_project_parser.add_argument(
+        "--window-before-seconds",
+        type=float,
+        help="Seconds to include before the target when using time-window mode.",
+    )
+    ask_project_parser.add_argument(
+        "--window-after-seconds",
+        type=float,
+        help="Seconds to include after the target when using time-window mode.",
+    )
+    ask_project_parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help="Reorder evidence bundles with deterministic domain-agnostic evidence signals.",
+    )
+    ask_project_parser.add_argument(
+        "--rerank-time-hint",
+        help="Optional timestamp hint for reranking, for example '10-14s'.",
+    )
+    ask_project_parser.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        dest="output_format",
+        help="Output format for the composed answer response.",
+    )
+    ask_project_parser.add_argument("--output", type=Path, help="Optional JSON output path.")
+    ask_project_parser.set_defaults(func=cmd_ask_project)
+
     graph_query_parser = subparsers.add_parser(
         "graph-query",
         help="Search a project, then expand temporal/reference hints through Neo4j graph traversal",
@@ -1181,6 +1271,41 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         write_json(output_path, response)
     for line in response.get("summary_lines", []):
         print(line, file=sys.stderr)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+
+
+def cmd_ask_project(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    response = ask_project(
+        client=client,
+        index_uid=args.index,
+        visual_index_uid=args.visual_index,
+        project_dir=project_dir,
+        query=args.query,
+        limit=args.limit,
+        segments_path=args.segments,
+        frames_manifest_path=args.frames_manifest,
+        visual_entities_path=args.visual_entities,
+        entity_links_path=args.entity_links,
+        domain_lexicon_path=args.domain_lexicon,
+        window_seconds=args.window_seconds,
+        neighbor_count=args.neighbor_count,
+        previous_neighbor_count=args.previous_neighbor_count,
+        next_neighbor_count=args.next_neighbor_count,
+        window_before_seconds=args.window_before_seconds,
+        window_after_seconds=args.window_after_seconds,
+        rerank=args.rerank,
+        rerank_time_hint=args.rerank_time_hint,
+    )
+    if args.output is not None:
+        output_path = args.output
+        if not output_path.is_absolute():
+            output_path = project_dir / output_path
+        write_json(output_path, response)
+    if args.output_format == "text":
+        print(format_answer_text(response["answer"]), end="")
+        return
     print(json.dumps(response, ensure_ascii=False, indent=2))
 
 
