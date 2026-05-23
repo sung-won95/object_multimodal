@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 
 from oarag.meili import (
+    HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
     LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     MeiliTaskError,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+    hybrid_embedder_settings_hash,
     lecture_segment_settings_hash,
     lecture_window_settings_hash,
     visual_entity_settings_hash,
@@ -35,6 +37,7 @@ from oarag.schemas import (
 class FakeMeiliClient:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        self.settings_by_index: dict[str, dict] = {}
 
     def wait_task(self, task, **kwargs):
         self.calls.append(("wait_task", task, kwargs))
@@ -50,7 +53,12 @@ class FakeMeiliClient:
 
     def update_settings(self, index_uid: str, settings: dict):
         self.calls.append(("update_settings", index_uid, settings))
+        self.settings_by_index[index_uid] = settings
         return {"taskUid": 3}
+
+    def get_settings(self, index_uid: str):
+        self.calls.append(("get_settings", index_uid))
+        return self.settings_by_index[index_uid]
 
     def add_documents(self, index_uid: str, documents: list[dict]):
         self.calls.append(("add_documents", index_uid, documents))
@@ -377,6 +385,99 @@ def test_index_project_segments_can_use_legacy_settings_profile(tmp_path: Path) 
     )
 
 
+def test_index_project_segments_applies_hybrid_embedder_profile_and_live_smoke(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(segments_path, [{"segment_id": "s1", "transcript_text": "alpha"}])
+    client = FakeMeiliClient()
+
+    summary = index_project_segments(
+        client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+        hybrid_embedder_name="lecture_embedder",
+        hybrid_embedder_dimensions=768,
+        hybrid_embedder_live_smoke=True,
+    )
+
+    settings_call = next(call for call in client.calls if call[0] == "update_settings")
+    assert settings_call[2]["embedders"] == {
+        "lecture_embedder": {
+            "source": "userProvided",
+            "dimensions": 768,
+        }
+    }
+    assert ("get_settings", "local_segments") in client.calls
+    assert summary["hybrid_embedder_profile"] == HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE
+    assert summary["hybrid_embedder_hash"] == hybrid_embedder_settings_hash(
+        {"embedders": settings_call[2]["embedders"]}
+    )
+    assert summary["hybrid_embedder_live_smoke"] == {
+        "enabled": True,
+        "ok": True,
+        "checked_embedder_names": ["lecture_embedder"],
+        "settings_hash": summary["hybrid_embedder_hash"],
+    }
+    assert summary["settings_snapshot"]["settings"]["embedders"] == settings_call[2]["embedders"]
+
+
+def test_index_project_segments_redacts_hybrid_embedder_credentials_in_summary(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(segments_path, [{"segment_id": "s1", "transcript_text": "alpha"}])
+    client = FakeMeiliClient()
+
+    summary = index_project_segments(
+        client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        hybrid_embedder_config={
+            "embedders": {
+                "default": {
+                    "source": "openAi",
+                    "model": "text-embedding-3-small",
+                    "apiKey": "sk-private-test-key",
+                    "documentTemplate": "{{doc.semantic_text}}",
+                }
+            }
+        },
+        hybrid_embedder_live_smoke=True,
+    )
+
+    settings_call = next(call for call in client.calls if call[0] == "update_settings")
+    summary_json = json.dumps(summary)
+    assert settings_call[2]["embedders"]["default"]["apiKey"] == "sk-private-test-key"
+    assert "sk-private-test-key" not in summary_json
+    assert summary["hybrid_embedder_snapshot"]["settings"]["embedders"]["default"]["apiKey"] == (
+        "<redacted>"
+    )
+    assert summary["settings_snapshot"]["settings"]["embedders"]["default"]["apiKey"] == (
+        "<redacted>"
+    )
+    assert summary["hybrid_embedder_live_smoke"]["ok"] is True
+
+
+def test_index_project_segments_live_smoke_requires_hybrid_embedder_settings(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(segments_path, [{"segment_id": "s1", "transcript_text": "alpha"}])
+
+    with pytest.raises(ValueError, match="Hybrid embedder options require"):
+        index_project_segments(
+            FakeMeiliClient(),
+            index_uid="local_segments",
+            project_dir=project_dir,
+            hybrid_embedder_live_smoke=True,
+        )
+
+
 def test_index_project_segments_reset_treats_missing_index_as_noop(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     segments_path = project_dir / "segments" / "lecture_segments.jsonl"
@@ -456,6 +557,40 @@ def test_index_project_windows_batches_documents_with_window_settings(tmp_path: 
     assert summary["settings_profile"] == LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE
     assert summary["settings_hash"] == lecture_window_settings_hash(settings_call[2])
     assert summary["semantic_source_field_counts"] == {"transcript_window_text": 3}
+
+
+def test_index_project_windows_applies_hybrid_embedder_profile(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(
+        segments_path,
+        [
+            _segment("seg_1", 1, 0.0, 2.0, "alpha", []),
+        ],
+    )
+    client = FakeMeiliClient()
+
+    summary = index_project_windows(
+        client,
+        index_uid="local_windows",
+        project_dir=project_dir,
+        neighbor_count=0,
+        hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+        hybrid_embedder_dimensions=512,
+    )
+
+    settings_call = next(call for call in client.calls if call[0] == "update_settings")
+    assert settings_call[2]["embedders"] == {
+        "default": {
+            "source": "userProvided",
+            "dimensions": 512,
+        }
+    }
+    assert summary["hybrid_embedder_profile"] == HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE
+    assert summary["hybrid_embedder_snapshot"]["settings"] == {
+        "embedders": settings_call[2]["embedders"]
+    }
+    assert summary["hybrid_embedder_live_smoke"] == {"enabled": False}
 
 
 def test_index_project_visual_entities_batches_documents(tmp_path: Path) -> None:

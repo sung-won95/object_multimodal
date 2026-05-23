@@ -33,8 +33,10 @@ from oarag.integrations.meili import (
     LECTURE_SEGMENT_SETTINGS,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     MeiliClient,
+    hybrid_embedder_settings_profile_names,
     lecture_segment_settings_profile_names,
     lecture_window_settings_profile_names,
+    load_hybrid_embedder_settings,
     visual_entity_settings_profile_names,
 )
 from oarag.integrations.neo4j import check_neo4j_health
@@ -144,6 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
         help="Meilisearch settings profile to apply to lecture_segments.",
     )
+    _add_hybrid_embedder_index_options(index_project)
     index_project.set_defaults(func=cmd_index_project)
 
     build_windows = subparsers.add_parser(
@@ -251,6 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
         help="Meilisearch settings profile to apply to lecture window documents.",
     )
+    _add_hybrid_embedder_index_options(index_windows)
     index_windows.add_argument(
         "--window-seconds",
         type=float,
@@ -1187,6 +1191,47 @@ def add_vlm_alignment_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_hybrid_embedder_index_options(parser: argparse.ArgumentParser) -> None:
+    hybrid = parser.add_mutually_exclusive_group()
+    hybrid.add_argument(
+        "--hybrid-embedder-profile",
+        choices=hybrid_embedder_settings_profile_names(),
+        help=(
+            "Opt in to a built-in Meilisearch hybrid/vector embedder settings profile. "
+            "Default indexing leaves embedders unchanged."
+        ),
+    )
+    hybrid.add_argument(
+        "--hybrid-embedder-config",
+        type=Path,
+        help=(
+            "JSON file containing a Meilisearch embedders object or an object with "
+            "'embedders'. Secrets are sent to Meilisearch but redacted from summaries."
+        ),
+    )
+    parser.add_argument(
+        "--hybrid-embedder-name",
+        default=DEFAULT_HYBRID_EMBEDDER,
+        help="Embedder name for --hybrid-embedder-profile.",
+    )
+    parser.add_argument(
+        "--hybrid-embedder-dimensions",
+        type=int,
+        help="Override vector dimensions for the built-in userProvided profile.",
+    )
+    parser.add_argument(
+        "--hybrid-embedder-live-smoke",
+        action="store_true",
+        help="After applying hybrid embedder settings, read them back from Meilisearch.",
+    )
+
+
+def _hybrid_embedder_config_from_args(args: argparse.Namespace) -> dict | None:
+    if args.hybrid_embedder_config is None:
+        return None
+    return load_hybrid_embedder_settings(args.hybrid_embedder_config)
+
+
 def client_from_args(args: argparse.Namespace) -> MeiliClient:
     return MeiliClient(base_url=args.url, api_key=args.api_key)
 
@@ -1247,6 +1292,11 @@ def cmd_index_project(args: argparse.Namespace) -> None:
         reset=args.reset,
         segments=args.segments,
         settings_profile=args.settings_profile,
+        hybrid_embedder_profile=args.hybrid_embedder_profile,
+        hybrid_embedder_config=_hybrid_embedder_config_from_args(args),
+        hybrid_embedder_name=args.hybrid_embedder_name,
+        hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
+        hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -1290,6 +1340,11 @@ def cmd_index_project_windows(args: argparse.Namespace) -> None:
         next_neighbor_count=args.next_neighbor_count,
         window_before_seconds=args.window_before_seconds,
         window_after_seconds=args.window_after_seconds,
+        hybrid_embedder_profile=args.hybrid_embedder_profile,
+        hybrid_embedder_config=_hybrid_embedder_config_from_args(args),
+        hybrid_embedder_name=args.hybrid_embedder_name,
+        hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
+        hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

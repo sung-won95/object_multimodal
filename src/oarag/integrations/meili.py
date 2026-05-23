@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 from oarag.core.schemas import (
@@ -21,6 +22,17 @@ LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE = "lecture_segments_default_v1"
 LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE = "lecture_segments_default_v2"
 LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE = "lecture_windows_default_v1"
 VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE = "visual_entities_default_v1"
+DEFAULT_HYBRID_EMBEDDER_NAME = "default"
+HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE = "manual_user_provided_v1"
+HYBRID_EMBEDDER_CUSTOM_SETTINGS_PROFILE = "custom"
+REDACTED_SETTINGS_VALUE = "<redacted>"
+
+HYBRID_EMBEDDER_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
+    HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE: {
+        "source": "userProvided",
+        "dimensions": 384,
+    },
+}
 
 LECTURE_SEGMENT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE: {
@@ -395,8 +407,11 @@ def lecture_segment_settings_snapshot(
     settings: dict[str, Any] | None = None,
     *,
     profile: str = LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+    redact_secrets: bool = False,
 ) -> dict[str, Any]:
     payload = lecture_segment_settings(profile) if settings is None else copy.deepcopy(settings)
+    if redact_secrets:
+        payload = sanitize_meili_settings_for_snapshot(payload)
     return {
         "profile": profile,
         "hash": lecture_segment_settings_hash(payload),
@@ -431,8 +446,11 @@ def visual_entity_settings_snapshot(
     settings: dict[str, Any] | None = None,
     *,
     profile: str = VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+    redact_secrets: bool = False,
 ) -> dict[str, Any]:
     payload = visual_entity_settings(profile) if settings is None else copy.deepcopy(settings)
+    if redact_secrets:
+        payload = sanitize_meili_settings_for_snapshot(payload)
     return {
         "profile": profile,
         "hash": visual_entity_settings_hash(payload),
@@ -467,8 +485,11 @@ def lecture_window_settings_snapshot(
     settings: dict[str, Any] | None = None,
     *,
     profile: str = LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
+    redact_secrets: bool = False,
 ) -> dict[str, Any]:
     payload = lecture_window_settings(profile) if settings is None else copy.deepcopy(settings)
+    if redact_secrets:
+        payload = sanitize_meili_settings_for_snapshot(payload)
     return {
         "profile": profile,
         "hash": lecture_window_settings_hash(payload),
@@ -476,8 +497,145 @@ def lecture_window_settings_snapshot(
     }
 
 
+def hybrid_embedder_settings(
+    profile: str = HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+    *,
+    embedder_name: str = DEFAULT_HYBRID_EMBEDDER_NAME,
+    dimensions: int | None = None,
+) -> dict[str, Any]:
+    if profile not in HYBRID_EMBEDDER_SETTINGS_PROFILES:
+        valid = ", ".join(sorted(HYBRID_EMBEDDER_SETTINGS_PROFILES))
+        raise ValueError(f"Unknown hybrid embedder settings profile: {profile}. Valid profiles: {valid}")
+    name = str(embedder_name or "").strip()
+    if not name:
+        raise ValueError("hybrid embedder name must not be empty")
+    embedder = copy.deepcopy(HYBRID_EMBEDDER_SETTINGS_PROFILES[profile])
+    if dimensions is not None:
+        embedder["dimensions"] = _validate_positive_int(
+            dimensions,
+            field_name="hybrid embedder dimensions",
+        )
+    settings = {"embedders": {name: embedder}}
+    _validate_hybrid_embedder_settings(settings)
+    return settings
+
+
+def hybrid_embedder_settings_profile_names() -> list[str]:
+    return sorted(HYBRID_EMBEDDER_SETTINGS_PROFILES)
+
+
+def normalize_hybrid_embedder_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(settings, dict):
+        raise ValueError("Hybrid embedder settings must be a JSON object")
+    if "embedders" in settings:
+        payload = {"embedders": copy.deepcopy(settings["embedders"])}
+    else:
+        payload = {"embedders": copy.deepcopy(settings)}
+    _validate_hybrid_embedder_settings(payload)
+    return payload
+
+
+def load_hybrid_embedder_settings(path: Path) -> dict[str, Any]:
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Failed to parse hybrid embedder config JSON at {path}: {exc}") from exc
+    return normalize_hybrid_embedder_settings(loaded)
+
+
+def merge_hybrid_embedder_settings(
+    settings: dict[str, Any],
+    hybrid_settings: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = copy.deepcopy(settings)
+    if hybrid_settings is None:
+        return merged
+    normalized = normalize_hybrid_embedder_settings(hybrid_settings)
+    merged["embedders"] = normalized["embedders"]
+    return merged
+
+
+def hybrid_embedder_settings_hash(settings: dict[str, Any]) -> str:
+    payload = sanitize_meili_settings_for_snapshot(normalize_hybrid_embedder_settings(settings))
+    encoded = _canonical_settings_json(payload).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def hybrid_embedder_settings_snapshot(
+    settings: dict[str, Any],
+    *,
+    profile: str = HYBRID_EMBEDDER_CUSTOM_SETTINGS_PROFILE,
+) -> dict[str, Any]:
+    payload = sanitize_meili_settings_for_snapshot(normalize_hybrid_embedder_settings(settings))
+    return {
+        "profile": profile,
+        "hash": hybrid_embedder_settings_hash(payload),
+        "settings": payload,
+    }
+
+
+def sanitize_meili_settings_for_snapshot(settings: dict[str, Any]) -> dict[str, Any]:
+    sanitized = _sanitize_setting_value(copy.deepcopy(settings))
+    if not isinstance(sanitized, dict):
+        raise ValueError("Meilisearch settings snapshot must be a JSON object")
+    return sanitized
+
+
 def _canonical_settings_json(settings: dict[str, Any]) -> str:
     return json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _validate_hybrid_embedder_settings(settings: dict[str, Any]) -> None:
+    embedders = settings.get("embedders")
+    if not isinstance(embedders, dict) or not embedders:
+        raise ValueError("Hybrid embedder settings require a non-empty 'embedders' object")
+    for embedder_name, embedder in embedders.items():
+        name = str(embedder_name or "").strip()
+        if not name:
+            raise ValueError("Hybrid embedder settings contain an empty embedder name")
+        if not isinstance(embedder, dict):
+            raise ValueError(f"Hybrid embedder '{name}' settings must be a JSON object")
+        source = embedder.get("source")
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError(f"Hybrid embedder '{name}' requires a non-empty 'source'")
+        if source == "userProvided":
+            if "documentTemplate" in embedder or "documentTemplateMaxBytes" in embedder:
+                raise ValueError(
+                    f"Hybrid embedder '{name}' uses source 'userProvided', which cannot "
+                    "include documentTemplate or documentTemplateMaxBytes"
+                )
+            _validate_positive_int(
+                embedder.get("dimensions"),
+                field_name=f"hybrid embedder '{name}' dimensions",
+            )
+
+
+def _validate_positive_int(value: Any, *, field_name: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+    return value
+
+
+def _sanitize_setting_value(value: Any, *, key: str | None = None) -> Any:
+    if key is not None and _is_secret_settings_key(key):
+        return REDACTED_SETTINGS_VALUE
+    if isinstance(value, dict):
+        return {str(item_key): _sanitize_setting_value(item_value, key=str(item_key)) for item_key, item_value in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_setting_value(item) for item in value]
+    return value
+
+
+def _is_secret_settings_key(key: str) -> bool:
+    normalized = key.replace("_", "").replace("-", "").lower()
+    return normalized in {
+        "apikey",
+        "authorization",
+        "bearertoken",
+        "password",
+        "secret",
+        "token",
+    }
 
 
 LECTURE_SEGMENT_SETTINGS = lecture_segment_settings()

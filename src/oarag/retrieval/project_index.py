@@ -8,16 +8,22 @@ from typing import Any, Iterable, Iterator
 from oarag.core.config import default_paths
 from oarag.core.io import write_json, write_jsonl
 from oarag.integrations.meili import (
+    DEFAULT_HYBRID_EMBEDDER_NAME,
+    HYBRID_EMBEDDER_CUSTOM_SETTINGS_PROFILE,
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     MeiliClient,
 )
 from oarag.integrations.meili import (
+    hybrid_embedder_settings,
+    hybrid_embedder_settings_snapshot,
     lecture_segment_settings,
     lecture_segment_settings_snapshot,
     lecture_window_settings,
     lecture_window_settings_snapshot,
+    merge_hybrid_embedder_settings,
+    normalize_hybrid_embedder_settings,
     visual_entity_settings,
     visual_entity_settings_snapshot,
 )
@@ -304,6 +310,11 @@ def index_project_windows(
     next_neighbor_count: int | None = None,
     window_before_seconds: float | None = None,
     window_after_seconds: float | None = None,
+    hybrid_embedder_profile: str | None = None,
+    hybrid_embedder_config: dict[str, Any] | None = None,
+    hybrid_embedder_name: str = DEFAULT_HYBRID_EMBEDDER_NAME,
+    hybrid_embedder_dimensions: int | None = None,
+    hybrid_embedder_live_smoke: bool = False,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     build_requested = _window_build_inputs_requested(
@@ -361,13 +372,39 @@ def index_project_windows(
             window_after_seconds=window_after_seconds,
         )
 
-    settings = lecture_window_settings(settings_profile)
-    settings_snapshot = lecture_window_settings_snapshot(settings, profile=settings_profile)
+    hybrid_settings, hybrid_snapshot = _resolve_hybrid_embedder_settings(
+        profile=hybrid_embedder_profile,
+        config=hybrid_embedder_config,
+        embedder_name=hybrid_embedder_name,
+        dimensions=hybrid_embedder_dimensions,
+        live_smoke=hybrid_embedder_live_smoke,
+    )
+    settings = merge_hybrid_embedder_settings(
+        lecture_window_settings(settings_profile),
+        hybrid_settings,
+    )
+    settings_snapshot = lecture_window_settings_snapshot(
+        settings,
+        profile=settings_profile,
+        redact_secrets=hybrid_snapshot is not None,
+    )
 
     if reset:
         client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
     client.wait_task(client.create_index(index_uid, primary_key="window_id"))
-    client.wait_task(client.update_settings(index_uid, settings))
+    _apply_index_settings(
+        client,
+        index_uid=index_uid,
+        settings=settings,
+        settings_profile=settings_profile,
+        hybrid_snapshot=hybrid_snapshot,
+    )
+    hybrid_live_smoke = _run_hybrid_embedder_live_smoke(
+        client,
+        index_uid=index_uid,
+        hybrid_snapshot=hybrid_snapshot,
+        requested=hybrid_embedder_live_smoke,
+    )
 
     indexed_documents = 0
     indexed_batches = 0
@@ -384,7 +421,7 @@ def index_project_windows(
                     semantic_source_field_counts.get(str(source_field), 0) + 1
                 )
 
-    return {
+    summary = {
         "index": index_uid,
         "project_dir": str(resolved_project_dir),
         "windows_path": str(windows_path) if windows_path else None,
@@ -401,6 +438,12 @@ def index_project_windows(
         "settings_hash": settings_snapshot["hash"],
         "settings_snapshot": settings_snapshot,
     }
+    _attach_hybrid_embedder_summary(
+        summary,
+        hybrid_snapshot=hybrid_snapshot,
+        live_smoke=hybrid_live_smoke,
+    )
+    return summary
 
 
 def index_project_segments(
@@ -413,6 +456,11 @@ def index_project_segments(
     segments: Path | None = None,
     visual_entities: Path | None = None,
     settings_profile: str = LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+    hybrid_embedder_profile: str | None = None,
+    hybrid_embedder_config: dict[str, Any] | None = None,
+    hybrid_embedder_name: str = DEFAULT_HYBRID_EMBEDDER_NAME,
+    hybrid_embedder_dimensions: int | None = None,
+    hybrid_embedder_live_smoke: bool = False,
 ) -> dict[str, Any]:
     segments_path = segment_artifact_path(project_dir, segments=segments)
     visual_entities_path = _optional_visual_entity_artifact_path(
@@ -420,13 +468,39 @@ def index_project_segments(
         visual_entities=visual_entities,
     )
     visual_entity_context = _visual_entity_context(visual_entities_path)
-    settings = lecture_segment_settings(settings_profile)
-    settings_snapshot = lecture_segment_settings_snapshot(settings, profile=settings_profile)
+    hybrid_settings, hybrid_snapshot = _resolve_hybrid_embedder_settings(
+        profile=hybrid_embedder_profile,
+        config=hybrid_embedder_config,
+        embedder_name=hybrid_embedder_name,
+        dimensions=hybrid_embedder_dimensions,
+        live_smoke=hybrid_embedder_live_smoke,
+    )
+    settings = merge_hybrid_embedder_settings(
+        lecture_segment_settings(settings_profile),
+        hybrid_settings,
+    )
+    settings_snapshot = lecture_segment_settings_snapshot(
+        settings,
+        profile=settings_profile,
+        redact_secrets=hybrid_snapshot is not None,
+    )
 
     if reset:
         client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
     client.wait_task(client.create_index(index_uid, primary_key="segment_id"))
-    client.wait_task(client.update_settings(index_uid, settings))
+    _apply_index_settings(
+        client,
+        index_uid=index_uid,
+        settings=settings,
+        settings_profile=settings_profile,
+        hybrid_snapshot=hybrid_snapshot,
+    )
+    hybrid_live_smoke = _run_hybrid_embedder_live_smoke(
+        client,
+        index_uid=index_uid,
+        hybrid_snapshot=hybrid_snapshot,
+        requested=hybrid_embedder_live_smoke,
+    )
 
     indexed_documents = 0
     indexed_batches = 0
@@ -447,7 +521,7 @@ def index_project_segments(
                     semantic_source_field_counts.get(str(source_field), 0) + 1
                 )
 
-    return {
+    summary = {
         "index": index_uid,
         "project_dir": str(project_dir),
         "segments_path": str(segments_path),
@@ -462,6 +536,12 @@ def index_project_segments(
         "settings_hash": settings_snapshot["hash"],
         "settings_snapshot": settings_snapshot,
     }
+    _attach_hybrid_embedder_summary(
+        summary,
+        hybrid_snapshot=hybrid_snapshot,
+        live_smoke=hybrid_live_smoke,
+    )
+    return summary
 
 
 def index_project_visual_entities(
@@ -518,6 +598,154 @@ def index_project_visual_entities(
         "settings_hash": settings_snapshot["hash"],
         "settings_snapshot": settings_snapshot,
     }
+
+
+def _resolve_hybrid_embedder_settings(
+    *,
+    profile: str | None,
+    config: dict[str, Any] | None,
+    embedder_name: str,
+    dimensions: int | None,
+    live_smoke: bool,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    requested_name = str(embedder_name or "").strip()
+    if not requested_name:
+        raise ValueError("hybrid embedder name must not be empty")
+    if profile is not None and config is not None:
+        raise ValueError("Provide only one of hybrid_embedder_profile or hybrid_embedder_config")
+    if profile is None and config is None:
+        if dimensions is not None or live_smoke or requested_name != DEFAULT_HYBRID_EMBEDDER_NAME:
+            raise ValueError(
+                "Hybrid embedder options require hybrid_embedder_profile or "
+                "hybrid_embedder_config"
+            )
+        return None, None
+    if config is not None:
+        if dimensions is not None:
+            raise ValueError("hybrid_embedder_dimensions only applies to hybrid_embedder_profile")
+        if requested_name != DEFAULT_HYBRID_EMBEDDER_NAME:
+            raise ValueError("hybrid_embedder_name only applies to hybrid_embedder_profile")
+        settings = normalize_hybrid_embedder_settings(config)
+        return settings, hybrid_embedder_settings_snapshot(
+            settings,
+            profile=HYBRID_EMBEDDER_CUSTOM_SETTINGS_PROFILE,
+        )
+
+    if profile is None:
+        raise ValueError("hybrid_embedder_profile is required")
+    settings = hybrid_embedder_settings(
+        profile,
+        embedder_name=requested_name,
+        dimensions=dimensions,
+    )
+    return settings, hybrid_embedder_settings_snapshot(settings, profile=profile)
+
+
+def _apply_index_settings(
+    client: MeiliClient,
+    *,
+    index_uid: str,
+    settings: dict[str, Any],
+    settings_profile: str,
+    hybrid_snapshot: dict[str, Any] | None,
+) -> None:
+    context = f"settings profile '{settings_profile}'"
+    if hybrid_snapshot is not None:
+        context += f" with hybrid embedder profile '{hybrid_snapshot['profile']}'"
+    try:
+        client.wait_task(client.update_settings(index_uid, settings))
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to apply Meilisearch {context} to index '{index_uid}': {exc}"
+        ) from exc
+
+
+def _run_hybrid_embedder_live_smoke(
+    client: MeiliClient,
+    *,
+    index_uid: str,
+    hybrid_snapshot: dict[str, Any] | None,
+    requested: bool,
+) -> dict[str, Any] | None:
+    if hybrid_snapshot is None:
+        return None
+    if not requested:
+        return {"enabled": False}
+    if not hasattr(client, "get_settings"):
+        raise RuntimeError(
+            "Hybrid embedder live smoke requires a Meilisearch client with get_settings"
+        )
+
+    try:
+        settings = client.get_settings(index_uid)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Hybrid embedder live smoke failed while reading settings for index "
+            f"'{index_uid}': {exc}"
+        ) from exc
+
+    embedders = settings.get("embedders") if isinstance(settings, dict) else None
+    if not isinstance(embedders, dict):
+        raise RuntimeError(
+            f"Hybrid embedder live smoke failed for index '{index_uid}': "
+            "Meilisearch settings response did not include an embedders object"
+        )
+
+    expected_embedders = hybrid_snapshot["settings"]["embedders"]
+    actual_snapshot = hybrid_embedder_settings_snapshot(
+        {"embedders": embedders},
+        profile=hybrid_snapshot["profile"],
+    )
+    mismatches = _hybrid_embedder_mismatches(
+        expected_embedders,
+        actual_snapshot["settings"]["embedders"],
+    )
+    if mismatches:
+        raise RuntimeError(
+            f"Hybrid embedder live smoke failed for index '{index_uid}': "
+            + "; ".join(mismatches)
+        )
+
+    return {
+        "enabled": True,
+        "ok": True,
+        "checked_embedder_names": sorted(str(name) for name in expected_embedders),
+        "settings_hash": actual_snapshot["hash"],
+    }
+
+
+def _hybrid_embedder_mismatches(
+    expected_embedders: dict[str, Any],
+    actual_embedders: dict[str, Any],
+) -> list[str]:
+    mismatches: list[str] = []
+    for embedder_name, expected_config in expected_embedders.items():
+        name = str(embedder_name)
+        actual_config = actual_embedders.get(name)
+        if not isinstance(actual_config, dict):
+            mismatches.append(f"missing embedder '{name}'")
+            continue
+        if not isinstance(expected_config, dict):
+            mismatches.append(f"expected embedder '{name}' config is not an object")
+            continue
+        for key, expected_value in expected_config.items():
+            if actual_config.get(key) != expected_value:
+                mismatches.append(f"embedder '{name}' field '{key}' did not match")
+    return mismatches
+
+
+def _attach_hybrid_embedder_summary(
+    summary: dict[str, Any],
+    *,
+    hybrid_snapshot: dict[str, Any] | None,
+    live_smoke: dict[str, Any] | None,
+) -> None:
+    if hybrid_snapshot is None:
+        return
+    summary["hybrid_embedder_profile"] = hybrid_snapshot["profile"]
+    summary["hybrid_embedder_hash"] = hybrid_snapshot["hash"]
+    summary["hybrid_embedder_snapshot"] = hybrid_snapshot
+    summary["hybrid_embedder_live_smoke"] = live_smoke or {"enabled": False}
 
 
 def ensure_window_document_semantic_contract(document: dict[str, Any]) -> dict[str, Any]:

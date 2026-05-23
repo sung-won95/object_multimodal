@@ -13,6 +13,7 @@ from oarag.cli import (
     parse_vlm_options,
 )
 from oarag.meili import (
+    HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
     LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
@@ -91,6 +92,11 @@ def test_index_project_accepts_project_id() -> None:
     assert args.project_dir is None
     assert args.batch_size == 100
     assert args.settings_profile == LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE
+    assert args.hybrid_embedder_profile is None
+    assert args.hybrid_embedder_config is None
+    assert args.hybrid_embedder_name == "default"
+    assert args.hybrid_embedder_dimensions is None
+    assert args.hybrid_embedder_live_smoke is False
 
 
 def test_index_project_accepts_project_dir() -> None:
@@ -147,9 +153,62 @@ def test_cmd_index_project_forwards_settings_profile(monkeypatch, capsys) -> Non
     assert calls["location"] == (None, project_dir)
     assert calls["client"] is fake_client
     assert calls["index_kwargs"]["settings_profile"] == LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
+    assert calls["index_kwargs"]["hybrid_embedder_profile"] is None
+    assert calls["index_kwargs"]["hybrid_embedder_config"] is None
     assert json.loads(capsys.readouterr().out)["settings_profile"] == (
         LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
     )
+
+
+def test_cmd_index_project_forwards_hybrid_embedder_options(monkeypatch, capsys) -> None:
+    calls = {}
+    fake_client = object()
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_index_project_segments(client, **kwargs):
+        calls["client"] = client
+        calls["index_kwargs"] = kwargs
+        return {
+            "hybrid_embedder_profile": kwargs["hybrid_embedder_profile"],
+            "hybrid_embedder_live_smoke": kwargs["hybrid_embedder_live_smoke"],
+        }
+
+    monkeypatch.setattr("oarag.cli.client_from_args", lambda args: fake_client)
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr("oarag.cli.index_project_segments", fake_index_project_segments)
+
+    args = build_parser().parse_args(
+        [
+            "index-project",
+            "--index",
+            "local_segments",
+            "--project-dir",
+            str(project_dir),
+            "--hybrid-embedder-profile",
+            HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+            "--hybrid-embedder-name",
+            "lecture_embedder",
+            "--hybrid-embedder-dimensions",
+            "768",
+            "--hybrid-embedder-live-smoke",
+        ]
+    )
+
+    cmd_index_project(args)
+
+    assert calls["client"] is fake_client
+    assert calls["index_kwargs"]["hybrid_embedder_profile"] == (
+        HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE
+    )
+    assert calls["index_kwargs"]["hybrid_embedder_config"] is None
+    assert calls["index_kwargs"]["hybrid_embedder_name"] == "lecture_embedder"
+    assert calls["index_kwargs"]["hybrid_embedder_dimensions"] == 768
+    assert calls["index_kwargs"]["hybrid_embedder_live_smoke"] is True
+    assert json.loads(capsys.readouterr().out)["hybrid_embedder_live_smoke"] is True
 
 
 def test_build_project_windows_cli_defaults() -> None:
@@ -233,6 +292,11 @@ def test_index_project_windows_cli_defaults() -> None:
     assert args.batch_size == 500
     assert args.reset is False
     assert args.settings_profile == LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE
+    assert args.hybrid_embedder_profile is None
+    assert args.hybrid_embedder_config is None
+    assert args.hybrid_embedder_name == "default"
+    assert args.hybrid_embedder_dimensions is None
+    assert args.hybrid_embedder_live_smoke is False
     assert args.neighbor_count == 1
 
 
@@ -265,6 +329,10 @@ def test_cmd_index_project_windows_forwards_settings_profile(monkeypatch, capsys
             "segments/lecture_windows.jsonl",
             "--settings-profile",
             LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
+            "--hybrid-embedder-profile",
+            HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+            "--hybrid-embedder-dimensions",
+            "512",
             "--window-before-seconds",
             "3",
             "--window-after-seconds",
@@ -277,6 +345,10 @@ def test_cmd_index_project_windows_forwards_settings_profile(monkeypatch, capsys
     assert calls["location"] == (None, project_dir)
     assert calls["client"] is fake_client
     assert calls["index_kwargs"]["settings_profile"] == LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE
+    assert calls["index_kwargs"]["hybrid_embedder_profile"] == (
+        HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE
+    )
+    assert calls["index_kwargs"]["hybrid_embedder_dimensions"] == 512
     assert calls["index_kwargs"]["windows"].as_posix() == "segments/lecture_windows.jsonl"
     assert calls["index_kwargs"]["window_before_seconds"] == 3.0
     assert calls["index_kwargs"]["window_after_seconds"] == 5.0

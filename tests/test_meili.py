@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from oarag.meili import (
+    HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
     LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE,
     MeiliClient,
     LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+    hybrid_embedder_settings,
+    hybrid_embedder_settings_hash,
+    hybrid_embedder_settings_profile_names,
+    hybrid_embedder_settings_snapshot,
+    normalize_hybrid_embedder_settings,
     lecture_segment_settings,
     lecture_segment_settings_hash,
     lecture_segment_settings_profile_names,
@@ -31,6 +39,7 @@ from oarag.schemas import (
 EXPECTED_DEFAULT_SETTINGS_HASH = "f0a9515744b51f74ba52310b07940174f99f040f7f7a6935e3678a0445e95917"
 EXPECTED_VISUAL_ENTITY_SETTINGS_HASH = "5cb877a0006ff93448b2c06680fc566f41bd3d54cd527b6b2282c0e1b158ccdc"
 EXPECTED_WINDOW_SETTINGS_HASH = "c42ed8c97d77620012254b45e2d6b3961f12e2211b0f8ac78759f844f07503e8"
+EXPECTED_HYBRID_EMBEDDER_SETTINGS_HASH = "d7e2a5244531c3c149b0415962e6b114cc8b7a39df3eb24b5acbbaf14f12cab3"
 
 
 class RecordingMeiliClient(MeiliClient):
@@ -115,6 +124,70 @@ def test_meili_search_accepts_hybrid_payload() -> None:
             },
         )
     ]
+
+
+def test_hybrid_embedder_profile_builds_meili_settings_payload() -> None:
+    settings = hybrid_embedder_settings(
+        HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+        embedder_name="lecture_embedder",
+        dimensions=768,
+    )
+    snapshot = hybrid_embedder_settings_snapshot(
+        settings,
+        profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+    )
+
+    assert settings == {
+        "embedders": {
+            "lecture_embedder": {
+                "source": "userProvided",
+                "dimensions": 768,
+            }
+        }
+    }
+    assert hybrid_embedder_settings_hash(settings) == EXPECTED_HYBRID_EMBEDDER_SETTINGS_HASH
+    assert snapshot == {
+        "profile": HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+        "hash": EXPECTED_HYBRID_EMBEDDER_SETTINGS_HASH,
+        "settings": settings,
+    }
+    assert HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE in hybrid_embedder_settings_profile_names()
+
+
+def test_hybrid_embedder_custom_settings_snapshot_redacts_credentials() -> None:
+    settings = normalize_hybrid_embedder_settings(
+        {
+            "embedders": {
+                "default": {
+                    "source": "openAi",
+                    "model": "text-embedding-3-small",
+                    "apiKey": "sk-private-test-key",
+                    "documentTemplate": "{{doc.semantic_text}}",
+                }
+            }
+        }
+    )
+
+    snapshot = hybrid_embedder_settings_snapshot(settings)
+
+    assert settings["embedders"]["default"]["apiKey"] == "sk-private-test-key"
+    assert snapshot["settings"]["embedders"]["default"]["apiKey"] == "<redacted>"
+    assert "sk-private-test-key" not in json.dumps(snapshot)
+
+
+def test_hybrid_embedder_user_provided_rejects_document_template() -> None:
+    with pytest.raises(ValueError, match="source 'userProvided'"):
+        normalize_hybrid_embedder_settings(
+            {
+                "embedders": {
+                    "default": {
+                        "source": "userProvided",
+                        "dimensions": 384,
+                        "documentTemplate": "{{doc.semantic_text}}",
+                    }
+                }
+            }
+        )
 
 
 def test_lecture_segment_settings_hash_is_a_regression_guard() -> None:
