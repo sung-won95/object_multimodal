@@ -73,6 +73,50 @@ def test_build_paper_claims_blocks_supported_claims_when_gate_or_readiness_fails
     assert run.payload["summary"]["overall_status"] == "blocked"
 
 
+def test_build_paper_claims_reads_metric_intervals_as_robustness_evidence(
+    tmp_path: Path,
+) -> None:
+    paths = _write_claim_inputs(tmp_path)
+    robustness = tmp_path / "paper_metric_intervals.json"
+    _write_json(
+        robustness,
+        {
+            "schema_version": "paper-metric-intervals-v1",
+            "status": "needs_evidence",
+            "summary": {
+                "robustness_status": "needs_evidence",
+                "paired_delta_count": 1,
+                "caveat_count": 1,
+            },
+            "paired_deltas": [{"metric": "hit_at_10s", "paired_query_count": 2}],
+            "caveats": ["small_sample_intervals_should_not_be_used_as_confirmatory_evidence"],
+            "privacy": {
+                "raw_queries": "excluded",
+                "answer_text": "excluded",
+                "transcript_content": "excluded",
+                "candidate_evidence_text": "excluded",
+                "local_paths": "excluded",
+            },
+        },
+    )
+
+    run = build_paper_claims(
+        metrics_path=paths["metrics"],
+        reproducibility_path=paths["reproducibility"],
+        quality_gate_result_path=paths["gate"],
+        readiness_audit_path=paths["readiness"],
+        robustness_path=robustness,
+        output_dir=tmp_path / "claims",
+    )
+
+    claims = {claim["claim_id"]: claim for claim in run.payload["claims"]}
+    robustness_claim = claims["robustness_artifact_recorded"]
+    assert run.payload["summary"]["robustness_status"] == "needs_evidence"
+    assert robustness_claim["status"] == "needs_evidence"
+    assert robustness_claim["missing_evidence"] == ["uncaveated paired robustness evidence"]
+    assert run.payload["summary"]["overall_status"] == "needs_evidence"
+
+
 def _write_claim_inputs(
     tmp_path: Path,
     *,

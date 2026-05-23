@@ -130,6 +130,56 @@ def test_build_paper_artifact_registry_accepts_optional_robustness_status(
     assert run.json_path is None
     assert run.payload["status"]["robustness"] == "passed"
     assert run.payload["artifacts"]["robustness"] == "robustness.json"
+    assert run.payload["status_links"]["robustness"] == {
+        "artifact": "robustness.json",
+        "status": "passed",
+    }
+
+
+def test_build_paper_artifact_registry_reads_metric_intervals_status(
+    tmp_path: Path,
+) -> None:
+    experiment_manifest = tmp_path / "experiment_manifest.json"
+    quality_gate = tmp_path / "quality_gate_result.json"
+    readiness = tmp_path / "paper_readiness_audit.json"
+    claims = tmp_path / "claim_evidence_matrix.json"
+    robustness = tmp_path / "paper_metric_intervals.json"
+
+    _write_json(
+        experiment_manifest,
+        {
+            "schema_version": "paper-experiment-manifest-v1",
+            "run_id": "registry_fixture",
+            "commit": {"sha": "abc123"},
+            "artifacts": {"quality_gate_result": "quality_gate_result.json"},
+        },
+    )
+    _write_json(quality_gate, {"passed": True})
+    _write_json(readiness, {"ready": True})
+    _write_json(claims, {"summary": {"overall_status": "needs_evidence"}})
+    _write_json(
+        robustness,
+        {
+            "schema_version": "paper-metric-intervals-v1",
+            "status": "needs_evidence",
+            "summary": {"robustness_status": "needs_evidence"},
+            "paired_deltas": [{"metric": "hit_at_10s"}],
+            "caveats": ["bootstrap_interval_descriptive_only"],
+        },
+    )
+
+    run = build_paper_artifact_registry(
+        experiment_manifest_path=experiment_manifest,
+        readiness_audit_path=readiness,
+        claim_matrix_path=claims,
+        robustness_path=robustness,
+    )
+
+    assert run.payload["status"]["robustness"] == "needs_evidence"
+    assert run.payload["status_links"]["robustness"] == {
+        "artifact": "paper_metric_intervals.json",
+        "status": "needs_evidence",
+    }
 
 
 def _write_json(path: Path, payload: dict) -> None:

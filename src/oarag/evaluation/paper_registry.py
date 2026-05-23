@@ -40,10 +40,31 @@ def build_paper_artifact_registry(
         experiment_manifest=manifest,
         manifest_dir=resolved_manifest_path.parent,
     )
-    resolved_robustness_path = robustness_path.expanduser().resolve() if robustness_path else None
+    resolved_robustness_path = _robustness_path(
+        explicit_path=robustness_path,
+        experiment_manifest=manifest,
+        manifest_dir=resolved_manifest_path.parent,
+    )
     gate = _read_optional_json(resolved_gate_path)
     robustness = _read_optional_json(resolved_robustness_path)
     output = output_path.expanduser().resolve() if output_path is not None else None
+    artifacts = _registry_artifacts(
+        experiment_manifest_path=resolved_manifest_path,
+        manifest=manifest,
+        readiness_audit_path=resolved_readiness_path,
+        claim_matrix_path=resolved_claim_path,
+        quality_gate_result_path=resolved_gate_path,
+        robustness_path=resolved_robustness_path,
+    )
+    status = {
+        "gate": _gate_status(gate),
+        "readiness": _readiness_status(readiness),
+        "claims": _claims_status(claims),
+        "robustness": _robustness_status(
+            robustness,
+            provided=resolved_robustness_path is not None,
+        ),
+    }
 
     payload = {
         "schema_version": PAPER_ARTIFACT_REGISTRY_SCHEMA_VERSION,
@@ -51,23 +72,9 @@ def build_paper_artifact_registry(
         "commit": {
             "sha": _commit_sha(manifest=manifest),
         },
-        "artifacts": _registry_artifacts(
-            experiment_manifest_path=resolved_manifest_path,
-            manifest=manifest,
-            readiness_audit_path=resolved_readiness_path,
-            claim_matrix_path=resolved_claim_path,
-            quality_gate_result_path=resolved_gate_path,
-            robustness_path=resolved_robustness_path,
-        ),
-        "status": {
-            "gate": _gate_status(gate),
-            "readiness": _readiness_status(readiness),
-            "claims": _claims_status(claims),
-            "robustness": _robustness_status(
-                robustness,
-                provided=resolved_robustness_path is not None,
-            ),
-        },
+        "artifacts": artifacts,
+        "status": status,
+        "status_links": _status_links(artifacts=artifacts, status=status),
         "privacy": {
             "payload": "run_id_commit_artifact_filenames_and_statuses_only",
             "raw_queries": "excluded",
@@ -102,6 +109,27 @@ def _quality_gate_path(
     return (manifest_dir / path).resolve()
 
 
+def _robustness_path(
+    *,
+    explicit_path: Path | None,
+    experiment_manifest: Mapping[str, Any],
+    manifest_dir: Path,
+) -> Path | None:
+    if explicit_path is not None:
+        return explicit_path.expanduser().resolve()
+    artifacts = experiment_manifest.get("artifacts")
+    artifacts = artifacts if isinstance(artifacts, Mapping) else {}
+    for key in ("robustness", "metric_intervals", "paper_metric_intervals"):
+        artifact_ref = artifacts.get(key)
+        if not isinstance(artifact_ref, str) or not artifact_ref.strip():
+            continue
+        path = Path(artifact_ref)
+        if path.is_absolute():
+            return path
+        return (manifest_dir / path).resolve()
+    return None
+
+
 def _registry_artifacts(
     *,
     experiment_manifest_path: Path,
@@ -124,6 +152,31 @@ def _registry_artifacts(
             if key not in artifacts:
                 artifacts[str(key)] = _artifact_ref_name(value)
     return artifacts
+
+
+def _status_links(
+    *,
+    artifacts: Mapping[str, str | None],
+    status: Mapping[str, str],
+) -> dict[str, dict[str, str | None]]:
+    return {
+        "gate": {
+            "artifact": artifacts.get("quality_gate_result"),
+            "status": status.get("gate"),
+        },
+        "readiness": {
+            "artifact": artifacts.get("readiness_audit"),
+            "status": status.get("readiness"),
+        },
+        "claims": {
+            "artifact": artifacts.get("claim_matrix"),
+            "status": status.get("claims"),
+        },
+        "robustness": {
+            "artifact": artifacts.get("robustness"),
+            "status": status.get("robustness"),
+        },
+    }
 
 
 def _commit_sha(*, manifest: Mapping[str, Any]) -> str | None:
@@ -176,19 +229,64 @@ def _robustness_status(payload: Mapping[str, Any], *, provided: bool) -> str:
         return "missing"
     if not payload:
         return "unknown"
+    if payload.get("schema_version") == "paper-metric-intervals-v1":
+        return _metric_intervals_robustness_status(payload)
     for key in ("passed", "ok", "ready"):
         if payload.get(key) is True:
             return "passed"
         if payload.get(key) is False:
             return "failed"
-    status = str(payload.get("status") or payload.get("result") or "").strip().lower()
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    for raw_status in (
+        payload.get("status"),
+        payload.get("result"),
+        summary.get("status"),
+        summary.get("robustness_status"),
+        summary.get("overall_status"),
+    ):
+        status = _normalize_robustness_status(raw_status)
+        if status != "unknown":
+            return status
+    return "unknown"
+
+
+def _metric_intervals_robustness_status(payload: Mapping[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    for raw_status in (
+        payload.get("status"),
+        summary.get("status"),
+        summary.get("robustness_status"),
+    ):
+        status = _normalize_robustness_status(raw_status)
+        if status != "unknown":
+            return status
+
+    caveats = [item for item in payload.get("caveats", []) if item]
+    paired_deltas = _list_of_dicts(payload.get("paired_deltas"))
+    row_count = _optional_int(payload.get("row_count"))
+    if row_count == 0 or caveats or not paired_deltas:
+        return "needs_evidence"
+    return "passed"
+
+
+def _normalize_robustness_status(value: Any) -> str:
+    status = str(value or "").strip().lower()
     if status in {"pass", "passed", "success", "succeeded", "ok", "ready"}:
         return "passed"
     if status in {"fail", "failed", "error", "blocked", "not_ready"}:
         return "failed"
+    if status in {"needs_evidence", "caveated", "descriptive", "partial"}:
+        return "needs_evidence"
     if status in {"skip", "skipped", "missing", "not_run"}:
         return "missing"
     return "unknown"
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _read_json(path: Path) -> dict[str, Any]:
