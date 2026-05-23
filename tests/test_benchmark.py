@@ -282,7 +282,7 @@ def test_retrieval_ablation_public_fixture_outputs_are_sanitized(tmp_path: Path)
     assert mode_metrics["transcript-only"]["frame_backed_ratio"] == 0.0
     assert mode_metrics["transcript-only"]["linked_entity_ratio"] == 0.0
     assert mode_metrics["visual-only"]["frame_backed_ratio"] == 1.0
-    assert mode_metrics["visual-only"]["linked_entity_ratio"] == 1.0
+    assert mode_metrics["visual-only"]["linked_entity_ratio"] == 0.0
     assert mode_metrics["time-aligned"]["frame_backed_ratio"] == 1.0
     assert mode_metrics["object-aligned"]["linked_entity_ratio"] == 1.0
 

@@ -616,6 +616,7 @@ def _visual_candidates_from_hits(
             hit=hit,
             entity=entity,
             project=project,
+            use_entity_links=mode == "object-aligned",
         )
         target = project.segment_lookup.get(target_segment_id or "", {})
         candidate_id = str(
@@ -623,10 +624,11 @@ def _visual_candidates_from_hits(
         )
         frame_ids = _visual_candidate_frame_ids(hit=hit, entity=entity, target=target)
         linked_entity_ids: list[str] = []
-        if resolution_method == "entity_link":
-            linked_entity_ids.extend(_entity_id_values(entity, hit))
-        if mode == "object-aligned" and target_segment_id:
-            linked_entity_ids.extend(_linked_entity_ids_for_segment(project, target_segment_id))
+        if mode == "object-aligned":
+            if resolution_method == "entity_link":
+                linked_entity_ids.extend(_entity_id_values(entity, hit))
+            if target_segment_id:
+                linked_entity_ids.extend(_linked_entity_ids_for_segment(project, target_segment_id))
         linked_entity_ids = _unique_strings(linked_entity_ids)
         candidates.append(
             {
@@ -863,20 +865,22 @@ def _resolve_visual_target_segment(
     hit: dict[str, Any],
     entity: dict[str, Any],
     project: AblationProject,
+    use_entity_links: bool,
 ) -> tuple[str | None, str]:
     hit_segment_id = str(hit.get("segment_id") or entity.get("segment_id") or "").strip()
     if hit_segment_id and hit_segment_id in project.segment_lookup:
         return hit_segment_id, "hit_segment_id"
 
-    entity_ids = _entity_id_values(entity, hit)
-    linked_segments = [
-        str(link.get("segment_id") or "").strip()
-        for entity_id in entity_ids
-        for link in project.links_by_entity.get(entity_id, [])
-        if str(link.get("segment_id") or "").strip() in project.segment_lookup
-    ]
-    if linked_segments:
-        return sorted(set(linked_segments))[0], "entity_link"
+    if use_entity_links:
+        entity_ids = _entity_id_values(entity, hit)
+        linked_segments = [
+            str(link.get("segment_id") or "").strip()
+            for entity_id in entity_ids
+            for link in project.links_by_entity.get(entity_id, [])
+            if str(link.get("segment_id") or "").strip() in project.segment_lookup
+        ]
+        if linked_segments:
+            return sorted(set(linked_segments))[0], "entity_link"
 
     frame_ids = _visual_candidate_frame_ids(hit=hit, entity=entity, target={})
     if frame_ids:
