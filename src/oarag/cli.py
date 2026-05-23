@@ -36,7 +36,11 @@ from oarag.integrations.meili import (
 )
 from oarag.integrations.neo4j import check_neo4j_health
 from oarag.retrieval.answer import ask_project, format_answer_text
-from oarag.retrieval.project_query import query_project
+from oarag.retrieval.project_query import (
+    DEFAULT_HYBRID_EMBEDDER,
+    DEFAULT_HYBRID_SEMANTIC_RATIO,
+    query_project,
+)
 from oarag.retrieval.project_index import (
     index_project_segments,
     index_project_visual_entities,
@@ -615,6 +619,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--rerank-time-hint",
         help="Optional timestamp hint for reranking, for example '10-14s'.",
     )
+    query_project.add_argument(
+        "--hybrid-retrieval",
+        action="store_true",
+        help=(
+            "Also query a semantic Meilisearch channel and merge it with lexical "
+            "candidate hits."
+        ),
+    )
+    query_project.add_argument(
+        "--hybrid-embedder",
+        default=DEFAULT_HYBRID_EMBEDDER,
+        help="Meilisearch embedder name used by --hybrid-retrieval.",
+    )
+    query_project.add_argument(
+        "--hybrid-semantic-ratio",
+        type=float,
+        default=DEFAULT_HYBRID_SEMANTIC_RATIO,
+        help="Semantic ratio for the semantic channel used by --hybrid-retrieval.",
+    )
     query_project.add_argument("--output", type=Path, help="Optional JSON output path.")
     query_project.set_defaults(func=cmd_query_project)
 
@@ -696,6 +719,25 @@ def build_parser() -> argparse.ArgumentParser:
     ask_project_parser.add_argument(
         "--rerank-time-hint",
         help="Optional timestamp hint for reranking, for example '10-14s'.",
+    )
+    ask_project_parser.add_argument(
+        "--hybrid-retrieval",
+        action="store_true",
+        help=(
+            "Also query a semantic Meilisearch channel and merge it with lexical "
+            "candidate hits."
+        ),
+    )
+    ask_project_parser.add_argument(
+        "--hybrid-embedder",
+        default=DEFAULT_HYBRID_EMBEDDER,
+        help="Meilisearch embedder name used by --hybrid-retrieval.",
+    )
+    ask_project_parser.add_argument(
+        "--hybrid-semantic-ratio",
+        type=float,
+        default=DEFAULT_HYBRID_SEMANTIC_RATIO,
+        help="Semantic ratio for the semantic channel used by --hybrid-retrieval.",
     )
     ask_project_parser.add_argument(
         "--format",
@@ -1280,6 +1322,9 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         window_after_seconds=args.window_after_seconds,
         rerank=args.rerank,
         rerank_time_hint=args.rerank_time_hint,
+        hybrid_retrieval=args.hybrid_retrieval,
+        hybrid_embedder=args.hybrid_embedder,
+        hybrid_semantic_ratio=args.hybrid_semantic_ratio,
     )
     if args.output is not None:
         output_path = args.output
@@ -1314,6 +1359,9 @@ def cmd_ask_project(args: argparse.Namespace) -> None:
         window_after_seconds=args.window_after_seconds,
         rerank=args.rerank,
         rerank_time_hint=args.rerank_time_hint,
+        hybrid_retrieval=args.hybrid_retrieval,
+        hybrid_embedder=args.hybrid_embedder,
+        hybrid_semantic_ratio=args.hybrid_semantic_ratio,
     )
     if args.output is not None:
         output_path = args.output

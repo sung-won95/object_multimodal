@@ -25,7 +25,11 @@ from oarag.retrieval.evidence import (
     segment_window,
 )
 from oarag.retrieval.project_index import segment_artifact_path
-from oarag.retrieval.project_query import query_project
+from oarag.retrieval.project_query import (
+    DEFAULT_HYBRID_EMBEDDER,
+    DEFAULT_HYBRID_SEMANTIC_RATIO,
+    query_project,
+)
 from oarag.core.schemas import EduVidQARecord, SearchCandidate
 
 
@@ -361,11 +365,17 @@ def run_local_project_suite(
     rerank_time_hint_field = (
         str(suite["rerank_time_hint_field"]) if suite.get("rerank_time_hint_field") else None
     )
+    hybrid_retrieval_enabled = bool(suite.get("hybrid_retrieval", False))
+    hybrid_embedder = str(suite.get("hybrid_embedder") or DEFAULT_HYBRID_EMBEDDER)
+    hybrid_semantic_ratio = (
+        _optional_float(suite.get("hybrid_semantic_ratio")) or DEFAULT_HYBRID_SEMANTIC_RATIO
+    )
 
     rows: list[dict[str, Any]] = []
     latencies = []
     domain_lexicon_metadata: dict[str, Any] | None = None
     rerank_metadata: dict[str, Any] | None = None
+    hybrid_metadata: dict[str, Any] | None = None
     for query_row in _read_query_csv(queries_path):
         if video_filter and str(query_row.get("video_id")) != video_filter:
             continue
@@ -383,6 +393,9 @@ def run_local_project_suite(
             domain_lexicon_path=domain_lexicon_path,
             rerank=rerank_enabled,
             rerank_time_hint=row_rerank_time_hint,
+            hybrid_retrieval=hybrid_retrieval_enabled,
+            hybrid_embedder=hybrid_embedder,
+            hybrid_semantic_ratio=hybrid_semantic_ratio,
         )
         if domain_lexicon_metadata is None:
             loaded_metadata = response.get("domain_lexicon")
@@ -390,6 +403,9 @@ def run_local_project_suite(
         if rerank_metadata is None:
             loaded_rerank = (response.get("retrieval_context") or {}).get("rerank")
             rerank_metadata = loaded_rerank if isinstance(loaded_rerank, dict) else None
+        if hybrid_metadata is None:
+            loaded_hybrid = (response.get("retrieval_context") or {}).get("hybrid_retrieval")
+            hybrid_metadata = loaded_hybrid if isinstance(loaded_hybrid, dict) else None
         elapsed_ms = (time.perf_counter() - started) * 1000
         processing_time_ms = response.get("processing_time_ms")
         latencies.append(_optional_float(processing_time_ms) or elapsed_ms)
@@ -428,6 +444,9 @@ def run_local_project_suite(
                 "domain_lexicon": response.get("domain_lexicon"),
                 "query_expansion": response.get("query_expansion"),
                 "rerank": (response.get("retrieval_context") or {}).get("rerank"),
+                "hybrid_retrieval": (response.get("retrieval_context") or {}).get(
+                    "hybrid_retrieval"
+                ),
                 "top_rerank": bundles[0].get("rerank") if bundles else None,
                 "processing_time_ms": processing_time_ms,
                 "elapsed_time_ms": round(elapsed_ms, 4),
@@ -447,6 +466,12 @@ def run_local_project_suite(
             observed=rerank_metadata,
             time_hint=rerank_time_hint,
             time_hint_field=rerank_time_hint_field,
+        ),
+        "hybrid_retrieval": _suite_hybrid_metadata(
+            enabled=hybrid_retrieval_enabled,
+            observed=hybrid_metadata,
+            embedder=hybrid_embedder,
+            semantic_ratio=hybrid_semantic_ratio,
         ),
         "mean_abs_error": round(
             _mean(row["best_abs_error"] for row in rows if row["best_abs_error"] is not None), 4
@@ -1458,6 +1483,30 @@ def _suite_rerank_metadata(
         "strategy": observed.get("strategy") if enabled and observed else None,
         "weights": observed.get("weights") if enabled and observed else None,
         "time_hint_source": source,
+    }
+
+
+def _suite_hybrid_metadata(
+    *,
+    enabled: bool,
+    observed: dict[str, Any] | None,
+    embedder: str,
+    semantic_ratio: float,
+) -> dict[str, Any]:
+    if not enabled:
+        return {
+            "enabled": False,
+            "modes": ["lexical"],
+            "embedder": None,
+            "semantic_ratio": None,
+            "fusion": None,
+        }
+    return {
+        "enabled": True,
+        "modes": observed.get("modes") if observed else ["lexical", "semantic"],
+        "embedder": observed.get("embedder") if observed else embedder,
+        "semantic_ratio": observed.get("semantic_ratio") if observed else semantic_ratio,
+        "fusion": observed.get("fusion") if observed else None,
     }
 
 

@@ -452,6 +452,9 @@ def test_query_project_cli_defaults() -> None:
     assert args.window_after_seconds is None
     assert args.rerank is False
     assert args.rerank_time_hint is None
+    assert args.hybrid_retrieval is False
+    assert args.hybrid_embedder == "default"
+    assert args.hybrid_semantic_ratio == 1.0
     assert args.output is None
 
 
@@ -494,6 +497,29 @@ def test_query_project_cli_accepts_visual_index() -> None:
     assert args.visual_index == "sample_visual_entities"
 
 
+def test_query_project_cli_accepts_hybrid_options() -> None:
+    args = build_parser().parse_args(
+        [
+            "query-project",
+            "--index",
+            "sample_segments",
+            "--project-id",
+            "sample_project",
+            "--query",
+            "range grid",
+            "--hybrid-retrieval",
+            "--hybrid-embedder",
+            "lecture_embedder",
+            "--hybrid-semantic-ratio",
+            "0.75",
+        ]
+    )
+
+    assert args.hybrid_retrieval is True
+    assert args.hybrid_embedder == "lecture_embedder"
+    assert args.hybrid_semantic_ratio == 0.75
+
+
 def test_ask_project_cli_defaults() -> None:
     args = build_parser().parse_args(
         [
@@ -515,6 +541,9 @@ def test_ask_project_cli_defaults() -> None:
     assert args.project_dir is None
     assert args.query == "bet size"
     assert args.limit == 5
+    assert args.hybrid_retrieval is False
+    assert args.hybrid_embedder == "default"
+    assert args.hybrid_semantic_ratio == 1.0
     assert args.output_format == "json"
     assert args.output is None
 

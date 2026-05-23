@@ -5,7 +5,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from oarag.retrieval.project_query import VISUAL_ENTITY_HIT_SOURCE, query_project
+from oarag.retrieval.project_query import (
+    DEFAULT_HYBRID_EMBEDDER,
+    DEFAULT_HYBRID_SEMANTIC_RATIO,
+    VISUAL_ENTITY_HIT_SOURCE,
+    query_project,
+)
 
 
 ANSWER_SCHEMA_VERSION = "grounded-answer-v1"
@@ -88,6 +93,9 @@ def ask_project(
     window_after_seconds: float | None = None,
     rerank: bool = False,
     rerank_time_hint: str | None = None,
+    hybrid_retrieval: bool = False,
+    hybrid_embedder: str | None = DEFAULT_HYBRID_EMBEDDER,
+    hybrid_semantic_ratio: float = DEFAULT_HYBRID_SEMANTIC_RATIO,
     answer_backend: AnswerBackend | None = None,
     no_answer_policy: NoAnswerPolicy | None = None,
 ) -> dict[str, Any]:
@@ -111,6 +119,9 @@ def ask_project(
         window_after_seconds=window_after_seconds,
         rerank=rerank,
         rerank_time_hint=rerank_time_hint,
+        hybrid_retrieval=hybrid_retrieval,
+        hybrid_embedder=hybrid_embedder,
+        hybrid_semantic_ratio=hybrid_semantic_ratio,
     )
     answer = compose_answer(
         retrieval_response,
@@ -488,7 +499,19 @@ def _retrieval_sources(bundle: dict[str, Any]) -> list[dict[str, Any]]:
         sources.append(
             {
                 key: source.get(key)
-                for key in ("source", "index", "rank", "score", "target_segment_id")
+                for key in (
+                    "source",
+                    "modality",
+                    "index",
+                    "retrieval_mode",
+                    "rank",
+                    "score",
+                    "original_rank",
+                    "original_score",
+                    "target_segment_id",
+                    "deduplicated",
+                    "matches",
+                )
                 if key in source
             }
         )

@@ -6,6 +6,7 @@ from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
     LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE,
+    MeiliClient,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     lecture_segment_settings,
     lecture_segment_settings_hash,
@@ -24,6 +25,16 @@ from oarag.schemas import (
 
 EXPECTED_DEFAULT_SETTINGS_HASH = "f0a9515744b51f74ba52310b07940174f99f040f7f7a6935e3678a0445e95917"
 EXPECTED_VISUAL_ENTITY_SETTINGS_HASH = "5cb877a0006ff93448b2c06680fc566f41bd3d54cd527b6b2282c0e1b158ccdc"
+
+
+class RecordingMeiliClient(MeiliClient):
+    def __init__(self) -> None:
+        super().__init__("http://localhost:7700")
+        self.requests: list[tuple[str, str, dict]] = []
+
+    def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
+        self.requests.append((method, path, payload or {}))
+        return {"hits": [], "processingTimeMs": 1}
 
 
 def test_lecture_segment_settings_payload_is_domain_agnostic_and_multilingual_safe() -> None:
@@ -71,6 +82,33 @@ def test_lecture_segment_settings_payload_is_domain_agnostic_and_multilingual_sa
     assert "frame_refs" in settings["displayedAttributes"]
     assert "visual_entities" in settings["displayedAttributes"]
     assert "source_video_path" not in settings["displayedAttributes"]
+
+
+def test_meili_search_accepts_hybrid_payload() -> None:
+    client = RecordingMeiliClient()
+
+    response = client.search(
+        "segments",
+        "bet size",
+        limit=3,
+        hybrid={"embedder": "default", "semanticRatio": 1.0},
+        show_ranking_score_details=True,
+    )
+
+    assert response["hits"] == []
+    assert client.requests == [
+        (
+            "POST",
+            "/indexes/segments/search",
+            {
+                "q": "bet size",
+                "limit": 3,
+                "showRankingScore": True,
+                "hybrid": {"embedder": "default", "semanticRatio": 1.0},
+                "showRankingScoreDetails": True,
+            },
+        )
+    ]
 
 
 def test_lecture_segment_settings_hash_is_a_regression_guard() -> None:

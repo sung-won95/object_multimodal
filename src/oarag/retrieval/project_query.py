@@ -27,10 +27,23 @@ from oarag.core.schemas import EntityLink, SearchCandidate, VisualEntity
 
 SEGMENT_HIT_SOURCE = "segment"
 VISUAL_ENTITY_HIT_SOURCE = "visual_entity"
+LEXICAL_RETRIEVAL_MODE = "lexical"
+SEMANTIC_RETRIEVAL_MODE = "semantic"
+DEFAULT_HYBRID_EMBEDDER = "default"
+DEFAULT_HYBRID_SEMANTIC_RATIO = 1.0
 SOURCE_PRIORITY = {
     SEGMENT_HIT_SOURCE: 0,
     VISUAL_ENTITY_HIT_SOURCE: 1,
 }
+RETRIEVAL_MODE_PRIORITY = {
+    LEXICAL_RETRIEVAL_MODE: 0,
+    SEMANTIC_RETRIEVAL_MODE: 1,
+}
+SOURCE_MODALITY = {
+    SEGMENT_HIT_SOURCE: "transcript",
+    VISUAL_ENTITY_HIT_SOURCE: "visual",
+}
+HYBRID_RRF_RANK_CONSTANT = 60
 
 
 def query_project(
@@ -54,6 +67,9 @@ def query_project(
     window_after_seconds: float | None = None,
     rerank: bool = False,
     rerank_time_hint: str | None = None,
+    hybrid_retrieval: bool = False,
+    hybrid_embedder: str | None = DEFAULT_HYBRID_EMBEDDER,
+    hybrid_semantic_ratio: float = DEFAULT_HYBRID_SEMANTIC_RATIO,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     domain_lexicon = load_domain_lexicon(
@@ -101,13 +117,20 @@ def query_project(
 
     query_expansion = domain_lexicon.expand_query_result(query)
     search_queries = _search_queries_for_expansion(query=query, query_expansion=query_expansion)
+    search_channels = _search_channels_for_retrieval(
+        hybrid_retrieval=hybrid_retrieval,
+        hybrid_embedder=hybrid_embedder,
+        hybrid_semantic_ratio=hybrid_semantic_ratio,
+    )
     search_response = _search_with_expanded_queries(
         client=client,
         index_uid=index_uid,
         queries=search_queries,
         limit=limit,
+        channels=search_channels,
     )
-    segment_hits = search_response.get("hits", [])
+    segment_hit_records = _search_hit_records(search_response)
+    segment_hits = [record["hit"] for record in segment_hit_records]
 
     bundles: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
@@ -125,6 +148,7 @@ def query_project(
                 index_uid=visual_index_uid,
                 queries=search_queries,
                 limit=limit,
+                channels=search_channels,
             )
             visual_hits = visual_search_response.get("hits", [])
         except urllib.error.HTTPError as exc:
@@ -135,23 +159,46 @@ def query_project(
             )
 
     retrieval_entries: list[dict[str, Any]] = []
-    for rank, hit in enumerate(segment_hits, start=1):
+    for rank, record in enumerate(segment_hit_records, start=1):
+        hit = record["hit"]
         candidate = SearchCandidate.from_hit(rank=rank, hit=hit).to_dict()
-        candidate["source"] = SEGMENT_HIT_SOURCE
+        _attach_retrieval_metadata(
+            candidate,
+            source=SEGMENT_HIT_SOURCE,
+            index_uid=index_uid,
+            aggregate_rank=rank,
+            record=record,
+            include_match_details=hybrid_retrieval,
+        )
         candidates.append(candidate)
         retrieval_entries.append(
             {
                 "source": SEGMENT_HIT_SOURCE,
+                "modality": SOURCE_MODALITY[SEGMENT_HIT_SOURCE],
                 "index": index_uid,
                 "rank": rank,
                 "score": candidate.get("score"),
+                "retrieval_mode": record.get("retrieval_mode"),
+                "original_rank": record.get("rank"),
+                "original_score": record.get("score"),
+                "search_query": record.get("query"),
+                "query_index": record.get("query_index"),
+                "fusion_score": record.get("fusion_score"),
+                "matches": _record_match_summaries(
+                    record=record,
+                    source=SEGMENT_HIT_SOURCE,
+                    index_uid=index_uid,
+                    include_match_details=hybrid_retrieval,
+                ),
                 "hit": hit,
                 "candidate": candidate,
                 "target_segment_id": candidate.get("segment_id"),
             }
         )
 
-    for rank, hit in enumerate(visual_hits, start=1):
+    visual_hit_records = _search_hit_records(visual_search_response)
+    for rank, record in enumerate(visual_hit_records, start=1):
+        hit = record["hit"]
         entity = _visual_entity_from_hit(hit=hit, entity_lookup=entity_lookup)
         target_segment_id, target_resolution = _resolve_visual_entity_target_segment(
             hit=hit,
@@ -167,13 +214,34 @@ def query_project(
             target_segment_id=target_segment_id,
             target=segment_lookup.get(target_segment_id or ""),
         )
+        _attach_retrieval_metadata(
+            candidate,
+            source=VISUAL_ENTITY_HIT_SOURCE,
+            index_uid=visual_index_uid,
+            aggregate_rank=rank,
+            record=record,
+            include_match_details=hybrid_retrieval,
+        )
         candidates.append(candidate)
         retrieval_entries.append(
             {
                 "source": VISUAL_ENTITY_HIT_SOURCE,
+                "modality": SOURCE_MODALITY[VISUAL_ENTITY_HIT_SOURCE],
                 "index": visual_index_uid,
                 "rank": rank,
                 "score": candidate.get("score"),
+                "retrieval_mode": record.get("retrieval_mode"),
+                "original_rank": record.get("rank"),
+                "original_score": record.get("score"),
+                "search_query": record.get("query"),
+                "query_index": record.get("query_index"),
+                "fusion_score": record.get("fusion_score"),
+                "matches": _record_match_summaries(
+                    record=record,
+                    source=VISUAL_ENTITY_HIT_SOURCE,
+                    index_uid=visual_index_uid,
+                    include_match_details=hybrid_retrieval,
+                ),
                 "hit": hit,
                 "candidate": candidate,
                 "entity": entity,
@@ -217,9 +285,15 @@ def query_project(
         candidate["merged_sources"] = [
             {
                 "source": source["source"],
+                "modality": source.get("modality"),
                 "index": source["index"],
                 "rank": source["rank"],
                 "score": source["score"],
+                "retrieval_mode": source.get("retrieval_mode"),
+                "original_rank": source.get("original_rank"),
+                "original_score": source.get("original_score"),
+                "deduplicated": source.get("deduplicated", False),
+                "matches": source.get("matches", []),
             }
             for source in retrieval_sources
         ]
@@ -284,19 +358,29 @@ def query_project(
             linked_entities=linked_entities,
             display_rank=merged_rank,
         )
+        merge_metadata = {
+            "target_key": f"segment:{target_segment_id}",
+            "target_segment_id": target_segment_id,
+            "source_count": len(retrieval_sources),
+            "selected_source": primary_entry["source"],
+            "selected_rank": primary_entry["rank"],
+            "deduplicated": len(retrieval_sources) > 1,
+        }
+        if hybrid_retrieval:
+            merge_metadata.update(
+                {
+                    "retrieval_match_count": _retrieval_match_count(retrieval_sources),
+                    "selected_retrieval_mode": primary_entry.get("retrieval_mode"),
+                    "deduplicated": len(retrieval_sources) > 1
+                    or any(source.get("deduplicated") for source in retrieval_sources),
+                }
+            )
         bundles.append(
             {
                 "rank": merged_rank,
                 "candidate": candidate,
                 "retrieval_sources": retrieval_sources,
-                "merge": {
-                    "target_key": f"segment:{target_segment_id}",
-                    "target_segment_id": target_segment_id,
-                    "source_count": len(retrieval_sources),
-                    "selected_source": primary_entry["source"],
-                    "selected_rank": primary_entry["rank"],
-                    "deduplicated": len(retrieval_sources) > 1,
-                },
+                "merge": merge_metadata,
                 "evidence_window": evidence_window,
                 "visual_entities": window_visual_entities,
                 "linked_entities": linked_entities,
@@ -355,6 +439,10 @@ def query_project(
                 if visual_index_uid
                 else None,
             },
+            "hybrid_retrieval": _hybrid_retrieval_metadata(
+                enabled=hybrid_retrieval,
+                channels=search_channels,
+            ),
             "window_config": window_config,
             "rerank": rerank_context,
         },
@@ -563,19 +651,35 @@ def _retrieval_entry_merge_key(entry: dict[str, Any]) -> tuple[int, int, str]:
     return rank, priority, discriminator
 
 
-def _retrieval_source_sort_key(entry: dict[str, Any]) -> tuple[int, int, str]:
+def _retrieval_source_sort_key(entry: dict[str, Any]) -> tuple[int, int, int, str]:
     source = str(entry.get("source", ""))
     rank = _optional_int(entry.get("rank")) or 0
-    return SOURCE_PRIORITY.get(source, 99), rank, str(entry.get("target_segment_id", ""))
+    mode = str(entry.get("retrieval_mode") or "")
+    return (
+        SOURCE_PRIORITY.get(source, 99),
+        RETRIEVAL_MODE_PRIORITY.get(mode, 99),
+        rank,
+        str(entry.get("target_segment_id", "")),
+    )
 
 
 def _retrieval_source_summary(entry: dict[str, Any]) -> dict[str, Any]:
     candidate = entry.get("candidate") if isinstance(entry.get("candidate"), dict) else {}
+    matches = entry.get("matches") if isinstance(entry.get("matches"), list) else []
     summary = {
         "source": entry.get("source"),
+        "modality": entry.get("modality") or SOURCE_MODALITY.get(str(entry.get("source") or "")),
         "index": entry.get("index"),
+        "retrieval_mode": entry.get("retrieval_mode"),
         "rank": entry.get("rank"),
         "score": entry.get("score"),
+        "original_rank": entry.get("original_rank"),
+        "original_score": entry.get("original_score"),
+        "search_query": entry.get("search_query"),
+        "query_index": entry.get("query_index"),
+        "fusion_score": entry.get("fusion_score"),
+        "deduplicated": len(matches) > 1,
+        "matches": matches,
         "target_segment_id": entry.get("target_segment_id"),
     }
     if entry.get("source") == VISUAL_ENTITY_HIT_SOURCE:
@@ -589,6 +693,111 @@ def _retrieval_source_summary(entry: dict[str, Any]) -> dict[str, Any]:
             }
         )
     return summary
+
+
+def _attach_retrieval_metadata(
+    candidate: dict[str, Any],
+    *,
+    source: str,
+    index_uid: str | None,
+    aggregate_rank: int,
+    record: dict[str, Any],
+    include_match_details: bool,
+) -> None:
+    candidate["source"] = source
+    candidate["modality"] = SOURCE_MODALITY.get(source)
+    candidate["retrieval_mode"] = record.get("retrieval_mode")
+    candidate["retrieval_rank"] = aggregate_rank
+    candidate["original_rank"] = record.get("rank")
+    candidate["original_score"] = record.get("score")
+    candidate["search_query"] = record.get("query")
+    candidate["query_index"] = record.get("query_index")
+    candidate["fusion_score"] = record.get("fusion_score")
+    candidate["retrieval_matches"] = _record_match_summaries(
+        record=record,
+        source=source,
+        index_uid=index_uid,
+        include_match_details=include_match_details,
+    )
+
+
+def _record_match_summaries(
+    *,
+    record: dict[str, Any],
+    source: str,
+    index_uid: str | None,
+    include_match_details: bool,
+) -> list[dict[str, Any]]:
+    matches = record.get("matches") if isinstance(record.get("matches"), list) else []
+    if not matches:
+        matches = [record]
+    summaries: list[dict[str, Any]] = []
+    for match in sorted(matches, key=_match_summary_sort_key):
+        summary: dict[str, Any] = {
+            "source": source,
+            "modality": SOURCE_MODALITY.get(source),
+            "index": index_uid,
+            "retrieval_mode": match.get("retrieval_mode"),
+            "rank": match.get("rank"),
+            "score": match.get("score"),
+            "query": match.get("query"),
+            "query_index": match.get("query_index"),
+        }
+        if include_match_details:
+            summary["channel_index"] = match.get("channel_index")
+            summary["first_seen"] = match.get("first_seen")
+        summaries.append(summary)
+    return summaries
+
+
+def _match_summary_sort_key(match: dict[str, Any]) -> tuple[int, int, int, int]:
+    return (
+        int(match.get("query_index") or 0),
+        RETRIEVAL_MODE_PRIORITY.get(str(match.get("retrieval_mode") or ""), 99),
+        int(match.get("rank") or 10**9),
+        int(match.get("first_seen") or 10**9),
+    )
+
+
+def _retrieval_match_count(retrieval_sources: list[dict[str, Any]]) -> int:
+    total = 0
+    for source in retrieval_sources:
+        matches = source.get("matches") if isinstance(source.get("matches"), list) else []
+        total += len(matches) if matches else 1
+    return total
+
+
+def _hybrid_retrieval_metadata(
+    *,
+    enabled: bool,
+    channels: list[dict[str, Any]],
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "enabled": enabled,
+        "modes": [str(channel.get("mode")) for channel in channels],
+    }
+    semantic_channel = next(
+        (
+            channel
+            for channel in channels
+            if str(channel.get("mode")) == SEMANTIC_RETRIEVAL_MODE
+            and isinstance(channel.get("hybrid"), dict)
+        ),
+        None,
+    )
+    if semantic_channel is not None:
+        hybrid = semantic_channel["hybrid"]
+        metadata.update(
+            {
+                "embedder": hybrid.get("embedder"),
+                "semantic_ratio": hybrid.get("semanticRatio"),
+                "fusion": {
+                    "method": "reciprocal_rank_fusion",
+                    "rank_constant": HYBRID_RRF_RANK_CONSTANT,
+                },
+            }
+        )
+    return metadata
 
 
 def _add_visual_hit_frames_to_window(
@@ -647,50 +856,224 @@ def _search_queries_for_expansion(*, query: str, query_expansion: QueryExpansion
     return queries
 
 
+def _search_channels_for_retrieval(
+    *,
+    hybrid_retrieval: bool,
+    hybrid_embedder: str | None,
+    hybrid_semantic_ratio: float,
+) -> list[dict[str, Any]]:
+    channels: list[dict[str, Any]] = [
+        {
+            "mode": LEXICAL_RETRIEVAL_MODE,
+            "hybrid": None,
+        }
+    ]
+    if not hybrid_retrieval:
+        return channels
+
+    embedder = str(hybrid_embedder or "").strip()
+    if not embedder:
+        raise ValueError("hybrid_embedder is required when hybrid_retrieval is enabled")
+    try:
+        semantic_ratio = float(hybrid_semantic_ratio)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("hybrid_semantic_ratio must be > 0.0 and <= 1.0") from exc
+    if not 0.0 < semantic_ratio <= 1.0:
+        raise ValueError("hybrid_semantic_ratio must be > 0.0 and <= 1.0")
+    channels.append(
+        {
+            "mode": SEMANTIC_RETRIEVAL_MODE,
+            "hybrid": {
+                "embedder": embedder,
+                "semanticRatio": semantic_ratio,
+            },
+        }
+    )
+    return channels
+
+
 def _search_with_expanded_queries(
     *,
     client: MeiliClient,
     index_uid: str,
     queries: list[str],
     limit: int,
+    channels: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    search_channels = channels or _search_channels_for_retrieval(
+        hybrid_retrieval=False,
+        hybrid_embedder=DEFAULT_HYBRID_EMBEDDER,
+        hybrid_semantic_ratio=DEFAULT_HYBRID_SEMANTIC_RATIO,
+    )
     responses: list[dict[str, Any]] = []
     hit_records: list[dict[str, Any]] = []
     hit_positions: dict[str, int] = {}
+    search_calls: list[dict[str, Any]] = []
 
     for query_index, search_query in enumerate(queries):
-        response = client.search(index_uid, search_query, limit=limit)
-        responses.append(response)
-        for rank, hit in enumerate(response.get("hits", []), start=1):
-            hit_key = _search_hit_key(hit)
-            score = _hit_score(hit)
-            if hit_key in hit_positions:
-                existing_index = hit_positions[hit_key]
-                if score > hit_records[existing_index]["score"]:
-                    hit_records[existing_index]["hit"] = hit
-                    hit_records[existing_index]["score"] = score
-                    hit_records[existing_index]["query_index"] = query_index
-                    hit_records[existing_index]["rank"] = rank
-                continue
-            hit_positions[hit_key] = len(hit_records)
-            hit_records.append(
+        for channel_index, channel in enumerate(search_channels):
+            response = _run_search_channel(
+                client=client,
+                index_uid=index_uid,
+                search_query=search_query,
+                limit=limit,
+                channel=channel,
+            )
+            responses.append(response)
+            hits = response.get("hits", [])
+            search_calls.append(
                 {
-                    "hit": hit,
-                    "score": score,
+                    "index": index_uid,
+                    "query": search_query,
                     "query_index": query_index,
-                    "rank": rank,
-                    "first_seen": len(hit_records),
+                    "retrieval_mode": channel["mode"],
+                    "channel_index": channel_index,
+                    "hit_count": len(hits),
+                    "processing_time_ms": response.get("processingTimeMs"),
                 }
             )
+            for rank, hit in enumerate(hits, start=1):
+                hit_key = _search_hit_key(hit)
+                score = _hit_score(hit)
+                occurrence = {
+                    "hit": hit,
+                    "score": score,
+                    "query": search_query,
+                    "query_index": query_index,
+                    "retrieval_mode": channel["mode"],
+                    "channel_index": channel_index,
+                    "rank": rank,
+                    "first_seen": sum(len(record.get("matches", [])) for record in hit_records),
+                }
+                if hit_key in hit_positions:
+                    existing_index = hit_positions[hit_key]
+                    hit_records[existing_index]["matches"].append(occurrence)
+                    if _is_better_hit_occurrence(occurrence, hit_records[existing_index]):
+                        hit_records[existing_index].update(_selected_hit_fields(occurrence))
+                    continue
+                hit_positions[hit_key] = len(hit_records)
+                hit_records.append(
+                    {
+                        **_selected_hit_fields(occurrence),
+                        "hit_key": hit_key,
+                        "matches": [occurrence],
+                    }
+                )
 
     aggregate = copy.deepcopy(responses[0]) if responses else {}
-    ranked_hit_records = sorted(hit_records, key=_expanded_hit_record_sort_key)
+    for record in hit_records:
+        record["fusion_score"] = _fusion_score(record.get("matches", []))
+    ranked_hit_records = sorted(
+        hit_records,
+        key=_hybrid_hit_record_sort_key
+        if len(search_channels) > 1
+        else _expanded_hit_record_sort_key,
+    )
+    limited_records = ranked_hit_records[:limit]
+    for aggregate_rank, record in enumerate(limited_records, start=1):
+        record["aggregate_rank"] = aggregate_rank
     aggregate["hits"] = [record["hit"] for record in ranked_hit_records[:limit]]
+    aggregate["hitRecords"] = limited_records
     aggregate["processingTimeMs"] = _combined_processing_time_ms(*responses)
     aggregate["query"] = queries[0] if len(queries) == 1 else queries
     aggregate["queries"] = queries
+    aggregate["retrievalModes"] = [channel["mode"] for channel in search_channels]
+    aggregate["searchCalls"] = search_calls
     aggregate["hitCountBeforeLimit"] = len(hit_records)
+    aggregate["rawHitCountBeforeDedupe"] = sum(call["hit_count"] for call in search_calls)
     return aggregate
+
+
+def _run_search_channel(
+    *,
+    client: MeiliClient,
+    index_uid: str,
+    search_query: str,
+    limit: int,
+    channel: dict[str, Any],
+) -> dict[str, Any]:
+    hybrid = channel.get("hybrid")
+    if isinstance(hybrid, dict):
+        return client.search(index_uid, search_query, limit=limit, hybrid=hybrid)
+    return client.search(index_uid, search_query, limit=limit)
+
+
+def _selected_hit_fields(occurrence: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "hit": occurrence["hit"],
+        "score": occurrence["score"],
+        "query": occurrence["query"],
+        "query_index": occurrence["query_index"],
+        "retrieval_mode": occurrence["retrieval_mode"],
+        "channel_index": occurrence["channel_index"],
+        "rank": occurrence["rank"],
+        "first_seen": occurrence["first_seen"],
+    }
+
+
+def _is_better_hit_occurrence(occurrence: dict[str, Any], record: dict[str, Any]) -> bool:
+    return _occurrence_selection_key(occurrence) < _occurrence_selection_key(record)
+
+
+def _occurrence_selection_key(occurrence: dict[str, Any]) -> tuple[float, int, int, int, int]:
+    return (
+        -float(occurrence.get("score", float("-inf"))),
+        int(occurrence.get("query_index") or 0),
+        RETRIEVAL_MODE_PRIORITY.get(str(occurrence.get("retrieval_mode") or ""), 99),
+        int(occurrence.get("rank") or 10**9),
+        int(occurrence.get("first_seen") or 10**9),
+    )
+
+
+def _fusion_score(matches: list[dict[str, Any]]) -> float:
+    score = 0.0
+    for match in matches:
+        rank = _optional_int(match.get("rank")) or 10**9
+        score += 1.0 / (HYBRID_RRF_RANK_CONSTANT + rank)
+    return round(score, 8)
+
+
+def _search_hit_records(response: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(response, dict):
+        return []
+    records = response.get("hitRecords")
+    if isinstance(records, list):
+        return [
+            record
+            for record in records
+            if isinstance(record, dict) and isinstance(record.get("hit"), dict)
+        ]
+    fallback_records: list[dict[str, Any]] = []
+    for rank, hit in enumerate(response.get("hits", []), start=1):
+        if not isinstance(hit, dict):
+            continue
+        fallback_records.append(
+            {
+                "hit": hit,
+                "score": _hit_score(hit),
+                "query": response.get("query"),
+                "query_index": 0,
+                "retrieval_mode": LEXICAL_RETRIEVAL_MODE,
+                "channel_index": 0,
+                "rank": rank,
+                "aggregate_rank": rank,
+                "first_seen": rank - 1,
+                "fusion_score": _fusion_score([{"rank": rank}]),
+                "matches": [
+                    {
+                        "hit": hit,
+                        "score": _hit_score(hit),
+                        "query": response.get("query"),
+                        "query_index": 0,
+                        "retrieval_mode": LEXICAL_RETRIEVAL_MODE,
+                        "channel_index": 0,
+                        "rank": rank,
+                        "first_seen": rank - 1,
+                    }
+                ],
+            }
+        )
+    return fallback_records
 
 
 def _search_metadata(response: dict[str, Any] | None, index_uid: str | None) -> dict[str, Any] | None:
@@ -703,6 +1086,30 @@ def _search_metadata(response: dict[str, Any] | None, index_uid: str | None) -> 
     }
     if "queries" in response:
         metadata["queries"] = response["queries"]
+    if "retrievalModes" in response:
+        metadata["retrieval_modes"] = response["retrievalModes"]
+    if "searchCalls" in response:
+        metadata["calls"] = [
+            {
+                key: call.get(key)
+                for key in (
+                    "index",
+                    "query",
+                    "query_index",
+                    "retrieval_mode",
+                    "channel_index",
+                    "hit_count",
+                    "processing_time_ms",
+                )
+                if key in call
+            }
+            for call in response["searchCalls"]
+            if isinstance(call, dict)
+        ]
+    if "hitCountBeforeLimit" in response:
+        metadata["hit_count_before_limit"] = response["hitCountBeforeLimit"]
+    if "rawHitCountBeforeDedupe" in response:
+        metadata["raw_hit_count_before_dedupe"] = response["rawHitCountBeforeDedupe"]
     return metadata
 
 
@@ -725,6 +1132,18 @@ def _expanded_hit_record_sort_key(record: dict[str, Any]) -> tuple[float, int, i
         int(record["query_index"]),
         int(record["rank"]),
         int(record["first_seen"]),
+    )
+
+
+def _hybrid_hit_record_sort_key(record: dict[str, Any]) -> tuple[float, float, int, int, int, int]:
+    score = optional_float(record.get("score"))
+    return (
+        -float(record.get("fusion_score") or 0.0),
+        -(score if score is not None else float("-inf")),
+        int(record.get("query_index") or 0),
+        RETRIEVAL_MODE_PRIORITY.get(str(record.get("retrieval_mode") or ""), 99),
+        int(record.get("rank") or 10**9),
+        int(record.get("first_seen") or 10**9),
     )
 
 
