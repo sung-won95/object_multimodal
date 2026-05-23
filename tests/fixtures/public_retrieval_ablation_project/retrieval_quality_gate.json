@@ -1,0 +1,25 @@
+{
+  "schema_version": "retrieval-quality-gate-v1",
+  "gate_id": "public_retrieval_answer_matrix_fixture_gate",
+  "note": "Public fixture regression guard only; thresholds are not paper claims.",
+  "suites": [
+    {
+      "suite_id": "public_matrix",
+      "suite_type": "retrieval_answer_matrix",
+      "schema_version": "retrieval-answer-ablation-matrix-v1",
+      "required_variants": [
+        "segment_lexical",
+        "domain_lexicon",
+        "hybrid",
+        "window",
+        "window_hybrid",
+        "rerank"
+      ],
+      "thresholds": {
+        "hit_at_10s": 1.0,
+        "mrr_at_max_delta": 0.5,
+        "grounded_answer_ratio": 1.0
+      }
+    }
+  ]
+}

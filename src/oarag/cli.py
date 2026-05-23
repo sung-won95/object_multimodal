@@ -7,6 +7,7 @@ from pathlib import Path
 
 from oarag.ingestion.alignment import align_segments_to_frames
 from oarag.evaluation.benchmark import run_benchmark
+from oarag.evaluation.quality_gate import check_retrieval_quality_gate
 from oarag.evaluation.reporting import generate_evaluation_report
 from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
 from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
@@ -1021,6 +1022,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_eval.set_defaults(func=cmd_report_evaluation)
 
+    retrieval_gate = subparsers.add_parser(
+        "check-retrieval-gate",
+        help="Check aggregate retrieval benchmark metrics against a public fixture quality gate",
+    )
+    retrieval_gate.add_argument("--metrics", required=True, type=Path)
+    retrieval_gate.add_argument("--config", required=True, type=Path)
+    retrieval_gate.set_defaults(func=cmd_check_retrieval_gate)
+
     lecture_smoke = subparsers.add_parser(
         "lecture-smoke",
         help="Run a private-safe lecture smoke suite from a manifest",
@@ -1788,6 +1797,13 @@ def cmd_report_evaluation(args: argparse.Namespace) -> None:
             indent=2,
         )
     )
+
+
+def cmd_check_retrieval_gate(args: argparse.Namespace) -> None:
+    result = check_retrieval_quality_gate(metrics_path=args.metrics, config_path=args.config)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if not result["passed"]:
+        raise SystemExit(1)
 
 
 def cmd_lecture_smoke(args: argparse.Namespace) -> None:
