@@ -11,6 +11,7 @@ from oarag.evaluation.experiment import run_paper_experiment
 from oarag.evaluation.quality_gate import check_retrieval_quality_gate
 from oarag.evaluation.readiness import audit_paper_readiness
 from oarag.evaluation.reporting import generate_evaluation_report
+from oarag.evaluation.metric_intervals import generate_metric_intervals
 from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
 from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
 from oarag.evaluation.eval import candidate_diagnostics, evaluate_query, summarize
@@ -80,6 +81,18 @@ def main(argv: list[str] | None = None) -> None:
 
 def main_run_vlm_alignment(argv: list[str] | None = None) -> None:
     parser = build_vlm_alignment_parser()
+    args = parser.parse_args(argv)
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def main_paper_metric_intervals(argv: list[str] | None = None) -> None:
+    parser = build_paper_metric_intervals_parser()
     args = parser.parse_args(argv)
     try:
         args.func(args)
@@ -1045,6 +1058,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_eval.set_defaults(func=cmd_report_evaluation)
 
+    metric_intervals = subparsers.add_parser(
+        "paper-metric-intervals",
+        help="Generate aggregate bootstrap CIs and paired deltas from query_results.jsonl",
+    )
+    add_paper_metric_intervals_arguments(metric_intervals)
+    metric_intervals.set_defaults(func=cmd_paper_metric_intervals)
+
     retrieval_gate = subparsers.add_parser(
         "check-retrieval-gate",
         help="Check aggregate retrieval benchmark metrics against a public fixture quality gate",
@@ -1144,6 +1164,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_paper_metric_intervals_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="paper-metric-intervals",
+        description="Generate aggregate bootstrap CIs and paired deltas from query_results.jsonl",
+    )
+    add_paper_metric_intervals_arguments(parser)
+    parser.set_defaults(func=cmd_paper_metric_intervals)
+    return parser
+
+
 def build_vlm_alignment_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run-vlm-alignment",
@@ -1155,6 +1185,57 @@ def build_vlm_alignment_parser() -> argparse.ArgumentParser:
     add_vlm_alignment_arguments(parser)
     parser.set_defaults(func=cmd_run_vlm_alignment)
     return parser
+
+
+def add_paper_metric_intervals_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--query-results", required=True, type=Path)
+    parser.add_argument(
+        "--metrics",
+        "--metrics-path",
+        dest="metrics_path",
+        type=Path,
+        help="Optional metrics.json path used for run metadata.",
+    )
+    parser.add_argument(
+        "--report",
+        "--report-path",
+        dest="report_path",
+        type=Path,
+        help="Optional paper report artifact path recorded by artifact name only.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Output directory. Defaults to paper_metric_intervals next to query_results.jsonl.",
+    )
+    parser.add_argument(
+        "--baseline-variant-id",
+        help="Baseline variant_id or mode for paired variant-minus-baseline deltas.",
+    )
+    parser.add_argument(
+        "--metric",
+        action="append",
+        dest="metrics",
+        help="Metric name to summarize. Repeat or pass comma-separated values.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Bootstrap RNG seed.",
+    )
+    parser.add_argument(
+        "--sample-count",
+        type=int,
+        default=1000,
+        help="Bootstrap resample count.",
+    )
+    parser.add_argument(
+        "--confidence-level",
+        type=float,
+        default=0.95,
+        help="Bootstrap percentile interval confidence level.",
+    )
 
 
 def add_vlm_alignment_arguments(parser: argparse.ArgumentParser) -> None:
@@ -1885,6 +1966,33 @@ def cmd_report_evaluation(args: argparse.Namespace) -> None:
                 "paper_table_markdown": str(report.paper_table_markdown_path),
                 "reproducibility_json": str(report.reproducibility_json_path),
                 "reproducibility_markdown": str(report.reproducibility_markdown_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+def cmd_paper_metric_intervals(args: argparse.Namespace) -> None:
+    run = generate_metric_intervals(
+        query_results_path=args.query_results,
+        output_dir=args.output_dir,
+        metrics_path=args.metrics_path,
+        report_path=args.report_path,
+        baseline_variant_id=args.baseline_variant_id,
+        metrics=args.metrics,
+        seed=args.seed,
+        sample_count=args.sample_count,
+        confidence_level=args.confidence_level,
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": run.payload.get("run_id"),
+                "output_dir": str(run.output_dir),
+                "json": str(run.json_path),
+                "csv": str(run.csv_path),
+                "markdown": str(run.markdown_path),
             },
             ensure_ascii=False,
             indent=2,
