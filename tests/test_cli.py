@@ -907,6 +907,32 @@ def test_benchmark_retrieval_cli_accepts_manifest_and_output_dir() -> None:
     assert args.diagnostic_top_k == 10
 
 
+def test_run_paper_experiment_cli_accepts_manifest_gate_output_and_run_id() -> None:
+    args = build_parser().parse_args(
+        [
+            "run-paper-experiment",
+            "--manifest",
+            "benchmarks/retrieval.json",
+            "--output-dir",
+            "reports/paper/dev",
+            "--run-id",
+            "paper_dev",
+            "--gate-config",
+            "benchmarks/gate.json",
+            "--diagnostic-top-k",
+            "5",
+            "--no-fail-on-gate",
+        ]
+    )
+
+    assert str(args.manifest) == "benchmarks/retrieval.json"
+    assert str(args.output_dir) == "reports/paper/dev"
+    assert args.run_id == "paper_dev"
+    assert str(args.gate_config) == "benchmarks/gate.json"
+    assert args.diagnostic_top_k == 5
+    assert args.no_fail_on_gate is True
+
+
 def test_eval_eduvidqa_cli_accepts_diagnostic_options() -> None:
     args = build_parser().parse_args(
         [

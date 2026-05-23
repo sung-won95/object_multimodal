@@ -41,6 +41,11 @@ def test_generate_evaluation_report_writes_paper_table_and_reproducibility(
                                 "linked_entity_backed_ratio": 0.0,
                                 "grounded_answer_ratio": 1.0,
                                 "citation_coverage_ratio": 1.0,
+                                "answer_citation_precision": 1.0,
+                                "answer_citation_recall": 1.0,
+                                "expected_citation_hit_ratio": 1.0,
+                                "mean_unsupported_claim_count": 0.0,
+                                "unsupported_claim_ratio": 0.0,
                                 "mean_processing_time_ms": 3.0,
                             }
                         ],
@@ -67,9 +72,12 @@ def test_generate_evaluation_report_writes_paper_table_and_reproducibility(
 
     paper_table = report.paper_table_markdown_path.read_text(encoding="utf-8")
     assert "segment_lexical" in paper_table
+    assert "cite P" in paper_table
+    assert "deterministic expected-hint overlap proxies" in paper_table
     assert "Raw queries" in paper_table
 
     reproducibility = report.reproducibility_json_path.read_text(encoding="utf-8")
     assert "abc123" in reproducibility
     assert "metrics.json" in reproducibility
+    assert "deterministic_expected_hint_overlap_not_full_llm_quality" in reproducibility
     assert str(tmp_path) not in reproducibility

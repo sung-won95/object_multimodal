@@ -26,6 +26,11 @@ PAPER_TABLE_COLUMNS = [
     "linked_entity_backed_ratio",
     "grounded_answer_ratio",
     "citation_coverage_ratio",
+    "answer_citation_precision",
+    "answer_citation_recall",
+    "expected_citation_hit_ratio",
+    "mean_unsupported_claim_count",
+    "unsupported_claim_ratio",
     "mean_processing_time_ms",
 ]
 
@@ -127,13 +132,14 @@ def paper_table_markdown(*, metrics: dict[str, Any], rows: list[dict[str, Any]])
     lines = [
         f"# Paper Evaluation Table: {metrics.get('run_id')}",
         "",
-        "| suite | condition | domain | queries | Hit@10s | MRR | top1 err | frame | linked | grounded | citations | latency ms |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| suite | condition | domain | queries | Hit@10s | MRR | top1 err | frame | linked | grounded | cite P | cite R | expected hit | unsupported | latency ms |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         lines.append(
             "| {suite_id} | {condition} | {domain} | {query_count} | {hit10} | {mrr} | "
-            "{top1} | {frame} | {linked} | {grounded} | {citations} | {latency} |".format(
+            "{top1} | {frame} | {linked} | {grounded} | {precision} | {recall} | {hit} | "
+            "{unsupported} | {latency} |".format(
                 suite_id=row.get("suite_id"),
                 condition=row.get("condition"),
                 domain=row.get("domain"),
@@ -144,7 +150,10 @@ def paper_table_markdown(*, metrics: dict[str, Any], rows: list[dict[str, Any]])
                 frame=_format_metric(row.get("frame_backed_ratio")),
                 linked=_format_metric(row.get("linked_entity_backed_ratio")),
                 grounded=_format_metric(row.get("grounded_answer_ratio")),
-                citations=_format_metric(row.get("citation_coverage_ratio")),
+                precision=_format_metric(row.get("answer_citation_precision")),
+                recall=_format_metric(row.get("answer_citation_recall")),
+                hit=_format_metric(row.get("expected_citation_hit_ratio")),
+                unsupported=_format_metric(row.get("mean_unsupported_claim_count")),
                 latency=_format_metric(row.get("mean_processing_time_ms")),
             )
         )
@@ -153,6 +162,8 @@ def paper_table_markdown(*, metrics: dict[str, Any], rows: list[dict[str, Any]])
             "",
             "Raw queries, answer text, transcript excerpts, candidate evidence, local paths, "
             "and raw candidate IDs are intentionally excluded.",
+            "Citation grounding metrics are deterministic expected-hint overlap proxies for "
+            "regression tracking, not a replacement for full LLM answer-quality judgment.",
             "",
         ]
     )
@@ -195,6 +206,9 @@ def reproducibility_payload(
             "candidate_evidence_text": "excluded",
             "local_paths": "excluded",
             "raw_candidate_ids": "excluded_or_hashed",
+            "grounding_proxy_metrics": (
+                "deterministic_expected_hint_overlap_not_full_llm_quality"
+            ),
         },
     }
 
@@ -229,6 +243,8 @@ def reproducibility_markdown(payload: dict[str, Any]) -> str:
             "This report contains aggregate metrics, configuration descriptors, commit metadata, "
             "and artifact names only. Raw queries, transcripts, answer text, candidate evidence, "
             "local filesystem paths, and raw candidate identifiers are excluded.",
+            "Grounding and citation metrics are deterministic expected-hint overlap proxies for "
+            "regression tracking; they do not replace full LLM answer-quality review.",
             "",
         ]
     )
@@ -259,6 +275,11 @@ def _paper_table_row(
         ),
         "grounded_answer_ratio": item.get("grounded_answer_ratio"),
         "citation_coverage_ratio": item.get("citation_coverage_ratio"),
+        "answer_citation_precision": item.get("answer_citation_precision"),
+        "answer_citation_recall": item.get("answer_citation_recall"),
+        "expected_citation_hit_ratio": item.get("expected_citation_hit_ratio"),
+        "mean_unsupported_claim_count": item.get("mean_unsupported_claim_count"),
+        "unsupported_claim_ratio": item.get("unsupported_claim_ratio"),
         "mean_processing_time_ms": item.get(
             "mean_processing_time_ms",
             item.get("mean_elapsed_time_ms"),

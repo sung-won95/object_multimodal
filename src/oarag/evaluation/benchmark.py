@@ -136,10 +136,11 @@ def run_benchmark(
     output_dir: Path | None = None,
     repo_root: Path | None = None,
     diagnostic_top_k: int | None = None,
+    run_id: str | None = None,
 ) -> BenchmarkRun:
     manifest = _read_json(manifest_path)
     base_dir = manifest_path.expanduser().resolve().parent
-    run_id = str(manifest.get("run_id") or f"run_{int(time.time())}")
+    run_id = str(run_id or manifest.get("run_id") or f"run_{int(time.time())}")
     resolved_output_dir = _resolve_output_dir(
         output_dir=output_dir,
         manifest=manifest,
@@ -336,6 +337,7 @@ def run_retrieval_answer_matrix_suite(
         query_id = _query_id(query_row, query_index=query_index)
         expected_ranges = _expected_ranges(query_row)
         expected_segment_ids = _expected_segment_ids(query_row)
+        expected_window_ids = _expected_window_ids(query_row)
         for variant in variants:
             rows.append(
                 _run_matrix_query(
@@ -351,6 +353,7 @@ def run_retrieval_answer_matrix_suite(
                     query_text=query_text,
                     expected_ranges=expected_ranges,
                     expected_segment_ids=expected_segment_ids,
+                    expected_window_ids=expected_window_ids,
                     include_answer=include_answer,
                     deltas=deltas,
                 )
@@ -395,6 +398,11 @@ def run_retrieval_answer_matrix_suite(
         "linked_entity_backed_ratio",
         "grounded_answer_ratio",
         "citation_coverage_ratio",
+        "answer_citation_precision",
+        "answer_citation_recall",
+        "expected_citation_hit_ratio",
+        "mean_unsupported_claim_count",
+        "unsupported_claim_ratio",
         "mean_processing_time_ms",
     ):
         metric[key] = _mean_or_none(item.get(key) for item in variant_metrics)
@@ -1077,6 +1085,7 @@ def _run_matrix_query(
     query_text: str,
     expected_ranges: list[tuple[float, float]],
     expected_segment_ids: list[str],
+    expected_window_ids: list[str],
     include_answer: bool,
     deltas: list[int],
 ) -> dict[str, Any]:
@@ -1129,6 +1138,12 @@ def _run_matrix_query(
     )
     answer_enabled = _bool_config(variant, "include_answer", default=include_answer)
     answer = compose_answer(response) if answer_enabled else None
+    answer_grounding = _answer_grounding_metrics(
+        answer=answer,
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges,
+    )
     elapsed_ms = round((time.perf_counter() - started) * 1000, 4)
     bundles = _list_of_dicts(response.get("bundles"))
     candidate_errors = [
@@ -1171,6 +1186,7 @@ def _run_matrix_query(
         ),
         "expected_time_available": bool(expected_ranges),
         "expected_segment_available": bool(expected_segment_ids),
+        "expected_window_available": bool(expected_window_ids),
         "search_hit_count": (response.get("counts") or {}).get("search_hits"),
         "bundle_count": len(bundles),
         "best_abs_error": best_error,
@@ -1187,6 +1203,7 @@ def _run_matrix_query(
         "query_expansion": _public_query_expansion(response.get("query_expansion")),
         "top_candidate": _public_matrix_candidate(top_bundle),
         "answer": _public_answer_summary(answer),
+        "answer_grounding": answer_grounding,
         "processing_time_ms": response.get("processing_time_ms"),
         "elapsed_time_ms": elapsed_ms,
         "warning_count": len(response.get("warnings") or []),
@@ -1219,6 +1236,11 @@ def _matrix_variant_metrics(
         "grounded_answer_ratio": _answer_ratio(rows, "grounded_answer"),
         "candidate_evidence_only_ratio": _answer_ratio(rows, "candidate_evidence_only"),
         "citation_coverage_ratio": _answer_count_ratio(rows, "citation_count"),
+        "answer_citation_precision": _mean_grounding_metric(rows, "citation_precision"),
+        "answer_citation_recall": _mean_grounding_metric(rows, "citation_recall"),
+        "expected_citation_hit_ratio": _grounding_bool_ratio(rows, "expected_citation_hit"),
+        "mean_unsupported_claim_count": _mean_grounding_metric(rows, "unsupported_claim_count"),
+        "unsupported_claim_ratio": _grounding_positive_ratio(rows, "unsupported_claim_count"),
         "mean_answer_citation_count": _mean_or_none(
             (row.get("answer") or {}).get("citation_count")
             for row in rows
@@ -1263,6 +1285,14 @@ def _expected_segment_ids(query_row: dict[str, Any]) -> list[str]:
     values = query_row.get(
         "expected_segment_ids",
         query_row.get("expected_segment_id", query_row.get("target_segment_id")),
+    )
+    return _string_list(values)
+
+
+def _expected_window_ids(query_row: dict[str, Any]) -> list[str]:
+    values = query_row.get(
+        "expected_window_ids",
+        query_row.get("expected_window_id", query_row.get("target_window_id")),
     )
     return _string_list(values)
 
@@ -1432,6 +1462,215 @@ def _public_answer_summary(answer: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _answer_grounding_metrics(
+    *,
+    answer: dict[str, Any] | None,
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+    expected_ranges: list[tuple[float, float]],
+) -> dict[str, Any]:
+    expected_units = _expected_citation_units(
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges,
+    )
+    expected_available = bool(expected_units)
+    if not isinstance(answer, dict):
+        return {
+            "enabled": False,
+            "expected_available": expected_available,
+            "expected_unit_count": len(expected_units),
+            "citation_precision": None,
+            "citation_recall": None,
+            "expected_citation_hit": None,
+            "unsupported_claim_count": None,
+        }
+
+    citations = _list_of_dicts(answer.get("citations"))
+    claims = _list_of_dicts(answer.get("claims"))
+    matched_citation_count = (
+        sum(
+            1
+            for citation in citations
+            if _citation_matches_expected(
+                citation,
+                expected_segment_ids=expected_segment_ids,
+                expected_window_ids=expected_window_ids,
+                expected_ranges=expected_ranges,
+            )
+        )
+        if expected_available
+        else None
+    )
+    covered_unit_count = (
+        sum(1 for unit in expected_units if _expected_unit_covered(unit, citations))
+        if expected_available
+        else None
+    )
+    citation_precision = (
+        round(float(matched_citation_count) / len(citations), 4)
+        if expected_available and citations
+        else 0.0
+        if expected_available
+        else None
+    )
+    citation_recall = (
+        round(float(covered_unit_count) / len(expected_units), 4)
+        if expected_available and expected_units
+        else None
+    )
+    unsupported_claim_count = _unsupported_claim_count(
+        claims=claims,
+        citations=citations,
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges,
+        expected_available=expected_available,
+    )
+    return {
+        "enabled": True,
+        "expected_available": expected_available,
+        "expected_unit_count": len(expected_units),
+        "claim_count": len(claims),
+        "citation_count": len(citations),
+        "matched_citation_count": matched_citation_count,
+        "covered_expected_unit_count": covered_unit_count,
+        "citation_precision": citation_precision,
+        "citation_recall": citation_recall,
+        "expected_citation_hit": bool(matched_citation_count)
+        if matched_citation_count is not None
+        else None,
+        "unsupported_claim_count": unsupported_claim_count,
+    }
+
+
+def _expected_citation_units(
+    *,
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+    expected_ranges: list[tuple[float, float]],
+) -> list[tuple[str, Any]]:
+    units: list[tuple[str, Any]] = []
+    for segment_id in sorted(set(expected_segment_ids)):
+        units.append(("segment", segment_id))
+    for window_id in sorted(set(expected_window_ids)):
+        units.append(("window", window_id))
+    for index, expected_range in enumerate(expected_ranges):
+        units.append(("time", (index, expected_range)))
+    return units
+
+
+def _expected_unit_covered(unit: tuple[str, Any], citations: list[dict[str, Any]]) -> bool:
+    unit_type, value = unit
+    for citation in citations:
+        if unit_type == "segment" and value in _citation_segment_ids(citation):
+            return True
+        if unit_type == "window" and value in _citation_window_ids(citation):
+            return True
+        if unit_type == "time" and _citation_matches_time(citation, [value[1]]):
+            return True
+    return False
+
+
+def _citation_matches_expected(
+    citation: dict[str, Any],
+    *,
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+    expected_ranges: list[tuple[float, float]],
+) -> bool:
+    if expected_segment_ids and set(expected_segment_ids).intersection(
+        _citation_segment_ids(citation)
+    ):
+        return True
+    if expected_window_ids and set(expected_window_ids).intersection(_citation_window_ids(citation)):
+        return True
+    return bool(expected_ranges and _citation_matches_time(citation, expected_ranges))
+
+
+def _citation_segment_ids(citation: dict[str, Any]) -> set[str]:
+    values: list[Any] = [
+        citation.get("segment_id"),
+        citation.get("target_segment_id"),
+        citation.get("sample_id"),
+    ]
+    for source in _list_of_dicts(citation.get("retrieval_sources")):
+        values.extend(
+            [
+                source.get("segment_id"),
+                source.get("target_segment_id"),
+                source.get("sample_id"),
+            ]
+        )
+        values.extend(_string_list(source.get("source_segment_ids")))
+    return set(_string_list(values))
+
+
+def _citation_window_ids(citation: dict[str, Any]) -> set[str]:
+    values: list[Any] = [citation.get("window_id")]
+    for source in _list_of_dicts(citation.get("retrieval_sources")):
+        values.append(source.get("window_id"))
+    return set(_string_list(values))
+
+
+def _citation_matches_time(
+    citation: dict[str, Any],
+    expected_ranges: list[tuple[float, float]],
+) -> bool:
+    start = _optional_float(citation.get("start_time"))
+    end = _optional_float(citation.get("end_time"))
+    timestamp = _first_float(citation.get("timestamp"), citation.get("timestamp_center"))
+    for expected_range in expected_ranges:
+        if start is not None and end is not None:
+            citation_range = (min(start, end), max(start, end))
+            if _ranges_overlap(citation_range, expected_range):
+                return True
+        if timestamp is not None and _point_to_range_distance(timestamp, expected_range) == 0:
+            return True
+    return False
+
+
+def _ranges_overlap(left: tuple[float, float], right: tuple[float, float]) -> bool:
+    return max(left[0], right[0]) <= min(left[1], right[1])
+
+
+def _unsupported_claim_count(
+    *,
+    claims: list[dict[str, Any]],
+    citations: list[dict[str, Any]],
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+    expected_ranges: list[tuple[float, float]],
+    expected_available: bool,
+) -> int:
+    citation_by_id = {
+        str(citation.get("citation_id")): citation
+        for citation in citations
+        if citation.get("citation_id") is not None
+    }
+    unsupported = 0
+    for claim in claims:
+        citation_ids = _string_list(claim.get("citation_ids"))
+        if not citation_ids:
+            unsupported += 1
+            continue
+        cited = [citation_by_id[citation_id] for citation_id in citation_ids if citation_id in citation_by_id]
+        if not cited:
+            unsupported += 1
+            continue
+        if expected_available and not any(
+            _citation_matches_expected(
+                citation,
+                expected_segment_ids=expected_segment_ids,
+                expected_window_ids=expected_window_ids,
+                expected_ranges=expected_ranges,
+            )
+            for citation in cited
+        ):
+            unsupported += 1
+    return unsupported
+
+
 def _top_candidate_matches(
     *,
     top_candidate: dict[str, Any] | None,
@@ -1490,6 +1729,37 @@ def _answer_count_ratio(rows: list[dict[str, Any]], key: str) -> float | None:
     )
 
 
+def _mean_grounding_metric(rows: list[dict[str, Any]], key: str) -> float | None:
+    values = []
+    for row in rows:
+        grounding = row.get("answer_grounding")
+        if isinstance(grounding, dict) and grounding.get(key) is not None:
+            values.append(grounding[key])
+    return _mean_or_none(values)
+
+
+def _grounding_bool_ratio(rows: list[dict[str, Any]], key: str) -> float | None:
+    values = []
+    for row in rows:
+        grounding = row.get("answer_grounding")
+        if isinstance(grounding, dict) and grounding.get(key) is not None:
+            values.append(bool(grounding[key]))
+    if not values:
+        return None
+    return round(sum(1.0 if value else 0.0 for value in values) / len(values), 4)
+
+
+def _grounding_positive_ratio(rows: list[dict[str, Any]], key: str) -> float | None:
+    values = []
+    for row in rows:
+        grounding = row.get("answer_grounding")
+        if isinstance(grounding, dict) and grounding.get(key) is not None:
+            values.append(float(grounding[key]))
+    if not values:
+        return None
+    return round(sum(1.0 if value > 0 else 0.0 for value in values) / len(values), 4)
+
+
 def _matrix_privacy_payload() -> dict[str, Any]:
     return {
         "public_outputs_are_sanitized": True,
@@ -1501,6 +1771,7 @@ def _matrix_privacy_payload() -> dict[str, Any]:
         "local_paths": "redacted",
         "raw_candidate_ids": "hashed",
         "raw_response_in_public_output": False,
+        "grounding_proxy_metrics": "deterministic_expected_hint_overlap_not_full_llm_quality",
     }
 
 
@@ -2059,15 +2330,18 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 "Matrix outputs are aggregate and public-safe: raw queries, answer text, "
                 "candidate evidence, transcript excerpts, local paths, and raw candidate IDs "
                 "are omitted.",
+                "Grounding proxy metrics use deterministic expected hint overlap for regression "
+                "tracking; they do not replace full LLM answer quality review.",
                 "",
-                "| suite | variant | queries | Hit@10s | MRR | frame-backed | linked-backed | grounded | citations | latency ms |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                "| suite | variant | queries | Hit@10s | MRR | frame-backed | linked-backed | grounded | cite P | cite R | expected hit | unsupported | latency ms |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for suite, variant in matrix_variants:
             lines.append(
                 "| {suite_id} | {variant_id} | {query_count} | {hit10} | {mrr} | "
-                "{frame} | {linked} | {grounded} | {citations} | {latency} |".format(
+                "{frame} | {linked} | {grounded} | {precision} | {recall} | {hit} | "
+                "{unsupported} | {latency} |".format(
                     suite_id=suite.get("suite_id"),
                     variant_id=variant.get("variant_id"),
                     query_count=variant.get("query_count") or 0,
@@ -2076,7 +2350,10 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                     frame=_format_metric(variant.get("frame_backed_ratio")),
                     linked=_format_metric(variant.get("linked_entity_backed_ratio")),
                     grounded=_format_metric(variant.get("grounded_answer_ratio")),
-                    citations=_format_metric(variant.get("citation_coverage_ratio")),
+                    precision=_format_metric(variant.get("answer_citation_precision")),
+                    recall=_format_metric(variant.get("answer_citation_recall")),
+                    hit=_format_metric(variant.get("expected_citation_hit_ratio")),
+                    unsupported=_format_metric(variant.get("mean_unsupported_claim_count")),
                     latency=_format_metric(
                         variant.get("mean_processing_time_ms")
                         or variant.get("mean_elapsed_time_ms")
@@ -2142,6 +2419,11 @@ def _write_metrics_summary_csv(path: Path, metrics: dict[str, Any]) -> None:
         "linked_entity_backed_ratio",
         "grounded_answer_ratio",
         "citation_coverage_ratio",
+        "answer_citation_precision",
+        "answer_citation_recall",
+        "expected_citation_hit_ratio",
+        "mean_unsupported_claim_count",
+        "unsupported_claim_ratio",
         "mean_processing_time_ms",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -2221,6 +2503,11 @@ def _metrics_summary_row(
         ),
         "grounded_answer_ratio": item.get("grounded_answer_ratio"),
         "citation_coverage_ratio": item.get("citation_coverage_ratio"),
+        "answer_citation_precision": item.get("answer_citation_precision"),
+        "answer_citation_recall": item.get("answer_citation_recall"),
+        "expected_citation_hit_ratio": item.get("expected_citation_hit_ratio"),
+        "mean_unsupported_claim_count": item.get("mean_unsupported_claim_count"),
+        "unsupported_claim_ratio": item.get("unsupported_claim_ratio"),
         "mean_processing_time_ms": item.get(
             "mean_processing_time_ms",
             item.get("mean_elapsed_time_ms"),
