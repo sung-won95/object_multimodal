@@ -68,7 +68,7 @@ python -m pytest
 
 The pytest configuration adds `src` to the test import path, so `PYTHONPATH=src` is not required for tests.
 
-Run the public synthetic Meilisearch semantic retrieval smoke:
+Run the public synthetic RAG readiness smoke for `query-project` and `ask-project`:
 
 ```bash
 docker compose up -d meilisearch
@@ -84,9 +84,17 @@ PYTHONPATH=src python -m oarag query-project \
   --query "slope information lower loss" \
   --limit 2 \
   --neighbor-count 0
+
+PYTHONPATH=src python -m oarag ask-project \
+  --project-dir tests/fixtures/public_lecture_semantic_project \
+  --index public_lecture_semantic_fixture \
+  --query "slope information lower loss" \
+  --limit 2 \
+  --neighbor-count 0
 ```
 
-The same path is covered by `python -m pytest tests/test_meili_semantic_smoke.py -q -rs`.
+The same readiness path is covered by
+`python -m pytest tests/test_rag_readiness_smoke.py -q -rs`.
 Set `OARAG_MEILI_URL` or `OARAG_MEILI_API_KEY` when using a non-default local server.
 If Meilisearch is not running, the pytest smoke reports a clear skip instead of a failure.
 For concurrent worktrees, keep the Compose project name unique; host port
