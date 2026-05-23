@@ -800,6 +800,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_HYBRID_SEMANTIC_RATIO,
         help="Semantic ratio for the semantic channel used by --hybrid-retrieval.",
     )
+    query_project.add_argument(
+        "--hybrid-query-vector-manifest",
+        type=Path,
+        help=(
+            "JSON manifest containing userProvided query vectors. Relative paths are "
+            "resolved from the project dir."
+        ),
+    )
+    query_project.add_argument(
+        "--hybrid-query-vector-name",
+        help="Query vector name in --hybrid-query-vector-manifest.",
+    )
+    query_project.add_argument(
+        "--hybrid-query-vector-embedder",
+        help="Expected Meilisearch userProvided embedder name for the query vector.",
+    )
+    query_project.add_argument(
+        "--hybrid-query-vector-dimensions",
+        type=int,
+        help="Expected query vector dimensions for mismatch checks.",
+    )
     query_project.add_argument("--output", type=Path, help="Optional JSON output path.")
     query_project.set_defaults(func=cmd_query_project)
 
@@ -1643,6 +1664,10 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         hybrid_retrieval=args.hybrid_retrieval,
         hybrid_embedder=args.hybrid_embedder,
         hybrid_semantic_ratio=args.hybrid_semantic_ratio,
+        hybrid_query_vector_embedder=args.hybrid_query_vector_embedder,
+        hybrid_query_vector_name=args.hybrid_query_vector_name,
+        hybrid_query_vector_dimensions=args.hybrid_query_vector_dimensions,
+        hybrid_query_vector_manifest_path=args.hybrid_query_vector_manifest,
     )
     if args.output is not None:
         output_path = args.output
