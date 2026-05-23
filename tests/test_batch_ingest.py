@@ -74,6 +74,21 @@ def test_uniform_frame_sampling_uses_segment_distribution_under_cap() -> None:
     assert timestamps == [5.0, 305.0, 605.0, 885.0]
 
 
+def test_uniform_frame_sampling_refills_after_segment_uniform_dedupe() -> None:
+    timestamps = select_frame_timestamps(
+        duration_sec=300.0,
+        frame_rate=1.0,
+        max_frames=4,
+        frame_sampling="uniform",
+        segments=[
+            {"start_time": 0.0, "end_time": 0.0},
+            {"start_time": 299.0, "end_time": 299.0},
+        ],
+    )
+
+    assert timestamps == [0.0, 100.0, 199.0, 299.0]
+
+
 def test_prefix_frame_sampling_keeps_existing_front_loaded_behavior() -> None:
     timestamps = select_frame_timestamps(
         duration_sec=300.0,

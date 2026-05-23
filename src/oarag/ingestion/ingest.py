@@ -476,11 +476,18 @@ def select_frame_timestamps(
         return _dedupe_sorted_timestamps(uniform_timestamps)
 
     selected = _spread_timestamps(segment_timestamps, min(max_frames, len(segment_timestamps)))
-    for timestamp in uniform_timestamps:
-        if len(selected) >= max_frames:
-            break
-        selected.append(timestamp)
-    return _dedupe_sorted_timestamps(selected)[:max_frames]
+    selected = _fill_unique_timestamps(
+        selected=selected,
+        candidates=uniform_timestamps,
+        limit=max_frames,
+    )
+    if len(selected) < max_frames:
+        selected = _fill_unique_timestamps(
+            selected=selected,
+            candidates=candidate_timestamps,
+            limit=max_frames,
+        )
+    return selected[:max_frames]
 
 
 def write_frames_manifest(
@@ -627,6 +634,27 @@ def _spread_timestamps(timestamps: list[float], limit: int) -> list[float]:
 
 def _dedupe_sorted_timestamps(timestamps: list[float]) -> list[float]:
     return sorted(dict.fromkeys(round(timestamp, 3) for timestamp in timestamps))
+
+
+def _fill_unique_timestamps(
+    *,
+    selected: list[float],
+    candidates: list[float],
+    limit: int,
+) -> list[float]:
+    filled = _dedupe_sorted_timestamps(selected)
+    if len(filled) >= limit:
+        return filled[:limit]
+    seen = set(filled)
+    for candidate in candidates:
+        rounded = round(candidate, 3)
+        if rounded in seen:
+            continue
+        filled.append(rounded)
+        seen.add(rounded)
+        if len(filled) >= limit:
+            break
+    return sorted(filled)
 
 
 def _segment_window(segment: dict[str, Any]) -> tuple[float, float] | None:
