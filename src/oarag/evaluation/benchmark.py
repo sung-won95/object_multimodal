@@ -11,7 +11,12 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from oarag.ingestion.eduvidqa import iter_records
-from oarag.evaluation.eval import evaluate_query, summarize
+from oarag.evaluation.eval import (
+    candidate_abs_errors as eval_candidate_abs_errors,
+    candidate_diagnostics,
+    evaluate_query,
+    summarize,
+)
 from oarag.core.io import write_json, write_jsonl
 from oarag.retrieval.evidence import (
     frame_id,
@@ -80,6 +85,7 @@ def run_benchmark(
     manifest_path: Path,
     output_dir: Path | None = None,
     repo_root: Path | None = None,
+    diagnostic_top_k: int | None = None,
 ) -> BenchmarkRun:
     manifest = _read_json(manifest_path)
     base_dir = manifest_path.expanduser().resolve().parent
@@ -92,6 +98,11 @@ def run_benchmark(
     )
     resolved_repo_root = (repo_root or base_dir).expanduser().resolve()
     deltas = [int(delta) for delta in manifest.get("deltas", DEFAULT_DELTAS)]
+    default_diagnostic_top_k = (
+        diagnostic_top_k
+        if diagnostic_top_k is not None
+        else _optional_int(manifest.get("diagnostic_top_k"))
+    )
 
     all_results: list[dict[str, Any]] = []
     suite_metrics: list[dict[str, Any]] = []
@@ -103,6 +114,10 @@ def run_benchmark(
                 suite=suite,
                 base_dir=base_dir,
                 deltas=deltas,
+                diagnostic_top_k=_suite_diagnostic_top_k(
+                    suite,
+                    default=default_diagnostic_top_k,
+                ),
             )
         elif suite_type == "local_project":
             metrics, results = run_local_project_suite(
@@ -243,6 +258,7 @@ def run_eduvidqa_suite(
     suite: dict[str, Any],
     base_dir: Path,
     deltas: list[int],
+    diagnostic_top_k: int = 0,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     input_path = _resolve_path(base_dir, suite["input"])
     index_uid = str(suite["index"])
@@ -263,24 +279,31 @@ def run_eduvidqa_suite(
         ]
         query_eval = evaluate_query(record, candidates, deltas=deltas)
         evals.append(query_eval)
-        candidate_errors = _candidate_abs_errors(record, candidates)
-        rows.append(
-            {
-                "suite_id": suite_id,
-                "suite_type": "eduvidqa",
-                "domain": domain,
-                "query_id": record.sample_id,
-                "index": index_uid,
-                "query_text": record.question,
-                "best_abs_error": query_eval.best_abs_error,
-                "hit_by_delta": {str(key): value for key, value in query_eval.hit_by_delta.items()},
-                "mrr": _reciprocal_rank(candidate_errors, deltas=max(deltas)),
-                "top_candidate": _candidate_result(candidates[0], candidate_errors[0])
-                if candidates
-                else None,
-                "processing_time_ms": response.get("processingTimeMs"),
-            }
-        )
+        candidate_errors = eval_candidate_abs_errors(record, candidates)
+        row = {
+            "suite_id": suite_id,
+            "suite_type": "eduvidqa",
+            "domain": domain,
+            "query_id": record.sample_id,
+            "index": index_uid,
+            "query_text": record.question,
+            "best_abs_error": query_eval.best_abs_error,
+            "hit_by_delta": {str(key): value for key, value in query_eval.hit_by_delta.items()},
+            "topk_recall": {str(key): value for key, value in query_eval.recall_by_k.items()},
+            "mrr": _reciprocal_rank(candidate_errors, deltas=max(deltas)),
+            "top_candidate": _candidate_result(candidates[0], candidate_errors[0])
+            if candidates
+            else None,
+            "processing_time_ms": response.get("processingTimeMs"),
+        }
+        if diagnostic_top_k > 0:
+            row["diagnostic_candidates"] = candidate_diagnostics(
+                record,
+                candidates,
+                top_k=diagnostic_top_k,
+                include_private_fields=bool(suite.get("include_private_fields", False)),
+            )
+        rows.append(row)
 
     metric = summarize(evals, deltas=deltas)
     metric.update(
@@ -290,6 +313,7 @@ def run_eduvidqa_suite(
             "domain": domain,
             "index": index_uid,
             "limit": limit,
+            "diagnostic_top_k": diagnostic_top_k,
             "mrr_at_max_delta": round(_mean(row["mrr"] for row in rows), 4) if rows else None,
             "top1_mean_abs_error": round(
                 _mean(
@@ -1185,15 +1209,7 @@ def _candidate_abs_errors(
     record: EduVidQARecord,
     candidates: list[SearchCandidate],
 ) -> list[float | None]:
-    errors: list[float | None] = []
-    for candidate in candidates:
-        if candidate.timestamp_center is None or not record.timestamp_points:
-            errors.append(None)
-            continue
-        errors.append(
-            min(abs(candidate.timestamp_center - gold) for gold in record.timestamp_points)
-        )
-    return errors
+    return eval_candidate_abs_errors(record, candidates)
 
 
 def _candidate_result(candidate: SearchCandidate, abs_error: float | None) -> dict[str, Any]:
@@ -1375,6 +1391,34 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                     ),
                 )
             )
+    diagnostic_suites = [
+        suite
+        for suite in metrics["suites"]
+        if any(suite.get(f"top{k}_recall") is not None for k in [1, 5, 10, 50])
+    ]
+    if diagnostic_suites:
+        lines.extend(
+            [
+                "",
+                "## Retrieval Diagnostics",
+                "",
+                "| suite | top1 | top5 | top10 | top50 | median err | p75 err | p90 err |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for suite in diagnostic_suites:
+            lines.append(
+                "| {suite_id} | {top1} | {top5} | {top10} | {top50} | {median} | {p75} | {p90} |".format(
+                    suite_id=suite.get("suite_id"),
+                    top1=_format_metric(suite.get("top1_recall")),
+                    top5=_format_metric(suite.get("top5_recall")),
+                    top10=_format_metric(suite.get("top10_recall")),
+                    top50=_format_metric(suite.get("top50_recall")),
+                    median=_format_metric(suite.get("median_abs_error")),
+                    p75=_format_metric(suite.get("p75_abs_error")),
+                    p90=_format_metric(suite.get("p90_abs_error")),
+                )
+            )
     lines.extend(["", "## Anti-Overfit View", ""])
     for domain, payload in metrics["anti_overfit"]["domains"].items():
         lines.append(
@@ -1447,6 +1491,14 @@ def _mean(values: Any) -> float:
     if not numbers:
         return 0.0
     return sum(numbers) / len(numbers)
+
+
+def _suite_diagnostic_top_k(suite: dict[str, Any], *, default: int | None) -> int:
+    value = suite.get("diagnostic_top_k", default)
+    parsed = _optional_int(value)
+    if parsed is None:
+        return 0
+    return max(parsed, 0)
 
 
 def _optional_float(value: Any) -> float | None:

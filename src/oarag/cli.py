@@ -9,7 +9,7 @@ from oarag.ingestion.alignment import align_segments_to_frames
 from oarag.evaluation.benchmark import run_benchmark
 from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_LANGUAGE, default_paths, env_default
 from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
-from oarag.evaluation.eval import evaluate_query, summarize
+from oarag.evaluation.eval import candidate_diagnostics, evaluate_query, summarize
 from oarag.vision.entity_links import link_entities
 from oarag.retrieval.evidence import build_evidence_response
 from oarag.graph.graph_ingest import ingest_project_graph
@@ -764,6 +764,17 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--record-limit", type=int)
     evaluate.add_argument("--deltas", default="5,10,15")
     evaluate.add_argument("--output", type=Path)
+    evaluate.add_argument(
+        "--diagnostic-top-k",
+        type=int,
+        default=0,
+        help="Write sanitized per-candidate retrieval diagnostics for the top K hits.",
+    )
+    evaluate.add_argument(
+        "--allow-private-output",
+        action="store_true",
+        help="Allow raw private fields such as questions and transcript excerpts in eval output.",
+    )
     evaluate.set_defaults(func=cmd_eval_eduvidqa)
 
     benchmark = subparsers.add_parser(
@@ -775,6 +786,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         help="Optional output directory. Defaults to reports/perf_runs/{run_id} near the manifest.",
+    )
+    benchmark.add_argument(
+        "--diagnostic-top-k",
+        type=int,
+        default=None,
+        help="Write sanitized per-candidate diagnostics for EduVidQA benchmark suites.",
     )
     benchmark.set_defaults(func=cmd_benchmark_retrieval)
 
@@ -1342,6 +1359,8 @@ def cmd_graph_query(args: argparse.Namespace) -> None:
 def cmd_eval_eduvidqa(args: argparse.Namespace) -> None:
     client = client_from_args(args)
     deltas = parse_deltas(args.deltas)
+    diagnostic_top_k = max(int(getattr(args, "diagnostic_top_k", 0) or 0), 0)
+    allow_private_output = bool(getattr(args, "allow_private_output", False))
     output_path = args.output
     if output_path is not None and not output_path.is_absolute():
         output_path = default_paths().repo_root / output_path
@@ -1360,17 +1379,27 @@ def cmd_eval_eduvidqa(args: argparse.Namespace) -> None:
             query_eval = evaluate_query(record, candidates, deltas=deltas)
             evals.append(query_eval)
             if output_handle:
+                row = {
+                    "sample_id": record.sample_id,
+                    "video_name": record.video_name,
+                    "timestamp_points": record.timestamp_points,
+                    "best_abs_error": query_eval.best_abs_error,
+                    "hit_by_delta": query_eval.hit_by_delta,
+                    "topk_recall": query_eval.recall_by_k,
+                }
+                if diagnostic_top_k > 0:
+                    row["diagnostic_candidates"] = candidate_diagnostics(
+                        record,
+                        candidates,
+                        top_k=diagnostic_top_k,
+                        include_private_fields=allow_private_output,
+                    )
+                if allow_private_output:
+                    row["question"] = record.question
+                    row["topk_candidates"] = [candidate.to_dict() for candidate in candidates]
                 output_handle.write(
                     json.dumps(
-                        {
-                            "sample_id": record.sample_id,
-                            "video_name": record.video_name,
-                            "question": record.question,
-                            "timestamp_points": record.timestamp_points,
-                            "best_abs_error": query_eval.best_abs_error,
-                            "hit_by_delta": query_eval.hit_by_delta,
-                            "topk_candidates": [candidate.to_dict() for candidate in candidates],
-                        },
+                        row,
                         ensure_ascii=False,
                     )
                     + "\n"
@@ -1391,6 +1420,7 @@ def cmd_benchmark_retrieval(args: argparse.Namespace) -> None:
         manifest_path=args.manifest,
         output_dir=args.output_dir,
         repo_root=default_paths().repo_root,
+        diagnostic_top_k=args.diagnostic_top_k,
     )
     print(
         json.dumps(
