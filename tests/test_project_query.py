@@ -231,6 +231,67 @@ def test_query_project_without_visual_artifacts_falls_back_to_transcript_and_fra
     assert "linked_entities=none" in bundle["summary"]["text"]
 
 
+def test_query_project_maps_window_hit_to_target_segment_bundle(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_1", 1, 0.0, 2.0, "Intro context", ["frame_000001"]),
+            _segment("seg_2", 2, 3.0, 5.0, "Target range grid", ["frame_000002"]),
+            _segment("seg_3", 3, 6.0, 8.0, "Next context", ["frame_000003"]),
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {"frame_id": "frame_000001", "timestamp": 1.0, "frame_path": "/tmp/f1.jpg"},
+            {"frame_id": "frame_000002", "timestamp": 4.0, "frame_path": "/tmp/f2.jpg"},
+            {"frame_id": "frame_000003", "timestamp": 7.0, "frame_path": "/tmp/f3.jpg"},
+        ],
+    )
+
+    response = query_project(
+        client=FakeClient(
+            hits=[
+                {
+                    "window_id": "window_seg_2_abc123",
+                    "target_segment_id": "seg_2",
+                    "sample_id": "seg_2",
+                    "video_id": "video",
+                    "start_time": 0.0,
+                    "end_time": 8.0,
+                    "timestamp_center": 4.0,
+                    "target_start_time": 3.0,
+                    "target_end_time": 5.0,
+                    "target_timestamp_center": 4.0,
+                    "source_segment_ids": ["seg_1", "seg_2", "seg_3"],
+                    "transcript_window_text": "Intro context Target range grid Next context",
+                    "semantic_source_fields": ["transcript_window_text"],
+                    "_rankingScore": 0.91,
+                }
+            ]
+        ),
+        index_uid="local_windows",
+        retrieval_index_kind="window",
+        project_dir=project_dir,
+        query="range grid",
+        neighbor_count=0,
+    )
+
+    assert response["index_kind"] == "window"
+    assert response["counts"]["window_search_hits"] == 1
+    assert response["counts"]["segment_search_hits"] == 0
+    assert response["retrieval_context"]["indexes"]["window"] == "local_windows"
+    assert response["retrieval_context"]["searches"]["window"]["hit_count"] == 1
+    bundle = response["bundles"][0]
+    assert bundle["candidate"]["source"] == "window"
+    assert bundle["candidate"]["segment_id"] == "seg_2"
+    assert bundle["candidate"]["window_id"] == "window_seg_2_abc123"
+    assert bundle["retrieval_sources"][0]["source"] == "window"
+    assert bundle["retrieval_sources"][0]["source_segment_ids"] == ["seg_1", "seg_2", "seg_3"]
+    assert bundle["evidence_window"]["target_segment"]["segment_id"] == "seg_2"
+
+
 def test_query_project_merges_visual_entity_hits_with_segment_targets(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     _write_jsonl(

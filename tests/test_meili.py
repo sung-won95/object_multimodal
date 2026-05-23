@@ -6,11 +6,16 @@ from oarag.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
     LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE,
+    LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     lecture_segment_settings,
     lecture_segment_settings_hash,
     lecture_segment_settings_profile_names,
     lecture_segment_settings_snapshot,
+    lecture_window_settings,
+    lecture_window_settings_hash,
+    lecture_window_settings_profile_names,
+    lecture_window_settings_snapshot,
     visual_entity_settings,
     visual_entity_settings_hash,
     visual_entity_settings_profile_names,
@@ -24,6 +29,7 @@ from oarag.schemas import (
 
 EXPECTED_DEFAULT_SETTINGS_HASH = "f0a9515744b51f74ba52310b07940174f99f040f7f7a6935e3678a0445e95917"
 EXPECTED_VISUAL_ENTITY_SETTINGS_HASH = "5cb877a0006ff93448b2c06680fc566f41bd3d54cd527b6b2282c0e1b158ccdc"
+EXPECTED_WINDOW_SETTINGS_HASH = "c42ed8c97d77620012254b45e2d6b3961f12e2211b0f8ac78759f844f07503e8"
 
 
 def test_lecture_segment_settings_payload_is_domain_agnostic_and_multilingual_safe() -> None:
@@ -163,3 +169,46 @@ def test_visual_entity_settings_hash_is_a_regression_guard() -> None:
 def test_unknown_visual_entity_settings_profile_is_rejected() -> None:
     with pytest.raises(ValueError, match="Unknown visual entity settings profile"):
         visual_entity_settings("visual_entities_experimental")
+
+
+def test_lecture_window_settings_payload_indexes_window_context() -> None:
+    settings = lecture_window_settings()
+
+    assert settings["searchableAttributes"] == [
+        LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+        "transcript_window_text",
+        "transcript_text",
+        "visual_entities.text",
+        "visual_entities.visual_description",
+        "video_name",
+        "video_id",
+        "sample_id",
+    ]
+    assert "window_id" in settings["filterableAttributes"]
+    assert "target_segment_id" in settings["filterableAttributes"]
+    assert "source_segment_ids" in settings["filterableAttributes"]
+    assert "evidence_window" in settings["displayedAttributes"]
+    assert "source_video_path" not in settings["displayedAttributes"]
+    assert settings["rankingRules"] == [
+        "words",
+        "typo",
+        "proximity",
+        "attribute",
+        "sort",
+        "exactness",
+    ]
+
+
+def test_lecture_window_settings_hash_is_a_regression_guard() -> None:
+    snapshot = lecture_window_settings_snapshot()
+
+    assert lecture_window_settings_hash() == EXPECTED_WINDOW_SETTINGS_HASH
+    assert snapshot["profile"] == LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE
+    assert snapshot["hash"] == EXPECTED_WINDOW_SETTINGS_HASH
+    assert snapshot["settings"] == lecture_window_settings()
+    assert LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE in lecture_window_settings_profile_names()
+
+
+def test_unknown_lecture_window_settings_profile_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Unknown lecture window settings profile"):
+        lecture_window_settings("lecture_windows_experimental")
