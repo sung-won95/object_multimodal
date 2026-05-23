@@ -1,0 +1,38 @@
+{
+  "schema_version": "paper-artifact-registry-v1",
+  "run_id": "<run_id>",
+  "commit": {
+    "sha": "<commit_sha>"
+  },
+  "artifacts": {
+    "experiment_manifest": "experiment_manifest.json",
+    "metrics": "metrics.json",
+    "metrics_summary": "metrics_summary.csv",
+    "query_results": "query_results.jsonl",
+    "summary": "summary.md",
+    "paper_report_dir": "paper_report",
+    "paper_table_csv": "paper_table.csv",
+    "paper_table_markdown": "paper_table.md",
+    "reproducibility_json": "reproducibility.json",
+    "reproducibility_markdown": "reproducibility.md",
+    "quality_gate_result": "quality_gate_result.json",
+    "readiness_audit": "paper_readiness_audit.json",
+    "claim_matrix": "claim_evidence_matrix.json",
+    "robustness": "robustness.json"
+  },
+  "status": {
+    "gate": "<passed|failed|skipped|unknown>",
+    "readiness": "<ready|gaps_found|unknown>",
+    "claims": "<supported|needs_evidence|blocked|unknown>",
+    "robustness": "<passed|failed|missing|unknown>"
+  },
+  "privacy": {
+    "payload": "run_id_commit_artifact_filenames_and_statuses_only",
+    "raw_queries": "excluded",
+    "answer_text": "excluded",
+    "transcript_content": "excluded",
+    "candidate_evidence_text": "excluded",
+    "local_paths": "excluded",
+    "private_eval_values": "excluded"
+  }
+}
