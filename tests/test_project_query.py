@@ -594,6 +594,67 @@ def test_query_project_cli_prints_summary_and_writes_output(tmp_path: Path, monk
     assert written["bundles"][0]["candidate"]["segment_id"] == "seg_1"
 
 
+def test_ask_project_cli_format_json_returns_answer_schema(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [_segment("seg_1", 1, 1.0, 3.0, "Shown on slide", ["frame_000001"])],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000001", "timestamp": 1.0, "frame_path": "/tmp/f1.jpg"}],
+    )
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "ask-project",
+            "--index",
+            "local_segments",
+            "--project-dir",
+            str(project_dir),
+            "--query",
+            "shown slide",
+            "--format",
+            "json",
+            "--output",
+            "ask-result.json",
+        ]
+    )
+    monkeypatch.setattr(
+        "oarag.cli.client_from_args",
+        lambda _: FakeClient(
+            hits=[
+                {
+                    "segment_id": "seg_1",
+                    "sample_id": "seg_1",
+                    "video_id": "video",
+                    "start_time": 1.0,
+                    "end_time": 3.0,
+                    "timestamp_center": 2.0,
+                    "transcript_text": "Shown on slide",
+                    "_rankingScore": 0.8,
+                }
+            ]
+        ),
+    )
+
+    args.func(args)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["answer_type"] == "grounded_answer"
+    assert payload["answer"]["answer_type"] == "grounded_answer"
+    assert payload["answer"]["claims"][0]["citation_ids"] == ["citation_1"]
+    assert payload["answer"]["citations"][0]["frame_refs"] == [
+        {"frame_id": "frame_000001", "timestamp": 1.0, "frame_path": "/tmp/f1.jpg"}
+    ]
+    written = json.loads((project_dir / "ask-result.json").read_text(encoding="utf-8"))
+    assert written["answer"]["schema_version"] == "grounded-answer-v1"
+
+
 def _segment(
     segment_id: str,
     sample_index: int,
