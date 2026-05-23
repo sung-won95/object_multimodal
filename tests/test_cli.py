@@ -589,6 +589,7 @@ def test_query_project_cli_defaults() -> None:
     assert args.window_after_seconds is None
     assert args.rerank is False
     assert args.rerank_time_hint is None
+    assert args.rerank_backend == "deterministic"
     assert args.hybrid_retrieval is False
     assert args.hybrid_embedder == "default"
     assert args.hybrid_semantic_ratio == 1.0
@@ -608,11 +609,14 @@ def test_query_project_cli_accepts_rerank_options() -> None:
             "--rerank",
             "--rerank-time-hint",
             "10-14s",
+            "--rerank-backend",
+            "stub",
         ]
     )
 
     assert args.rerank is True
     assert args.rerank_time_hint == "10-14s"
+    assert args.rerank_backend == "stub"
 
 
 def test_query_project_cli_accepts_visual_index() -> None:
@@ -697,6 +701,7 @@ def test_ask_project_cli_defaults() -> None:
     assert args.project_dir is None
     assert args.query == "bet size"
     assert args.limit == 5
+    assert args.rerank_backend == "deterministic"
     assert args.hybrid_retrieval is False
     assert args.hybrid_embedder == "default"
     assert args.hybrid_semantic_ratio == 1.0

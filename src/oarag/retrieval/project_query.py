@@ -21,7 +21,7 @@ from oarag.retrieval.evidence import (
 )
 from oarag.integrations.meili import MeiliClient
 from oarag.retrieval.project_index import segment_artifact_path
-from oarag.retrieval.rerank import rerank_bundles, rerank_metadata
+from oarag.retrieval.rerank import DEFAULT_RERANK_BACKEND, rerank_bundles, rerank_metadata
 from oarag.core.schemas import EntityLink, SearchCandidate, VisualEntity
 
 
@@ -72,6 +72,7 @@ def query_project(
     window_after_seconds: float | None = None,
     rerank: bool = False,
     rerank_time_hint: str | None = None,
+    rerank_backend: str = DEFAULT_RERANK_BACKEND,
     hybrid_retrieval: bool = False,
     hybrid_embedder: str | None = DEFAULT_HYBRID_EMBEDDER,
     hybrid_semantic_ratio: float = DEFAULT_HYBRID_SEMANTIC_RATIO,
@@ -408,12 +409,18 @@ def query_project(
         bundled_entity_total += len(window_visual_entities)
         bundled_link_total += len(linked_entities)
 
-    rerank_context = rerank_metadata(enabled=False, query=query, timestamp_hint=rerank_time_hint)
+    rerank_context = rerank_metadata(
+        enabled=False,
+        query=query,
+        timestamp_hint=rerank_time_hint,
+        backend=rerank_backend,
+    )
     if rerank:
         bundles, rerank_context = rerank_bundles(
             bundles=bundles,
             query=query,
             timestamp_hint=rerank_time_hint,
+            backend=rerank_backend,
         )
         summary_lines = _refresh_bundle_summaries(bundles)
 

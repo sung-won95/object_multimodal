@@ -877,6 +877,102 @@ def test_query_project_rerank_reorders_bundles_and_records_breakdown(tmp_path: P
     assert "rerank_score=" in response["summary_lines"][0]
 
 
+def test_query_project_rerank_backend_option_records_private_safe_breakdown(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_1", 1, 1.0, 3.0, "Introductory aside", []),
+            _segment("seg_2", 2, 5.0, 9.0, "Plain transcript context", ["frame_000006"]),
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000006", "timestamp": 6.0, "frame_path": "/tmp/f6.jpg"}],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "entity_grid",
+                "project_id": "project",
+                "frame_id": "frame_000006",
+                "timestamp": 6.0,
+                "frame_path": "/tmp/f6.jpg",
+                "bbox": None,
+                "text": "range grid diagram",
+                "entity_type": "ocr_text",
+                "confidence": 0.9,
+                "source": "test",
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "entity_links.jsonl",
+        [
+            {
+                "link_id": "link_seg_2_entity_grid",
+                "project_id": "project",
+                "segment_id": "seg_2",
+                "entity_id": "entity_grid",
+                "frame_id": "frame_000006",
+                "link_type": "time_overlap+lexical_match",
+                "score": 1.0,
+                "evidence": ["time_overlap", "lexical_match"],
+                "time_overlap": True,
+                "lexical_match": ["range", "grid", "diagram"],
+                "mention_candidate": [],
+            }
+        ],
+    )
+
+    response = query_project(
+        client=FakeClient(
+            hits=[
+                {
+                    "segment_id": "seg_1",
+                    "sample_id": "seg_1",
+                    "video_id": "video",
+                    "start_time": 1.0,
+                    "end_time": 3.0,
+                    "timestamp_center": 2.0,
+                    "transcript_text": "Introductory aside",
+                    "_rankingScore": 0.95,
+                },
+                {
+                    "segment_id": "seg_2",
+                    "sample_id": "seg_2",
+                    "video_id": "video",
+                    "start_time": 5.0,
+                    "end_time": 9.0,
+                    "timestamp_center": 7.0,
+                    "transcript_text": "Plain transcript context",
+                    "_rankingScore": 0.2,
+                },
+            ]
+        ),
+        index_uid="local_segments",
+        project_dir=project_dir,
+        query="range grid diagram",
+        neighbor_count=0,
+        rerank=True,
+        rerank_backend="stub",
+    )
+
+    assert response["retrieval_context"]["rerank"]["backend"] == "stub"
+    assert response["retrieval_context"]["rerank"]["external_transport"] == "none"
+    assert response["bundles"][0]["candidate"]["segment_id"] == "seg_2"
+    top = response["bundles"][0]["rerank"]
+    assert top["backend"] == "stub"
+    assert top["breakdown"]["score"] == top["score"]
+    assert top["breakdown"]["original_rank"] == top["original_rank"]
+    assert "linked_entities.entity.text" in top["used_fields"]
+    assert "visual_entities.text" in top["used_fields"]
+    assert "rerank_score=" in response["summary_lines"][0]
+
+
 def test_query_project_cli_prints_summary_and_writes_output(tmp_path: Path, monkeypatch, capsys) -> None:
     project_dir = tmp_path / "project"
     _write_jsonl(
