@@ -6,7 +6,36 @@ committed reports, GitHub issues, and PR descriptions.
 
 ## Command Checklist
 
-Run the steps in this order:
+Default path: run the full bundle with one command.
+
+```bash
+PYTHONPATH=src python3 -m oarag run-paper-bundle \
+  --manifest <benchmark_manifest.json> \
+  --output-dir <bundle_output_dir> \
+  --gate-config <quality_gate.json> \
+  --baseline-variant-id <baseline_variant_id>
+```
+
+Use `--seed`, `--sample-count`, and `--confidence-level` when the paper run needs
+explicit bootstrap settings. Use `--no-fail-on-gate` only when you need the bundle
+artifacts for inspection after a failing quality gate.
+
+The bundle runs these stages in order and records the stage status in
+`paper_bundle_result.json`:
+
+1. `run-paper-experiment`
+2. `paper-metric-intervals`
+3. `audit-paper-readiness`
+4. `build-paper-claims`
+5. `build-paper-registry`
+
+If a stage fails, the command names the failed stage and leaves any already generated
+private-safe artifacts in the output directory.
+
+## Advanced / Fallback Manual Flow
+
+Use the manual flow only for debugging, partial reruns, or comparing an individual
+artifact builder.
 
 1. `run-paper-experiment`
 
@@ -17,7 +46,18 @@ Run the steps in this order:
      --gate-config <quality_gate.json>
    ```
 
-2. `audit-paper-readiness`
+2. `paper-metric-intervals`
+
+   ```bash
+   PYTHONPATH=src python3 -m oarag paper-metric-intervals \
+     --query-results <run_output_dir>/query_results.jsonl \
+     --metrics <run_output_dir>/metrics.json \
+     --report <run_output_dir>/paper_report/paper_table.md \
+     --output-dir <intervals_output_dir> \
+     --baseline-variant-id <baseline_variant_id>
+   ```
+
+3. `audit-paper-readiness`
 
    ```bash
    PYTHONPATH=src python3 -m oarag audit-paper-readiness \
@@ -25,7 +65,7 @@ Run the steps in this order:
      --output-dir <readiness_output_dir>
    ```
 
-3. `build-paper-claims`
+4. `build-paper-claims`
 
    ```bash
    PYTHONPATH=src python3 -m oarag build-paper-claims \
@@ -33,35 +73,38 @@ Run the steps in this order:
      --reproducibility <run_output_dir>/paper_report/reproducibility.json \
      --quality-gate-result <run_output_dir>/quality_gate_result.json \
      --readiness-audit <readiness_output_dir>/paper_readiness_audit.json \
+     --robustness <intervals_output_dir>/paper_metric_intervals.json \
      --output-dir <claims_output_dir>
    ```
 
-4. `robustness`
-
-   Run the project-specific robustness check after the claim matrix step and write a
-   private-safe summary artifact such as `robustness.json`. The summary should expose only
-   schema metadata and coarse pass/fail status.
-
-5. Optional registry
+5. `build-paper-registry`
 
    ```bash
    PYTHONPATH=src python3 -m oarag build-paper-registry \
      --experiment-manifest <run_output_dir>/experiment_manifest.json \
      --readiness-audit <readiness_output_dir>/paper_readiness_audit.json \
      --claim-matrix <claims_output_dir>/claim_evidence_matrix.json \
-     --robustness <robustness.json> \
+     --robustness <intervals_output_dir>/paper_metric_intervals.json \
      --output <registry_output_dir>/paper_artifact_registry.json
    ```
 
 ## Artifact Contract
 
 - `metrics.json`: aggregate schema and metric fields only.
+- `paper_metric_intervals.json`: aggregate bootstrap intervals, paired delta status,
+  caveats, and coarse robustness status only.
 - `paper_report/reproducibility.json`: commit, sanitized command tokens, dataset descriptors,
   and artifact filenames only.
 - `quality_gate_result.json`: gate status, threshold failure codes, and aggregate schema metadata.
 - `paper_readiness_audit.json`: checklist statuses and gap codes only.
 - `claim_evidence_matrix.json`: claim status, evidence artifact filenames, and field names only.
 - `paper_artifact_registry.json`: run id, commit sha, artifact filenames, and coarse statuses only.
+- `paper_bundle_result.json`: bundle stage statuses, artifact filenames, registry statuses,
+  and failure stage metadata only.
+
+The artifact registry links the quality gate, readiness audit, claim matrix, and robustness
+interval status by filename and coarse status. Treat small-sample, missing-baseline, or
+missing-paired-delta caveats as `needs_evidence`, not as a passing robustness claim.
 
 ## Review Gate
 

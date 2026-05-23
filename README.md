@@ -156,6 +156,22 @@ PYTHONPATH=src python -m oarag check-retrieval-gate \
 
 The gate thresholds are only a public fixture regression guard, not paper claim thresholds. The payload is aggregate-only and excludes raw query, transcript, and evidence text.
 
+For paper experiment quality artifacts, prefer the end-to-end bundle command:
+
+```bash
+PYTHONPATH=src python -m oarag run-paper-bundle \
+  --manifest benchmarks/retrieval_benchmark.json \
+  --output-dir reports/paper/run_001 \
+  --gate-config tests/fixtures/public_retrieval_ablation_project/retrieval_quality_gate.json \
+  --baseline-variant-id segment_lexical
+```
+
+The bundle writes the experiment manifest, quality gate result, metric intervals,
+paper readiness audit, claim matrix, artifact registry, and bundle result in one
+private-safe flow. The registry connects gate, readiness, claims, and robustness
+statuses by artifact filename. See `reports/paper/private_safe_runbook.md` for the
+manual fallback flow.
+
 ## Private-Safe Lecture Smoke
 
 Run a manifest-driven smoke suite for private/local lectures:
