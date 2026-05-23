@@ -1,0 +1,9 @@
+{
+  "project_id": "public_userprovided_vector_fixture",
+  "description": "Synthetic public fixture for Meilisearch userProvided vector retrieval smoke tests.",
+  "artifacts": {
+    "segments": "segments/lecture_segments.jsonl",
+    "lecture_windows": "segments/lecture_windows.jsonl",
+    "query_vectors": "manifests/query_vectors.json"
+  }
+}

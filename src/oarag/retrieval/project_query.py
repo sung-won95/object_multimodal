@@ -24,7 +24,7 @@ from oarag.retrieval.evidence import (
     segment_window,
     select_window_segments,
 )
-from oarag.integrations.meili import MeiliClient
+from oarag.integrations.meili import MeiliClient, normalize_query_vector
 from oarag.retrieval.project_index import segment_artifact_path
 from oarag.retrieval.rerank import DEFAULT_RERANK_BACKEND, rerank_bundles, rerank_metadata
 from oarag.core.schemas import EntityLink, SearchCandidate, VisualEntity
@@ -37,6 +37,7 @@ LEXICAL_RETRIEVAL_MODE = "lexical"
 SEMANTIC_RETRIEVAL_MODE = "semantic"
 DEFAULT_HYBRID_EMBEDDER = "default"
 DEFAULT_HYBRID_SEMANTIC_RATIO = 1.0
+DEFAULT_QUERY_VECTOR_MANIFEST_RELATIVE_PATH = Path("manifests") / "query_vectors.json"
 SOURCE_PRIORITY = {
     SEGMENT_HIT_SOURCE: 0,
     WINDOW_HIT_SOURCE: 0,
@@ -82,6 +83,11 @@ def query_project(
     hybrid_retrieval: bool = False,
     hybrid_embedder: str | None = DEFAULT_HYBRID_EMBEDDER,
     hybrid_semantic_ratio: float = DEFAULT_HYBRID_SEMANTIC_RATIO,
+    hybrid_query_vector: list[float] | None = None,
+    hybrid_query_vector_embedder: str | None = None,
+    hybrid_query_vector_name: str | None = None,
+    hybrid_query_vector_dimensions: int | None = None,
+    hybrid_query_vector_manifest_path: Path | None = None,
 ) -> dict[str, Any]:
     if retrieval_index_kind not in PRIMARY_INDEX_KINDS:
         valid = ", ".join(sorted(PRIMARY_INDEX_KINDS))
@@ -137,10 +143,21 @@ def query_project(
 
     query_expansion = domain_lexicon.expand_query_result(query)
     search_queries = _search_queries_for_expansion(query=query, query_expansion=query_expansion)
+    hybrid_query_vector_spec = _resolve_hybrid_query_vector(
+        project_dir=resolved_project_dir,
+        hybrid_retrieval=hybrid_retrieval,
+        hybrid_embedder=hybrid_embedder,
+        query_vector=hybrid_query_vector,
+        query_vector_embedder=hybrid_query_vector_embedder,
+        query_vector_name=hybrid_query_vector_name,
+        query_vector_dimensions=hybrid_query_vector_dimensions,
+        query_vector_manifest_path=hybrid_query_vector_manifest_path,
+    )
     search_channels = _search_channels_for_retrieval(
         hybrid_retrieval=hybrid_retrieval,
         hybrid_embedder=hybrid_embedder,
         hybrid_semantic_ratio=hybrid_semantic_ratio,
+        hybrid_query_vector_spec=hybrid_query_vector_spec,
     )
     search_response = _search_with_expanded_queries(
         client=client,
@@ -852,6 +869,8 @@ def _record_match_summaries(
         if include_match_details:
             summary["channel_index"] = match.get("channel_index")
             summary["first_seen"] = match.get("first_seen")
+            if isinstance(match.get("query_vector"), dict):
+                summary["query_vector"] = dict(match["query_vector"])
         summaries.append(summary)
     return summaries
 
@@ -897,12 +916,16 @@ def _hybrid_retrieval_metadata(
             {
                 "embedder": hybrid.get("embedder"),
                 "semantic_ratio": hybrid.get("semanticRatio"),
+                "query_vector": {"used": False},
                 "fusion": {
                     "method": "reciprocal_rank_fusion",
                     "rank_constant": HYBRID_RRF_RANK_CONSTANT,
                 },
             }
         )
+        query_vector_metadata = semantic_channel.get("query_vector")
+        if isinstance(query_vector_metadata, dict):
+            metadata["query_vector"] = dict(query_vector_metadata)
     return metadata
 
 
@@ -967,6 +990,7 @@ def _search_channels_for_retrieval(
     hybrid_retrieval: bool,
     hybrid_embedder: str | None,
     hybrid_semantic_ratio: float,
+    hybrid_query_vector_spec: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     channels: list[dict[str, Any]] = [
         {
@@ -986,16 +1010,223 @@ def _search_channels_for_retrieval(
         raise ValueError("hybrid_semantic_ratio must be > 0.0 and <= 1.0") from exc
     if not 0.0 < semantic_ratio <= 1.0:
         raise ValueError("hybrid_semantic_ratio must be > 0.0 and <= 1.0")
-    channels.append(
-        {
-            "mode": SEMANTIC_RETRIEVAL_MODE,
-            "hybrid": {
-                "embedder": embedder,
-                "semanticRatio": semantic_ratio,
-            },
-        }
-    )
+    semantic_channel = {
+        "mode": SEMANTIC_RETRIEVAL_MODE,
+        "hybrid": {
+            "embedder": embedder,
+            "semanticRatio": semantic_ratio,
+        },
+    }
+    if hybrid_query_vector_spec is not None:
+        semantic_channel["vector"] = hybrid_query_vector_spec["vector"]
+        semantic_channel["query_vector"] = hybrid_query_vector_spec["metadata"]
+    channels.append(semantic_channel)
     return channels
+
+
+def _resolve_hybrid_query_vector(
+    *,
+    project_dir: Path,
+    hybrid_retrieval: bool,
+    hybrid_embedder: str | None,
+    query_vector: list[float] | None,
+    query_vector_embedder: str | None,
+    query_vector_name: str | None,
+    query_vector_dimensions: int | None,
+    query_vector_manifest_path: Path | None,
+) -> dict[str, Any] | None:
+    has_vector_options = any(
+        (
+            query_vector is not None,
+            _non_empty_string(query_vector_embedder) is not None,
+            _non_empty_string(query_vector_name) is not None,
+            query_vector_dimensions is not None,
+            query_vector_manifest_path is not None,
+        )
+    )
+    if not has_vector_options:
+        return None
+    if not hybrid_retrieval:
+        raise ValueError("hybrid query vector options require hybrid_retrieval=True")
+
+    embedder = str(hybrid_embedder or "").strip()
+    if not embedder:
+        raise ValueError("hybrid_embedder is required when hybrid_retrieval is enabled")
+
+    vector_source = "argument"
+    vector_name = _non_empty_string(query_vector_name)
+    vector_embedder = _non_empty_string(query_vector_embedder) or embedder
+    manifest_dimensions: int | None = None
+    raw_vector: Any = query_vector
+
+    if query_vector_manifest_path is not None or vector_name is not None:
+        if query_vector is not None:
+            raise ValueError(
+                "Provide only one of hybrid_query_vector or "
+                "hybrid_query_vector_manifest_path/name"
+            )
+        manifest_path = _resolve_query_vector_manifest_path(
+            project_dir=project_dir,
+            path=query_vector_manifest_path,
+        )
+        manifest_spec = _load_query_vector_manifest(manifest_path, vector_name=vector_name)
+        raw_vector = manifest_spec["vector"]
+        vector_name = manifest_spec["name"]
+        vector_embedder = _non_empty_string(query_vector_embedder) or manifest_spec["embedder"]
+        manifest_dimensions = manifest_spec.get("dimensions")
+        vector_source = "manifest"
+
+    if raw_vector is None:
+        requested = vector_embedder or embedder
+        raise ValueError(
+            f"query vector is required for userProvided embedder '{requested}'; "
+            "provide hybrid_query_vector or a hybrid_query_vector_manifest_path/name"
+        )
+
+    if vector_embedder != embedder:
+        raise ValueError(
+            "query vector embedder mismatch: "
+            f"hybrid_embedder is '{embedder}' but query vector is for '{vector_embedder}'"
+        )
+
+    expected_dimensions = (
+        query_vector_dimensions
+        if query_vector_dimensions is not None
+        else manifest_dimensions
+    )
+    if (
+        query_vector_dimensions is not None
+        and manifest_dimensions is not None
+        and query_vector_dimensions != manifest_dimensions
+    ):
+        raise ValueError(
+            f"query vector dimension mismatch for embedder '{vector_embedder}': "
+            f"manifest declares {manifest_dimensions}, expected {query_vector_dimensions}"
+        )
+
+    vector = normalize_query_vector(
+        raw_vector,
+        dimensions=expected_dimensions,
+        field_name=f"query vector for embedder '{vector_embedder}'",
+    )
+    metadata = {
+        "used": True,
+        "embedder": vector_embedder,
+        "dimensions": len(vector),
+        "source": vector_source,
+    }
+    if vector_name is not None:
+        metadata["name"] = vector_name
+    return {
+        "vector": vector,
+        "metadata": metadata,
+    }
+
+
+def _resolve_query_vector_manifest_path(*, project_dir: Path, path: Path | None) -> Path:
+    if path is None:
+        return (project_dir / DEFAULT_QUERY_VECTOR_MANIFEST_RELATIVE_PATH).resolve()
+    candidate = path.expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (project_dir / candidate).resolve()
+
+
+def _load_query_vector_manifest(path: Path, *, vector_name: str | None) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"query vector manifest not found: {path}")
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Failed to parse query vector manifest JSON at {path}: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise ValueError("query vector manifest must be a JSON object")
+
+    queries = loaded.get("queries")
+    if not isinstance(queries, dict) or not queries:
+        raise ValueError("query vector manifest must include a non-empty 'queries' object")
+    selected_name = _select_query_vector_name(queries, vector_name=vector_name)
+    entry = queries.get(selected_name)
+    if not isinstance(entry, dict):
+        raise ValueError(f"query vector manifest entry '{selected_name}' must be a JSON object")
+
+    vector = entry.get("vector")
+    embedder = _non_empty_string(entry.get("embedder")) or _non_empty_string(
+        loaded.get("embedder")
+    )
+    if embedder is None:
+        raise ValueError(f"query vector manifest entry '{selected_name}' is missing embedder")
+
+    dimensions = _query_vector_manifest_dimensions(
+        manifest=loaded,
+        entry=entry,
+        embedder=embedder,
+    )
+    return {
+        "name": selected_name,
+        "embedder": embedder,
+        "dimensions": dimensions,
+        "vector": vector,
+    }
+
+
+def _select_query_vector_name(queries: dict[str, Any], *, vector_name: str | None) -> str:
+    if vector_name is not None:
+        if vector_name not in queries:
+            available = ", ".join(sorted(str(name) for name in queries))
+            raise ValueError(
+                f"query vector manifest does not contain '{vector_name}'. "
+                f"Available query vectors: {available}"
+            )
+        return vector_name
+    if len(queries) == 1:
+        return str(next(iter(queries)))
+    available = ", ".join(sorted(str(name) for name in queries))
+    raise ValueError(
+        "hybrid_query_vector_name is required when the query vector manifest contains "
+        f"multiple vectors. Available query vectors: {available}"
+    )
+
+
+def _query_vector_manifest_dimensions(
+    *,
+    manifest: dict[str, Any],
+    entry: dict[str, Any],
+    embedder: str,
+) -> int | None:
+    dimensions = entry.get("dimensions")
+    embedders = manifest.get("embedders")
+    if embedders is None:
+        return dimensions if isinstance(dimensions, int) else None
+    if not isinstance(embedders, dict):
+        raise ValueError(
+            "query vector manifest embedder settings problem: 'embedders' must be an object"
+        )
+    embedder_settings = embedders.get(embedder)
+    if not isinstance(embedder_settings, dict):
+        raise ValueError(
+            "query vector manifest embedder settings problem: "
+            f"missing embedder '{embedder}'"
+        )
+    if embedder_settings.get("source") != "userProvided":
+        raise ValueError(
+            "query vector manifest embedder settings problem: "
+            f"embedder '{embedder}' must use source 'userProvided'"
+        )
+    embedder_dimensions = embedder_settings.get("dimensions")
+    if dimensions is not None and dimensions != embedder_dimensions:
+        raise ValueError(
+            f"query vector dimension mismatch for embedder '{embedder}': "
+            f"entry declares {dimensions}, embedder declares {embedder_dimensions}"
+        )
+    return embedder_dimensions if isinstance(embedder_dimensions, int) else None
+
+
+def _non_empty_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _search_with_expanded_queries(
@@ -1027,17 +1258,19 @@ def _search_with_expanded_queries(
             )
             responses.append(response)
             hits = response.get("hits", [])
-            search_calls.append(
-                {
-                    "index": index_uid,
-                    "query": search_query,
-                    "query_index": query_index,
-                    "retrieval_mode": channel["mode"],
-                    "channel_index": channel_index,
-                    "hit_count": len(hits),
-                    "processing_time_ms": response.get("processingTimeMs"),
-                }
-            )
+            query_vector_metadata = channel.get("query_vector")
+            search_call = {
+                "index": index_uid,
+                "query": search_query,
+                "query_index": query_index,
+                "retrieval_mode": channel["mode"],
+                "channel_index": channel_index,
+                "hit_count": len(hits),
+                "processing_time_ms": response.get("processingTimeMs"),
+            }
+            if isinstance(query_vector_metadata, dict):
+                search_call["query_vector"] = dict(query_vector_metadata)
+            search_calls.append(search_call)
             for rank, hit in enumerate(hits, start=1):
                 hit_key = _search_hit_key(hit)
                 score = _hit_score(hit)
@@ -1051,6 +1284,8 @@ def _search_with_expanded_queries(
                     "rank": rank,
                     "first_seen": sum(len(record.get("matches", [])) for record in hit_records),
                 }
+                if isinstance(query_vector_metadata, dict):
+                    occurrence["query_vector"] = dict(query_vector_metadata)
                 if hit_key in hit_positions:
                     existing_index = hit_positions[hit_key]
                     hit_records[existing_index]["matches"].append(occurrence)
@@ -1100,12 +1335,21 @@ def _run_search_channel(
 ) -> dict[str, Any]:
     hybrid = channel.get("hybrid")
     if isinstance(hybrid, dict):
+        vector = channel.get("vector")
+        if vector is not None:
+            return client.search(
+                index_uid,
+                search_query,
+                limit=limit,
+                hybrid=hybrid,
+                vector=vector,
+            )
         return client.search(index_uid, search_query, limit=limit, hybrid=hybrid)
     return client.search(index_uid, search_query, limit=limit)
 
 
 def _selected_hit_fields(occurrence: dict[str, Any]) -> dict[str, Any]:
-    return {
+    selected = {
         "hit": occurrence["hit"],
         "score": occurrence["score"],
         "query": occurrence["query"],
@@ -1115,6 +1359,9 @@ def _selected_hit_fields(occurrence: dict[str, Any]) -> dict[str, Any]:
         "rank": occurrence["rank"],
         "first_seen": occurrence["first_seen"],
     }
+    if isinstance(occurrence.get("query_vector"), dict):
+        selected["query_vector"] = dict(occurrence["query_vector"])
+    return selected
 
 
 def _is_better_hit_occurrence(occurrence: dict[str, Any], record: dict[str, Any]) -> bool:
@@ -1206,6 +1453,7 @@ def _search_metadata(response: dict[str, Any] | None, index_uid: str | None) -> 
                     "channel_index",
                     "hit_count",
                     "processing_time_ms",
+                    "query_vector",
                 )
                 if key in call
             }

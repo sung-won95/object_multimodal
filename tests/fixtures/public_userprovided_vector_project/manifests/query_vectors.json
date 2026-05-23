@@ -1,0 +1,17 @@
+{
+  "schema_version": "oarag-query-vectors-v1",
+  "embedders": {
+    "default": {
+      "source": "userProvided",
+      "dimensions": 3
+    }
+  },
+  "queries": {
+    "gradient_direction": {
+      "embedder": "default",
+      "dimensions": 3,
+      "vector": [0.98, 0.02, 0.0],
+      "description": "Synthetic public vector closest to vector_semantic_seg_001."
+    }
+  }
+}

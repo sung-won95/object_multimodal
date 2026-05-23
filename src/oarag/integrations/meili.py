@@ -3,10 +3,12 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -543,6 +545,41 @@ def load_hybrid_embedder_settings(path: Path) -> dict[str, Any]:
     return normalize_hybrid_embedder_settings(loaded)
 
 
+def normalize_query_vector(
+    vector: Sequence[Any],
+    *,
+    dimensions: int | None = None,
+    field_name: str = "query vector",
+) -> list[float]:
+    if isinstance(vector, str | bytes) or not isinstance(vector, Sequence):
+        raise ValueError(f"{field_name} must be a JSON array of finite numbers")
+
+    expected_dimensions: int | None = None
+    if dimensions is not None:
+        expected_dimensions = _validate_positive_int(
+            dimensions,
+            field_name=f"{field_name} dimensions",
+        )
+
+    normalized: list[float] = []
+    for index, value in enumerate(vector):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError(f"{field_name} item {index} must be a finite number")
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError(f"{field_name} item {index} must be a finite number")
+        normalized.append(number)
+
+    if not normalized:
+        raise ValueError(f"{field_name} must not be empty")
+    if expected_dimensions is not None and len(normalized) != expected_dimensions:
+        raise ValueError(
+            f"{field_name} dimension mismatch: expected {expected_dimensions}, "
+            f"got {len(normalized)}"
+        )
+    return normalized
+
+
 def merge_hybrid_embedder_settings(
     settings: dict[str, Any],
     hybrid_settings: dict[str, Any] | None,
@@ -711,7 +748,7 @@ class MeiliClient:
         if hybrid is not None:
             payload["hybrid"] = hybrid
         if vector is not None:
-            payload["vector"] = vector
+            payload["vector"] = normalize_query_vector(vector)
         if show_ranking_score_details:
             payload["showRankingScoreDetails"] = True
         return self._request("POST", f"/indexes/{quote(index_uid)}/search", payload)
