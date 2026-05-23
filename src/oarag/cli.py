@@ -28,10 +28,12 @@ from oarag.core.io import write_json
 from oarag.evaluation.lecture_smoke import run_lecture_smoke
 from oarag.integrations.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+    LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_SETTINGS,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     MeiliClient,
     lecture_segment_settings_profile_names,
+    lecture_window_settings_profile_names,
     visual_entity_settings_profile_names,
 )
 from oarag.integrations.neo4j import check_neo4j_health
@@ -42,8 +44,10 @@ from oarag.retrieval.project_query import (
     query_project,
 )
 from oarag.retrieval.project_index import (
+    build_project_windows,
     index_project_segments,
     index_project_visual_entities,
+    index_project_windows,
     project_dir_from_args,
 )
 from oarag.core.schemas import SearchCandidate
@@ -139,6 +143,144 @@ def build_parser() -> argparse.ArgumentParser:
         help="Meilisearch settings profile to apply to lecture_segments.",
     )
     index_project.set_defaults(func=cmd_index_project)
+
+    build_windows = subparsers.add_parser(
+        "build-project-windows",
+        help="Build a local project lecture_windows JSONL for window-level retrieval",
+    )
+    location = build_windows.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    build_windows.add_argument(
+        "--segments",
+        type=Path,
+        help="Optional segment JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_windows.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Optional frames manifest JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_windows.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Optional visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_windows.add_argument(
+        "--output",
+        type=Path,
+        help="Output lecture_windows JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_windows.add_argument(
+        "--manifest",
+        type=Path,
+        help="Project manifest JSON path. Relative paths are resolved from project dir.",
+    )
+    build_windows.add_argument(
+        "--window-seconds",
+        type=float,
+        help="Include segments whose timestamps overlap this many seconds around each target.",
+    )
+    build_windows.add_argument(
+        "--neighbor-count",
+        type=int,
+        default=1,
+        help="Neighboring segments to include on each side when --window-seconds is omitted.",
+    )
+    build_windows.add_argument(
+        "--previous-neighbor-count",
+        type=int,
+        help="Neighboring segments to include before the target when using neighbor mode.",
+    )
+    build_windows.add_argument(
+        "--next-neighbor-count",
+        type=int,
+        help="Neighboring segments to include after the target when using neighbor mode.",
+    )
+    build_windows.add_argument(
+        "--window-before-seconds",
+        type=float,
+        help="Seconds to include before each target when using time-window mode.",
+    )
+    build_windows.add_argument(
+        "--window-after-seconds",
+        type=float,
+        help="Seconds to include after each target when using time-window mode.",
+    )
+    build_windows.set_defaults(func=cmd_build_project_windows)
+
+    index_windows = subparsers.add_parser(
+        "index-project-windows",
+        help="Index local project lecture window documents",
+    )
+    index_windows.add_argument("--index", required=True)
+    location = index_windows.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    index_windows.add_argument(
+        "--windows",
+        type=Path,
+        help=(
+            "Optional lecture_windows JSONL path. Relative paths are resolved from project dir. "
+            "When omitted, an existing default artifact is used unless build inputs or "
+            "window options are provided."
+        ),
+    )
+    index_windows.add_argument(
+        "--segments",
+        type=Path,
+        help="Optional segment JSONL path used when building windows in memory.",
+    )
+    index_windows.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Optional frames manifest JSONL path used when building windows in memory.",
+    )
+    index_windows.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Optional visual_entities JSONL path used when building windows in memory.",
+    )
+    index_windows.add_argument("--batch-size", type=int, default=500)
+    index_windows.add_argument("--reset", action="store_true")
+    index_windows.add_argument(
+        "--settings-profile",
+        choices=lecture_window_settings_profile_names(),
+        default=LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
+        help="Meilisearch settings profile to apply to lecture window documents.",
+    )
+    index_windows.add_argument(
+        "--window-seconds",
+        type=float,
+        help="Include segments whose timestamps overlap this many seconds around each target.",
+    )
+    index_windows.add_argument(
+        "--neighbor-count",
+        type=int,
+        default=1,
+        help="Neighboring segments to include on each side when --window-seconds is omitted.",
+    )
+    index_windows.add_argument(
+        "--previous-neighbor-count",
+        type=int,
+        help="Neighboring segments to include before the target when using neighbor mode.",
+    )
+    index_windows.add_argument(
+        "--next-neighbor-count",
+        type=int,
+        help="Neighboring segments to include after the target when using neighbor mode.",
+    )
+    index_windows.add_argument(
+        "--window-before-seconds",
+        type=float,
+        help="Seconds to include before each target when using time-window mode.",
+    )
+    index_windows.add_argument(
+        "--window-after-seconds",
+        type=float,
+        help="Seconds to include after each target when using time-window mode.",
+    )
+    index_windows.set_defaults(func=cmd_index_project_windows)
 
     index_visual_entities = subparsers.add_parser(
         "index-project-visual-entities",
@@ -545,6 +687,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Search a local project and return multimodal evidence bundles",
     )
     query_project.add_argument("--index", required=True)
+    query_project.add_argument(
+        "--index-kind",
+        choices=["segment", "window"],
+        default="segment",
+        help="Interpret --index hits as segment documents or window-level documents.",
+    )
     query_project.add_argument(
         "--visual-index",
         help="Optional Meilisearch index containing visual_entities documents.",
@@ -1071,6 +1219,49 @@ def cmd_index_project(args: argparse.Namespace) -> None:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def cmd_build_project_windows(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = build_project_windows(
+        project_dir=project_dir,
+        output_path=args.output,
+        segments=args.segments,
+        frames_manifest=args.frames_manifest,
+        visual_entities=args.visual_entities,
+        manifest_path=args.manifest,
+        window_seconds=args.window_seconds,
+        neighbor_count=args.neighbor_count,
+        previous_neighbor_count=args.previous_neighbor_count,
+        next_neighbor_count=args.next_neighbor_count,
+        window_before_seconds=args.window_before_seconds,
+        window_after_seconds=args.window_after_seconds,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_index_project_windows(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = index_project_windows(
+        client,
+        index_uid=args.index,
+        project_dir=project_dir,
+        batch_size=args.batch_size,
+        reset=args.reset,
+        windows=args.windows,
+        segments=args.segments,
+        frames_manifest=args.frames_manifest,
+        visual_entities=args.visual_entities,
+        settings_profile=args.settings_profile,
+        window_seconds=args.window_seconds,
+        neighbor_count=args.neighbor_count,
+        previous_neighbor_count=args.previous_neighbor_count,
+        next_neighbor_count=args.next_neighbor_count,
+        window_before_seconds=args.window_before_seconds,
+        window_after_seconds=args.window_after_seconds,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
 def cmd_index_project_visual_entities(args: argparse.Namespace) -> None:
     client = client_from_args(args)
     project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
@@ -1305,6 +1496,7 @@ def cmd_query_project(args: argparse.Namespace) -> None:
     response = query_project(
         client=client,
         index_uid=args.index,
+        retrieval_index_kind=args.index_kind,
         visual_index_uid=args.visual_index,
         project_dir=project_dir,
         query=args.query,

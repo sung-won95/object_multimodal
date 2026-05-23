@@ -1,22 +1,36 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from oarag.core.config import default_paths
+from oarag.core.io import write_json, write_jsonl
 from oarag.integrations.meili import (
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
+    LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     MeiliClient,
 )
 from oarag.integrations.meili import (
     lecture_segment_settings,
     lecture_segment_settings_snapshot,
+    lecture_window_settings,
+    lecture_window_settings_snapshot,
     visual_entity_settings,
     visual_entity_settings_snapshot,
 )
-from oarag.core.schemas import VisualEntity, ensure_lecture_segment_semantic_contract
+from oarag.core.schemas import (
+    LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD,
+    LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+    VisualEntity,
+    ensure_lecture_segment_semantic_contract,
+    slugify,
+)
+
+
+LECTURE_WINDOW_ARTIFACT_RELATIVE_PATH = Path("segments") / "lecture_windows.jsonl"
 
 
 def project_dir_from_args(*, project_id: str | None, project_dir: Path | None) -> Path:
@@ -72,6 +86,23 @@ def visual_entity_artifact_path(project_dir: Path, visual_entities: Path | None 
     raise FileNotFoundError(f"No visual entity artifact found at {default}")
 
 
+def window_artifact_path(project_dir: Path, windows: Path | None = None) -> Path:
+    if windows is not None:
+        candidate = windows.expanduser()
+        if not candidate.is_absolute():
+            candidate = (project_dir / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+        if not candidate.exists():
+            raise FileNotFoundError(f"Window artifact not found: {candidate}")
+        return candidate
+
+    default = project_dir / LECTURE_WINDOW_ARTIFACT_RELATIVE_PATH
+    if default.exists():
+        return default
+    raise FileNotFoundError(f"No window artifact found at {default}")
+
+
 def iter_jsonl_documents(path: Path) -> Iterator[dict[str, Any]]:
     with path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
@@ -95,6 +126,281 @@ def iter_batches(documents: Iterable[dict[str, Any]], batch_size: int) -> Iterat
             batch = []
     if batch:
         yield batch
+
+
+def build_window_index_documents(
+    segments: list[dict[str, Any]],
+    *,
+    frames: list[dict[str, Any]] | None = None,
+    visual_entities: list[dict[str, Any]] | None = None,
+    window_seconds: float | None = None,
+    neighbor_count: int = 1,
+    previous_neighbor_count: int | None = None,
+    next_neighbor_count: int | None = None,
+    window_before_seconds: float | None = None,
+    window_after_seconds: float | None = None,
+) -> list[dict[str, Any]]:
+    from oarag.retrieval.evidence import (
+        frame_id,
+        make_evidence_window,
+        resolve_window_config,
+        segment_sort_key,
+        select_window_segments,
+    )
+
+    window_config = resolve_window_config(
+        window_seconds=window_seconds,
+        neighbor_count=neighbor_count,
+        previous_neighbor_count=previous_neighbor_count,
+        next_neighbor_count=next_neighbor_count,
+        window_before_seconds=window_before_seconds,
+        window_after_seconds=window_after_seconds,
+    )
+    frame_lookup = {frame_id(frame): frame for frame in frames or []}
+    visual_entity_context = _visual_entity_context_from_rows(visual_entities or [])
+    sorted_segments = [
+        segment for _, segment in sorted(enumerate(segments), key=lambda item: segment_sort_key(item[1], item[0]))
+    ]
+
+    documents: list[dict[str, Any]] = []
+    for target in sorted_segments:
+        target_segment_id = str(target.get("segment_id") or "")
+        if not target_segment_id:
+            continue
+        window_segments = select_window_segments(
+            sorted_segments,
+            target_segment_id=target_segment_id,
+            window_seconds=window_seconds,
+            neighbor_count=neighbor_count,
+            previous_neighbor_count=previous_neighbor_count,
+            next_neighbor_count=next_neighbor_count,
+            window_before_seconds=window_before_seconds,
+            window_after_seconds=window_after_seconds,
+        )
+        evidence_window = make_evidence_window(
+            target=target,
+            window_segments=window_segments,
+            frame_lookup=frame_lookup,
+            window_config=window_config,
+        ).to_dict()
+        documents.append(
+            _window_index_document(
+                target=target,
+                window_segments=window_segments,
+                evidence_window=evidence_window,
+                visual_entity_context=visual_entity_context,
+                window_config=window_config,
+            )
+        )
+    return documents
+
+
+def build_project_windows(
+    *,
+    project_dir: Path,
+    output_path: Path | None = None,
+    segments: Path | None = None,
+    frames_manifest: Path | None = None,
+    visual_entities: Path | None = None,
+    manifest_path: Path | None = None,
+    window_seconds: float | None = None,
+    neighbor_count: int = 1,
+    previous_neighbor_count: int | None = None,
+    next_neighbor_count: int | None = None,
+    window_before_seconds: float | None = None,
+    window_after_seconds: float | None = None,
+) -> dict[str, Any]:
+    resolved_project_dir = project_dir.expanduser().resolve()
+    segments_path = segment_artifact_path(resolved_project_dir, segments=segments)
+    frames_path = _optional_project_path(
+        project_dir=resolved_project_dir,
+        path=frames_manifest,
+        default=resolved_project_dir / "manifests" / "frames_manifest.jsonl",
+    )
+    visual_entities_path = _optional_visual_entity_artifact_path(
+        project_dir=resolved_project_dir,
+        visual_entities=visual_entities,
+    )
+    resolved_output_path = _resolve_project_output_path(
+        project_dir=resolved_project_dir,
+        path=output_path,
+        default=resolved_project_dir / LECTURE_WINDOW_ARTIFACT_RELATIVE_PATH,
+    )
+    resolved_manifest_path = _resolve_project_output_path(
+        project_dir=resolved_project_dir,
+        path=manifest_path,
+        default=resolved_project_dir / "manifests" / "project_manifest.json",
+    )
+
+    segment_rows = list(iter_jsonl_documents(segments_path))
+    frame_rows = list(iter_jsonl_documents(frames_path)) if frames_path.exists() else []
+    visual_entity_rows = (
+        list(iter_jsonl_documents(visual_entities_path)) if visual_entities_path else []
+    )
+    documents = build_window_index_documents(
+        segment_rows,
+        frames=frame_rows,
+        visual_entities=visual_entity_rows,
+        window_seconds=window_seconds,
+        neighbor_count=neighbor_count,
+        previous_neighbor_count=previous_neighbor_count,
+        next_neighbor_count=next_neighbor_count,
+        window_before_seconds=window_before_seconds,
+        window_after_seconds=window_after_seconds,
+    )
+    write_jsonl(resolved_output_path, documents)
+
+    summary = {
+        "project_dir": str(resolved_project_dir),
+        "paths": {
+            "segments": str(segments_path),
+            "frames_manifest": str(frames_path),
+            "visual_entities": str(visual_entities_path) if visual_entities_path else None,
+            "lecture_windows": str(resolved_output_path),
+            "project_manifest": str(resolved_manifest_path),
+        },
+        "window_config": documents[0]["window_config"] if documents else _empty_window_config(
+            window_seconds=window_seconds,
+            neighbor_count=neighbor_count,
+            previous_neighbor_count=previous_neighbor_count,
+            next_neighbor_count=next_neighbor_count,
+            window_before_seconds=window_before_seconds,
+            window_after_seconds=window_after_seconds,
+        ),
+        "counts": {
+            "segments_total": len(segment_rows),
+            "windows_total": len(documents),
+            "frames_total": len(frame_rows),
+            "visual_entities_total": len(visual_entity_rows),
+            "window_frame_refs": sum(len(_list_of_dicts(document.get("frame_refs"))) for document in documents),
+            "window_visual_entities": sum(
+                len(_list_of_dicts(document.get("visual_entities"))) for document in documents
+            ),
+        },
+    }
+    _update_project_window_manifest(
+        manifest_path=resolved_manifest_path,
+        windows_path=resolved_output_path,
+        summary=summary,
+    )
+    return summary
+
+
+def index_project_windows(
+    client: MeiliClient,
+    *,
+    index_uid: str,
+    project_dir: Path,
+    batch_size: int = 500,
+    reset: bool = False,
+    windows: Path | None = None,
+    segments: Path | None = None,
+    frames_manifest: Path | None = None,
+    visual_entities: Path | None = None,
+    settings_profile: str = LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
+    window_seconds: float | None = None,
+    neighbor_count: int = 1,
+    previous_neighbor_count: int | None = None,
+    next_neighbor_count: int | None = None,
+    window_before_seconds: float | None = None,
+    window_after_seconds: float | None = None,
+) -> dict[str, Any]:
+    resolved_project_dir = project_dir.expanduser().resolve()
+    build_requested = _window_build_inputs_requested(
+        segments=segments,
+        frames_manifest=frames_manifest,
+        visual_entities=visual_entities,
+        window_seconds=window_seconds,
+        neighbor_count=neighbor_count,
+        previous_neighbor_count=previous_neighbor_count,
+        next_neighbor_count=next_neighbor_count,
+        window_before_seconds=window_before_seconds,
+        window_after_seconds=window_after_seconds,
+    )
+    windows_path = (
+        window_artifact_path(resolved_project_dir, windows=windows)
+        if windows is not None
+        else None
+    )
+    if windows_path is None and not build_requested:
+        windows_path = _optional_window_artifact_path(resolved_project_dir, windows=None)
+    segments_path: Path | None = None
+    frames_path: Path | None = None
+    visual_entities_path: Path | None = None
+
+    if windows_path is not None:
+        documents: Iterable[dict[str, Any]] = (
+            ensure_window_document_semantic_contract(document)
+            for document in iter_jsonl_documents(windows_path)
+        )
+    else:
+        segments_path = segment_artifact_path(resolved_project_dir, segments=segments)
+        frames_path = _optional_project_path(
+            project_dir=resolved_project_dir,
+            path=frames_manifest,
+            default=resolved_project_dir / "manifests" / "frames_manifest.jsonl",
+        )
+        visual_entities_path = _optional_visual_entity_artifact_path(
+            project_dir=resolved_project_dir,
+            visual_entities=visual_entities,
+        )
+        segment_rows = list(iter_jsonl_documents(segments_path))
+        frame_rows = list(iter_jsonl_documents(frames_path)) if frames_path.exists() else []
+        visual_entity_rows = (
+            list(iter_jsonl_documents(visual_entities_path)) if visual_entities_path else []
+        )
+        documents = build_window_index_documents(
+            segment_rows,
+            frames=frame_rows,
+            visual_entities=visual_entity_rows,
+            window_seconds=window_seconds,
+            neighbor_count=neighbor_count,
+            previous_neighbor_count=previous_neighbor_count,
+            next_neighbor_count=next_neighbor_count,
+            window_before_seconds=window_before_seconds,
+            window_after_seconds=window_after_seconds,
+        )
+
+    settings = lecture_window_settings(settings_profile)
+    settings_snapshot = lecture_window_settings_snapshot(settings, profile=settings_profile)
+
+    if reset:
+        client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
+    client.wait_task(client.create_index(index_uid, primary_key="window_id"))
+    client.wait_task(client.update_settings(index_uid, settings))
+
+    indexed_documents = 0
+    indexed_batches = 0
+    semantic_source_field_counts: dict[str, int] = {}
+    visual_entity_count = 0
+    for batch in iter_batches(documents, batch_size=batch_size):
+        client.wait_task(client.add_documents(index_uid, batch))
+        indexed_documents += len(batch)
+        indexed_batches += 1
+        for document in batch:
+            visual_entity_count += len(_list_of_dicts(document.get("visual_entities")))
+            for source_field in document.get(LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD, []):
+                semantic_source_field_counts[str(source_field)] = (
+                    semantic_source_field_counts.get(str(source_field), 0) + 1
+                )
+
+    return {
+        "index": index_uid,
+        "project_dir": str(resolved_project_dir),
+        "windows_path": str(windows_path) if windows_path else None,
+        "segments_path": str(segments_path) if segments_path else None,
+        "frames_manifest_path": str(frames_path) if frames_path else None,
+        "visual_entities_path": str(visual_entities_path) if visual_entities_path else None,
+        "batch_size": batch_size,
+        "reset": reset,
+        "indexed_documents": indexed_documents,
+        "indexed_batches": indexed_batches,
+        "embedded_visual_entities": visual_entity_count,
+        "semantic_source_field_counts": semantic_source_field_counts,
+        "settings_profile": settings_snapshot["profile"],
+        "settings_hash": settings_snapshot["hash"],
+        "settings_snapshot": settings_snapshot,
+    }
 
 
 def index_project_segments(
@@ -214,6 +520,73 @@ def index_project_visual_entities(
     }
 
 
+def ensure_window_document_semantic_contract(document: dict[str, Any]) -> dict[str, Any]:
+    indexed = dict(document)
+    semantic_text, source_fields = _window_semantic_text(indexed)
+    existing_text = _compact_text(str(indexed.get(LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD) or ""))
+    existing_source_fields = _string_list(indexed.get(LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD))
+    indexed[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] = existing_text or semantic_text
+    indexed[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] = existing_source_fields or source_fields
+    return indexed
+
+
+def _window_index_document(
+    *,
+    target: dict[str, Any],
+    window_segments: list[dict[str, Any]],
+    evidence_window: dict[str, Any],
+    visual_entity_context: dict[str, Any],
+    window_config: dict[str, Any],
+) -> dict[str, Any]:
+    source_segment_ids = [
+        str(segment.get("segment_id"))
+        for segment in window_segments
+        if segment.get("segment_id") not in (None, "")
+    ]
+    target_segment_id = str(target.get("segment_id") or "")
+    transcript_window_text = _transcript_window_text(evidence_window)
+    window_visual_entities = _window_visual_entities(
+        window_segments=window_segments,
+        visual_entity_context=visual_entity_context,
+    )
+    start_time = _optional_float(evidence_window.get("start_time"))
+    end_time = _optional_float(evidence_window.get("end_time"))
+    document: dict[str, Any] = {
+        "window_id": _window_id(
+            target_segment_id=target_segment_id,
+            source_segment_ids=source_segment_ids,
+            window_config=window_config,
+        ),
+        "target_segment_id": target_segment_id,
+        "segment_id": target_segment_id,
+        "project_id": target.get("project_id"),
+        "dataset_name": target.get("dataset_name"),
+        "subset_name": target.get("subset_name"),
+        "split_name": target.get("split_name"),
+        "sample_id": target.get("sample_id"),
+        "sample_index": target.get("sample_index"),
+        "video_id": target.get("video_id"),
+        "video_name": target.get("video_name"),
+        "source": target.get("source"),
+        "start_time": start_time,
+        "end_time": end_time,
+        "timestamp_center": _window_timestamp_center(start_time=start_time, end_time=end_time, target=target),
+        "target_start_time": _optional_float(target.get("start_time")),
+        "target_end_time": _optional_float(target.get("end_time")),
+        "target_timestamp_center": _optional_float(target.get("timestamp_center")),
+        "source_segment_ids": source_segment_ids,
+        "transcript_window_text": transcript_window_text,
+        "transcript_text": transcript_window_text,
+        "frame_refs": evidence_window.get("frame_refs", []),
+        "visual_entities": window_visual_entities,
+        "visual_entity_count": len(window_visual_entities),
+        "evidence_window": evidence_window,
+        "window_config": dict(window_config),
+    }
+    document = _drop_empty_window_fields(document)
+    return ensure_window_document_semantic_contract(document)
+
+
 def _visual_entity_index_document(document: dict[str, Any]) -> dict[str, Any]:
     entity = VisualEntity.from_dict(document)
     if not entity.entity_id:
@@ -254,12 +627,15 @@ def _optional_visual_entity_artifact_path(
 
 
 def _visual_entity_context(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {"by_segment_id": {}, "by_frame_id": {}}
+    return _visual_entity_context_from_rows(iter_jsonl_documents(path))
+
+
+def _visual_entity_context_from_rows(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     by_segment_id: dict[str, list[dict[str, Any]]] = {}
     by_frame_id: dict[str, list[dict[str, Any]]] = {}
-    if path is None:
-        return {"by_segment_id": by_segment_id, "by_frame_id": by_frame_id}
-
-    for row in iter_jsonl_documents(path):
+    for row in rows:
         entity = _compact_visual_entity(row)
         segment_id = row.get("segment_id")
         if segment_id not in (None, ""):
@@ -268,6 +644,35 @@ def _visual_entity_context(path: Path | None) -> dict[str, Any]:
         if frame_id not in (None, ""):
             by_frame_id.setdefault(str(frame_id), []).append(entity)
     return {"by_segment_id": by_segment_id, "by_frame_id": by_frame_id}
+
+
+def _window_visual_entities(
+    *,
+    window_segments: list[dict[str, Any]],
+    visual_entity_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    by_segment_id = visual_entity_context["by_segment_id"]
+    by_frame_id = visual_entity_context["by_frame_id"]
+    linked: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for segment in window_segments:
+        segment_id = segment.get("segment_id")
+        if segment_id not in (None, ""):
+            _append_unique_entities(linked, seen, by_segment_id.get(str(segment_id), []))
+        for frame_ref in _segment_frame_ids(segment):
+            _append_unique_entities(linked, seen, by_frame_id.get(frame_ref, []))
+        inline_entities = segment.get("visual_entities")
+        if isinstance(inline_entities, list):
+            _append_unique_entities(
+                linked,
+                seen,
+                [
+                    _compact_visual_entity(entity)
+                    for entity in inline_entities
+                    if isinstance(entity, dict)
+                ],
+            )
+    return sorted(linked, key=_entity_sort_key)
 
 
 def _linked_visual_entities(
@@ -342,6 +747,229 @@ def _compact_visual_entity(row: dict[str, Any]) -> dict[str, Any]:
     if video_id not in (None, ""):
         compact["video_id"] = str(video_id)
     return compact
+
+
+def _entity_sort_key(entity: dict[str, Any]) -> tuple[bool, float, str, str]:
+    timestamp = _optional_float(entity.get("timestamp"))
+    return (
+        timestamp is None,
+        timestamp or 0.0,
+        str(entity.get("frame_id", "")),
+        str(entity.get("entity_id", "")),
+    )
+
+
+def _transcript_window_text(evidence_window: dict[str, Any]) -> str:
+    pieces: list[str] = []
+    for segment in evidence_window.get("transcript_segments") or []:
+        if not isinstance(segment, dict):
+            continue
+        text = _compact_text(str(segment.get("transcript_text") or ""))
+        if text:
+            pieces.append(text)
+    return _compact_text(" ".join(pieces))
+
+
+def _window_timestamp_center(
+    *,
+    start_time: float | None,
+    end_time: float | None,
+    target: dict[str, Any],
+) -> float | None:
+    if start_time is not None and end_time is not None:
+        return round((start_time + end_time) / 2.0, 4)
+    target_center = _optional_float(target.get("timestamp_center"))
+    if target_center is not None:
+        return target_center
+    if start_time is not None:
+        return start_time
+    return end_time
+
+
+def _window_id(
+    *,
+    target_segment_id: str,
+    source_segment_ids: list[str],
+    window_config: dict[str, Any],
+) -> str:
+    fingerprint = json.dumps(
+        {
+            "target_segment_id": target_segment_id,
+            "source_segment_ids": source_segment_ids,
+            "window_config": window_config,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:12]
+    return f"window_{slugify(target_segment_id)}_{digest}"
+
+
+def _drop_empty_window_fields(document: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in document.items()
+        if value not in (None, "")
+    }
+
+
+def _window_semantic_text(document: dict[str, Any]) -> tuple[str, list[str]]:
+    pieces: list[str] = []
+    source_fields: list[str] = []
+
+    transcript = _compact_text(str(document.get("transcript_window_text") or ""))
+    if transcript:
+        pieces.append(transcript)
+        source_fields.append("transcript_window_text")
+
+    visual_entities = _list_of_dicts(document.get("visual_entities"))
+    for field_name, source_field in (
+        ("text", "visual_entities.text"),
+        ("visual_description", "visual_entities.visual_description"),
+    ):
+        values = _unique_text_values(entity.get(field_name) for entity in visual_entities)
+        if not values:
+            continue
+        pieces.extend(values)
+        source_fields.append(source_field)
+
+    return _compact_text(" ".join(pieces)), source_fields
+
+
+def _unique_text_values(values: Iterable[Any]) -> list[str]:
+    text_values: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _compact_text(str(value or ""))
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        text_values.append(text)
+    return text_values
+
+
+def _compact_text(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item not in (None, "")]
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_project_path(*, project_dir: Path, path: Path | None, default: Path) -> Path:
+    if path is None:
+        return default
+    candidate = path.expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (project_dir / candidate).resolve()
+
+
+def _resolve_project_output_path(*, project_dir: Path, path: Path | None, default: Path) -> Path:
+    if path is None:
+        return default
+    candidate = path.expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (project_dir / candidate).resolve()
+
+
+def _optional_window_artifact_path(project_dir: Path, windows: Path | None) -> Path | None:
+    if windows is not None:
+        return window_artifact_path(project_dir, windows=windows)
+    default = project_dir / LECTURE_WINDOW_ARTIFACT_RELATIVE_PATH
+    return default if default.exists() else None
+
+
+def _window_build_inputs_requested(
+    *,
+    segments: Path | None,
+    frames_manifest: Path | None,
+    visual_entities: Path | None,
+    window_seconds: float | None,
+    neighbor_count: int,
+    previous_neighbor_count: int | None,
+    next_neighbor_count: int | None,
+    window_before_seconds: float | None,
+    window_after_seconds: float | None,
+) -> bool:
+    return any(
+        (
+            segments is not None,
+            frames_manifest is not None,
+            visual_entities is not None,
+            window_seconds is not None,
+            neighbor_count != 1,
+            previous_neighbor_count is not None,
+            next_neighbor_count is not None,
+            window_before_seconds is not None,
+            window_after_seconds is not None,
+        )
+    )
+
+
+def _empty_window_config(
+    *,
+    window_seconds: float | None,
+    neighbor_count: int,
+    previous_neighbor_count: int | None,
+    next_neighbor_count: int | None,
+    window_before_seconds: float | None,
+    window_after_seconds: float | None,
+) -> dict[str, Any]:
+    from oarag.retrieval.evidence import resolve_window_config
+
+    return resolve_window_config(
+        window_seconds=window_seconds,
+        neighbor_count=neighbor_count,
+        previous_neighbor_count=previous_neighbor_count,
+        next_neighbor_count=next_neighbor_count,
+        window_before_seconds=window_before_seconds,
+        window_after_seconds=window_after_seconds,
+    )
+
+
+def _update_project_window_manifest(
+    *,
+    manifest_path: Path,
+    windows_path: Path,
+    summary: dict[str, Any],
+) -> None:
+    if manifest_path.exists():
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload = loaded if isinstance(loaded, dict) else {}
+    else:
+        payload = {}
+
+    artifacts = payload.setdefault("artifacts", {})
+    if not isinstance(artifacts, dict):
+        artifacts = {}
+        payload["artifacts"] = artifacts
+    artifacts["lecture_windows"] = str(windows_path)
+
+    counts = payload.setdefault("counts", {})
+    if not isinstance(counts, dict):
+        counts = {}
+        payload["counts"] = counts
+    counts["lecture_windows"] = int(summary["counts"]["windows_total"])
+
+    payload["window_indexing"] = {
+        "window_config": summary["window_config"],
+        "counts": summary["counts"],
+    }
+    write_json(manifest_path, payload)
 
 
 def _visual_entity_semantic_source_fields(document: dict[str, Any]) -> list[str]:
