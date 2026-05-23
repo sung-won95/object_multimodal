@@ -1095,6 +1095,69 @@ def test_ask_project_cli_format_json_returns_answer_schema(
     assert written["answer"]["schema_version"] == "grounded-answer-v1"
 
 
+def test_ask_project_cli_window_index_kind_maps_window_hit(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_1", 1, 0.0, 2.0, "Intro context", []),
+            _segment("seg_2", 2, 3.0, 5.0, "Target range grid appears", []),
+        ],
+    )
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "ask-project",
+            "--index",
+            "local_windows",
+            "--index-kind",
+            "window",
+            "--project-dir",
+            str(project_dir),
+            "--query",
+            "target range grid",
+            "--format",
+            "json",
+        ]
+    )
+    monkeypatch.setattr(
+        "oarag.cli.client_from_args",
+        lambda _: FakeClient(
+            hits=[
+                {
+                    "window_id": "window_seg_2_abc123",
+                    "target_segment_id": "seg_2",
+                    "sample_id": "seg_2",
+                    "video_id": "video",
+                    "start_time": 0.0,
+                    "end_time": 5.0,
+                    "timestamp_center": 2.5,
+                    "target_start_time": 3.0,
+                    "target_end_time": 5.0,
+                    "target_timestamp_center": 4.0,
+                    "source_segment_ids": ["seg_1", "seg_2"],
+                    "transcript_window_text": "Intro context Target range grid appears",
+                    "_rankingScore": 0.8,
+                }
+            ]
+        ),
+    )
+
+    args.func(args)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["index_kind"] == "window"
+    assert payload["counts"]["window_search_hits"] == 1
+    citation = payload["answer"]["citations"][0]
+    assert citation["retrieval_index_kind"] == "window"
+    assert citation["retrieval_sources"][0]["source"] == "window"
+    assert citation["retrieval_sources"][0]["window_id"] == "window_seg_2_abc123"
+
+
 def _segment(
     segment_id: str,
     sample_index: int,

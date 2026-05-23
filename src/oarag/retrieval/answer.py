@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from oarag.retrieval.project_query import (
     DEFAULT_HYBRID_EMBEDDER,
     DEFAULT_HYBRID_SEMANTIC_RATIO,
+    SEGMENT_HIT_SOURCE,
     VISUAL_ENTITY_HIT_SOURCE,
     query_project,
 )
@@ -79,6 +80,7 @@ def ask_project(
     index_uid: str,
     project_dir: Path,
     query: str,
+    retrieval_index_kind: str = SEGMENT_HIT_SOURCE,
     visual_index_uid: str | None = None,
     limit: int = 5,
     segments_path: Path | None = None,
@@ -104,6 +106,7 @@ def ask_project(
     retrieval_response = query_project(
         client=client,
         index_uid=index_uid,
+        retrieval_index_kind=retrieval_index_kind,
         visual_index_uid=visual_index_uid,
         project_dir=project_dir,
         query=query,
@@ -205,13 +208,19 @@ def _compose_deterministic_answer(
     query = str(retrieval_response.get("query") or "")
     bundles = _list_of_dicts(retrieval_response.get("bundles"))
     citations = [
-        _citation_for_bundle(bundle=bundle, citation_id=f"citation_{index}", rank=index)
+        _citation_for_bundle(
+            bundle=bundle,
+            citation_id=f"citation_{index}",
+            rank=index,
+            retrieval_response=retrieval_response,
+        )
         for index, bundle in enumerate(bundles[: policy.candidate_evidence_limit], start=1)
     ]
     candidate_evidence = _candidate_evidence_items(
         bundles=bundles,
         citations=citations,
         query=query,
+        retrieval_response=retrieval_response,
         limit=policy.candidate_evidence_limit,
     )
     top_bundle = bundles[0] if bundles else None
@@ -324,6 +333,7 @@ def _candidate_evidence_items(
     bundles: list[dict[str, Any]],
     citations: list[dict[str, Any]],
     query: str,
+    retrieval_response: dict[str, Any],
     limit: int,
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
@@ -347,6 +357,10 @@ def _candidate_evidence_items(
                 "modalities": _modalities_for_bundle(bundle),
                 "citation_ids": [citation["citation_id"]],
                 "support": _support_signals(bundle, query=query),
+                **_answer_bundle_retrieval_metadata(
+                    bundle=bundle,
+                    retrieval_response=retrieval_response,
+                ),
             }
         )
     return items
@@ -357,6 +371,7 @@ def _citation_for_bundle(
     bundle: dict[str, Any],
     citation_id: str,
     rank: int,
+    retrieval_response: dict[str, Any],
 ) -> dict[str, Any]:
     candidate = _candidate(bundle)
     target = _target_segment(bundle)
@@ -376,9 +391,37 @@ def _citation_for_bundle(
         "frame_refs": _frame_refs(evidence_window),
         "visual_entity_ids": _visual_entity_ids(bundle),
         "entity_link_ids": _entity_link_ids(bundle),
-        "retrieval_sources": _retrieval_sources(bundle),
         "modalities": _modalities_for_bundle(bundle),
+        **_answer_bundle_retrieval_metadata(
+            bundle=bundle,
+            retrieval_response=retrieval_response,
+        ),
     }
+
+
+def _answer_bundle_retrieval_metadata(
+    *,
+    bundle: dict[str, Any],
+    retrieval_response: dict[str, Any],
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "retrieval_index_kind": str(retrieval_response.get("index_kind") or ""),
+        "retrieval_sources": _retrieval_sources(bundle),
+    }
+    context = retrieval_response.get("retrieval_context")
+    context = context if isinstance(context, dict) else {}
+    hybrid = context.get("hybrid_retrieval")
+    if isinstance(hybrid, dict):
+        metadata["hybrid_retrieval"] = hybrid
+
+    bundle_rerank = bundle.get("rerank")
+    if isinstance(bundle_rerank, dict):
+        metadata["rerank"] = bundle_rerank
+    else:
+        rerank_context = context.get("rerank")
+        if isinstance(rerank_context, dict):
+            metadata["rerank"] = rerank_context
+    return metadata
 
 
 def _support_signals(bundle: dict[str, Any] | None, *, query: str) -> dict[str, Any]:
@@ -511,9 +554,19 @@ def _retrieval_sources(bundle: dict[str, Any]) -> list[dict[str, Any]]:
                     "score",
                     "original_rank",
                     "original_score",
+                    "search_query",
+                    "query_index",
+                    "fusion_score",
                     "target_segment_id",
                     "deduplicated",
                     "matches",
+                    "window_id",
+                    "source_segment_ids",
+                    "entity_id",
+                    "frame_id",
+                    "timestamp",
+                    "visual_entity_text",
+                    "target_resolution",
                 )
                 if key in source
             }
