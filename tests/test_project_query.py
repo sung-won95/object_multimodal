@@ -51,6 +51,28 @@ class QueryAwareFakeClient:
         }
 
 
+class HybridFakeClient:
+    def __init__(self, hits_by_call: dict[tuple[str, str, str], list[dict]]) -> None:
+        self.hits_by_call = hits_by_call
+        self.searches: list[tuple[str, str, int, str, dict | None]] = []
+
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        hybrid: dict | None = None,
+    ) -> dict:
+        mode = "semantic" if hybrid else "lexical"
+        self.searches.append((index_uid, query, limit, mode, hybrid))
+        return {
+            "hits": self.hits_by_call.get((index_uid, query, mode), [])[:limit],
+            "processingTimeMs": 2,
+            "indexUid": index_uid,
+            "query": query,
+        }
+
+
 def test_query_project_returns_multimodal_bundle(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     _write_jsonl(
@@ -532,6 +554,167 @@ def test_query_project_expansion_hits_can_enter_top_limit(tmp_path: Path) -> Non
     assert response["query_expansion"]["search_queries"] == ["wager", "bet"]
     assert response["retrieval_context"]["searches"]["segment"]["hit_count"] == 1
     assert response["bundles"][0]["candidate"]["segment_id"] == "seg_alias"
+
+
+def test_query_project_hybrid_retrieval_calls_each_expanded_query_per_channel_and_merges(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_lexical", 1, 0.0, 2.0, "Wager introduction", []),
+            _segment("seg_semantic", 2, 3.0, 5.0, "Bet sizing concept", []),
+            _segment("seg_alias", 3, 6.0, 8.0, "Alias-only followup", []),
+        ],
+    )
+    (project_dir / "domain_lexicon.json").write_text(
+        json.dumps({"aliases": {"bet": ["wager"]}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    client = HybridFakeClient(
+        {
+            ("local_segments", "wager", "lexical"): [
+                {
+                    "segment_id": "seg_lexical",
+                    "sample_id": "seg_lexical",
+                    "video_id": "video",
+                    "start_time": 0.0,
+                    "end_time": 2.0,
+                    "timestamp_center": 1.0,
+                    "transcript_text": "Wager introduction",
+                    "_rankingScore": 0.5,
+                }
+            ],
+            ("local_segments", "wager", "semantic"): [
+                {
+                    "segment_id": "seg_semantic",
+                    "sample_id": "seg_semantic",
+                    "video_id": "video",
+                    "start_time": 3.0,
+                    "end_time": 5.0,
+                    "timestamp_center": 4.0,
+                    "transcript_text": "Bet sizing concept",
+                    "_rankingScore": 0.8,
+                }
+            ],
+            ("local_segments", "bet", "lexical"): [
+                {
+                    "segment_id": "seg_semantic",
+                    "sample_id": "seg_semantic",
+                    "video_id": "video",
+                    "start_time": 3.0,
+                    "end_time": 5.0,
+                    "timestamp_center": 4.0,
+                    "transcript_text": "Bet sizing concept",
+                    "_rankingScore": 0.6,
+                }
+            ],
+            ("local_segments", "bet", "semantic"): [
+                {
+                    "segment_id": "seg_alias",
+                    "sample_id": "seg_alias",
+                    "video_id": "video",
+                    "start_time": 6.0,
+                    "end_time": 8.0,
+                    "timestamp_center": 7.0,
+                    "transcript_text": "Alias-only followup",
+                    "_rankingScore": 0.7,
+                }
+            ],
+        }
+    )
+
+    response = query_project(
+        client=client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        query="wager",
+        limit=2,
+        neighbor_count=0,
+        hybrid_retrieval=True,
+        hybrid_embedder="default",
+        hybrid_semantic_ratio=1.0,
+    )
+
+    assert client.searches == [
+        ("local_segments", "wager", 2, "lexical", None),
+        (
+            "local_segments",
+            "wager",
+            2,
+            "semantic",
+            {"embedder": "default", "semanticRatio": 1.0},
+        ),
+        ("local_segments", "bet", 2, "lexical", None),
+        (
+            "local_segments",
+            "bet",
+            2,
+            "semantic",
+            {"embedder": "default", "semanticRatio": 1.0},
+        ),
+    ]
+    assert response["query_expansion"]["search_queries"] == ["wager", "bet"]
+    assert response["retrieval_context"]["hybrid_retrieval"] == {
+        "enabled": True,
+        "modes": ["lexical", "semantic"],
+        "embedder": "default",
+        "semantic_ratio": 1.0,
+        "fusion": {
+            "method": "reciprocal_rank_fusion",
+            "rank_constant": 60,
+        },
+    }
+    assert response["retrieval_context"]["searches"]["segment"]["retrieval_modes"] == [
+        "lexical",
+        "semantic",
+    ]
+    assert response["retrieval_context"]["searches"]["segment"]["raw_hit_count_before_dedupe"] == 4
+    assert [bundle["candidate"]["segment_id"] for bundle in response["bundles"]] == [
+        "seg_semantic",
+        "seg_alias",
+    ]
+    top = response["bundles"][0]
+    assert top["candidate"]["source"] == "segment"
+    assert top["candidate"]["modality"] == "transcript"
+    assert top["candidate"]["retrieval_mode"] == "semantic"
+    assert top["candidate"]["original_rank"] == 1
+    assert [match["retrieval_mode"] for match in top["candidate"]["retrieval_matches"]] == [
+        "semantic",
+        "lexical",
+    ]
+    assert [match["query"] for match in top["candidate"]["retrieval_matches"]] == [
+        "wager",
+        "bet",
+    ]
+    assert top["merge"]["retrieval_match_count"] == 2
+    assert top["merge"]["selected_retrieval_mode"] == "semantic"
+    assert top["merge"]["deduplicated"] is True
+    assert top["retrieval_sources"][0]["deduplicated"] is True
+    assert [match["rank"] for match in top["retrieval_sources"][0]["matches"]] == [1, 1]
+
+
+def test_query_project_hybrid_retrieval_rejects_invalid_semantic_ratio(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [_segment("seg_1", 1, 0.0, 2.0, "text", [])],
+    )
+
+    try:
+        query_project(
+            client=FakeClient([]),
+            index_uid="local_segments",
+            project_dir=project_dir,
+            query="text",
+            hybrid_retrieval=True,
+            hybrid_semantic_ratio=0.0,
+        )
+    except ValueError as exc:
+        assert "hybrid_semantic_ratio" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_query_project_rerank_reorders_bundles_and_records_breakdown(tmp_path: Path) -> None:

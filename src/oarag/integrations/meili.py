@@ -412,12 +412,21 @@ class MeiliClient:
         query: str,
         limit: int = 10,
         show_ranking_score: bool = True,
+        hybrid: dict[str, Any] | None = None,
+        vector: list[float] | None = None,
+        show_ranking_score_details: bool = False,
     ) -> dict[str, Any]:
         payload = {
             "q": query,
             "limit": limit,
             "showRankingScore": show_ranking_score,
         }
+        if hybrid is not None:
+            payload["hybrid"] = hybrid
+        if vector is not None:
+            payload["vector"] = vector
+        if show_ranking_score_details:
+            payload["showRankingScoreDetails"] = True
         return self._request("POST", f"/indexes/{quote(index_uid)}/search", payload)
 
     def wait_task(
