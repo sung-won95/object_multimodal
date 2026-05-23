@@ -61,6 +61,9 @@ def test_link_entities_writes_timestamp_only_links_and_updates_manifest(tmp_path
         "timestamp_only": 1,
         "semantic_match": 0,
         "timestamp_fallback": 1,
+        "semantic_hint": 0,
+        "domain_lexicon_match": 0,
+        "reference_cue": 0,
         "visual_text_match": 0,
         "visual_description_match": 0,
         "entity_type_match": 0,
@@ -370,6 +373,128 @@ def test_link_entities_uses_project_domain_lexicon_for_aliases(tmp_path: Path) -
     assert summary["counts"]["evidence_type_counts"]["mention_candidate"] == 1
     assert rows[0]["lexical_match"] == ["bet", "board", "size"]
     assert rows[0]["mention_candidate"] == ["bet", "board", "size"]
+    assert "domain_lexicon_match" in rows[0]["evidence"]
+    assert rows[0]["reason_metadata"]["domain_lexicon_matches_by_field"] == {
+        "text": ["bet", "board", "size"]
+    }
+
+
+def test_link_entities_creates_semantic_hint_link_without_transcript_lexical_match(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            {
+                "segment_id": "seg_1",
+                "project_id": "sample_project",
+                "video_id": "video",
+                "start_time": 40.0,
+                "end_time": 42.0,
+                "timestamp_center": 41.0,
+                "transcript_text": "look at this result",
+                "semantic_text": "covariance matrix diagram",
+                "mention_candidates": ["this result"],
+                "frame_refs": ["frame_000040"],
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "ent_semantic",
+                "project_id": "sample_project",
+                "frame_id": "frame_000040",
+                "timestamp": 41.0,
+                "frame_path": "/tmp/frame_000040.jpg",
+                "bbox": None,
+                "text": "",
+                "entity_type": "diagram",
+                "confidence": 0.9,
+                "source": "vlm:stub-vlm",
+                "visual_description": "covariance matrix diagram on slide",
+            }
+        ],
+    )
+
+    summary = link_entities(project_dir=project_dir)
+
+    rows = _read_jsonl(project_dir / "manifests" / "entity_links.jsonl")
+    assert summary["counts"]["timestamp_only_links"] == 0
+    assert summary["counts"]["semantic_links"] == 1
+    assert rows[0]["link_type"] == (
+        "time_overlap+semantic_hint+visual_description_match+entity_type_match"
+    )
+    assert rows[0]["lexical_match"] == []
+    assert rows[0]["mention_candidate"] == []
+    assert rows[0]["evidence"] == [
+        "time_overlap",
+        "semantic_hint",
+        "visual_description_match",
+        "entity_type_match",
+    ]
+    assert rows[0]["score_breakdown"] == {"time_overlap": 0.2, "semantic_hint": 0.3}
+    assert rows[0]["reason_metadata"]["summary"] == "semantic_hint_visual_match"
+    assert rows[0]["reason_metadata"]["semantic_matches_by_field"] == {
+        "visual_description": ["covariance", "diagram", "matrix"],
+        "entity_type": ["diagram"],
+    }
+
+
+def test_link_entities_creates_reference_position_link_without_lexical_match(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            {
+                "segment_id": "seg_1",
+                "project_id": "sample_project",
+                "video_id": "video",
+                "start_time": 50.0,
+                "end_time": 52.0,
+                "timestamp_center": 51.0,
+                "transcript_text": "여기 보이는 내용을 봅니다",
+                "mention_candidates": ["여기"],
+                "frame_refs": ["frame_000050"],
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "ent_reference",
+                "project_id": "sample_project",
+                "frame_id": "frame_000050",
+                "timestamp": 51.0,
+                "frame_path": "/tmp/frame_000050.jpg",
+                "bbox": None,
+                "text": "A1",
+                "entity_type": "diagram",
+                "confidence": 0.9,
+                "source": "vlm:stub-vlm",
+                "position": {"label": "center"},
+            }
+        ],
+    )
+
+    summary = link_entities(project_dir=project_dir)
+
+    rows = _read_jsonl(project_dir / "manifests" / "entity_links.jsonl")
+    assert summary["counts"]["timestamp_only_links"] == 0
+    assert summary["counts"]["semantic_links"] == 1
+    assert rows[0]["link_type"] == "time_overlap+reference_cue+position_match"
+    assert rows[0]["lexical_match"] == []
+    assert rows[0]["mention_candidate"] == []
+    assert rows[0]["score_breakdown"] == {"time_overlap": 0.2, "reference_cue": 0.12}
+    assert rows[0]["reason_metadata"]["summary"] == "reference_cue_visual_position_match"
+    assert rows[0]["reason_metadata"]["reference_cues_by_field"] == {
+        "position": ["center", "여기"]
+    }
 
 
 def test_link_entities_skips_non_overlapping_entities(tmp_path: Path) -> None:

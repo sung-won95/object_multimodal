@@ -87,6 +87,16 @@ def test_query_project_returns_multimodal_bundle(tmp_path: Path) -> None:
                 "time_overlap": True,
                 "lexical_match": ["bet", "board", "size"],
                 "mention_candidate": ["board"],
+                "score_breakdown": {
+                    "time_overlap": 0.2,
+                    "visual_text_match": 0.6,
+                    "mention_candidate": 0.45,
+                    "domain_lexicon_match": 0.1,
+                },
+                "reason_metadata": {
+                    "domain_lexicon_matches_by_field": {"text": ["bet"]},
+                    "reference_cues_by_field": {"position": ["this", "center"]},
+                },
             }
         ],
     )
@@ -148,6 +158,13 @@ def test_query_project_returns_multimodal_bundle(tmp_path: Path) -> None:
     assert bundle["linked_entities"][0]["entity"]["text"] == "bet size board"
     assert "shared terms: bet, board, size" in bundle["linked_entities"][0]["explanation"]
     assert "mention/entity hint: board" in bundle["linked_entities"][0]["explanation"]
+    assert "domain alias: bet" in bundle["linked_entities"][0]["explanation"]
+    assert "reference/position cue: center, this" in bundle["linked_entities"][0]["explanation"]
+    assert "score components:" in bundle["linked_entities"][0]["explanation"]
+    assert bundle["linked_entities"][0]["score_breakdown"]["domain_lexicon_match"] == 0.1
+    assert bundle["linked_entities"][0]["reason_metadata"]["reference_cues_by_field"] == {
+        "position": ["this", "center"]
+    }
     assert bundle["summary"]["frame_paths"] == ["/tmp/f1.jpg", "/tmp/f6.jpg", "/tmp/f8.jpg", "/tmp/f12.jpg"]
     assert "bet size board" in response["summary_lines"][0]
 

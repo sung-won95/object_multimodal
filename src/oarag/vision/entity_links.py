@@ -29,6 +29,53 @@ STOP_TERMS = {
     "to",
     "with",
 }
+REFERENCE_CUE_TERMS = {
+    "above",
+    "below",
+    "center",
+    "central",
+    "here",
+    "left",
+    "lower",
+    "right",
+    "that",
+    "there",
+    "this",
+    "upper",
+    "가운데",
+    "그",
+    "아래",
+    "여기",
+    "오른쪽",
+    "왼쪽",
+    "위",
+    "이",
+    "이것",
+    "저",
+    "중앙",
+}
+POSITION_CUE_TERMS = {
+    "above",
+    "below",
+    "center",
+    "central",
+    "left",
+    "lower",
+    "right",
+    "upper",
+    "가운데",
+    "아래",
+    "오른쪽",
+    "왼쪽",
+    "위",
+    "중앙",
+}
+SEGMENT_SEMANTIC_HINT_FIELDS = (
+    "semantic_text",
+    "semantic_hint",
+    "semantic_hints",
+    "question",
+)
 
 TIME_OVERLAP_SCORE = 0.2
 VISUAL_MATCH_FIELDS = (
@@ -55,6 +102,13 @@ VISUAL_FIELD_SCORE_WEIGHTS = {
 MENTION_SCORE_BASE = 0.45
 MENTION_SCORE_PER_EXTRA_TERM = 0.05
 MENTION_SCORE_CAP = 0.6
+SEMANTIC_HINT_SCORE_BASE = 0.22
+SEMANTIC_HINT_SCORE_PER_EXTRA_TERM = 0.04
+SEMANTIC_HINT_SCORE_CAP = 0.38
+DOMAIN_LEXICON_SCORE_BASE = 0.1
+DOMAIN_LEXICON_SCORE_PER_EXTRA_TERM = 0.03
+DOMAIN_LEXICON_SCORE_CAP = 0.18
+REFERENCE_CUE_SCORE = 0.12
 
 
 def link_entities(
@@ -159,10 +213,10 @@ def link_entities(
             "lexical_links": sum(1 for link in links if link.lexical_match),
             "mention_links": sum(1 for link in links if link.mention_candidate),
             "timestamp_only_links": sum(
-                1 for link in links if not link.lexical_match and not link.mention_candidate
+                1 for link in links if _is_timestamp_only_link(link)
             ),
             "semantic_links": sum(
-                1 for link in links if link.lexical_match or link.mention_candidate
+                1 for link in links if _is_semantic_link(link)
             ),
             "evidence_type_counts": evidence_type_counts,
             "score_summary": _score_summary(links),
@@ -232,15 +286,36 @@ def _link_evidence(
         entity,
         domain_lexicon=domain_lexicon,
     )
+    semantic_matches_by_field = _semantic_matches_by_field(
+        segment,
+        entity,
+        domain_lexicon=domain_lexicon,
+    )
+    reference_cues = _reference_cues(
+        segment,
+        entity,
+        domain_lexicon=domain_lexicon,
+    )
+    domain_lexicon_matches = _domain_lexicon_matches(
+        segment,
+        entity,
+        domain_lexicon=domain_lexicon,
+    )
     lexical_match = _unique_sorted_terms(lexical_matches_by_field)
     mention_match = _unique_sorted_terms(mention_matches_by_field)
     evidence = _evidence_types(
         lexical_matches_by_field=lexical_matches_by_field,
         mention_matches_by_field=mention_matches_by_field,
+        semantic_matches_by_field=semantic_matches_by_field,
+        domain_lexicon_matches=domain_lexicon_matches,
+        reference_cues=reference_cues,
     )
     score_breakdown = _score_breakdown(
         lexical_matches_by_field=lexical_matches_by_field,
         mention_match=mention_match,
+        semantic_match=_unique_sorted_terms(semantic_matches_by_field),
+        domain_lexicon_matches=domain_lexicon_matches,
+        reference_cues=reference_cues,
     )
     return {
         "link_type": _link_type(
@@ -257,6 +332,9 @@ def _link_evidence(
             entity=entity,
             lexical_matches_by_field=lexical_matches_by_field,
             mention_matches_by_field=mention_matches_by_field,
+            semantic_matches_by_field=semantic_matches_by_field,
+            domain_lexicon_matches=domain_lexicon_matches,
+            reference_cues=reference_cues,
         ),
     }
 
@@ -309,6 +387,95 @@ def _mention_matches_by_field(
     return matches_by_field
 
 
+def _semantic_matches_by_field(
+    segment: dict[str, Any],
+    entity: VisualEntity,
+    *,
+    domain_lexicon: DomainLexicon,
+) -> dict[str, list[str]]:
+    semantic_text = _segment_semantic_hint_text(segment)
+    if not semantic_text:
+        return {field_name: [] for field_name in VISUAL_MATCH_FIELDS}
+
+    semantic_terms = _expanded_terms(semantic_text, domain_lexicon=domain_lexicon)
+    transcript_terms = _expanded_terms(
+        str(segment.get("transcript_text", "")),
+        domain_lexicon=domain_lexicon,
+    )
+    matches_by_field: dict[str, list[str]] = {}
+    for field_name, field_text in _visual_field_texts(entity).items():
+        field_terms = _expanded_terms(field_text, domain_lexicon=domain_lexicon)
+        matches_by_field[field_name] = sorted(
+            term
+            for term in semantic_terms & field_terms
+            if _informative_term(term) and term not in transcript_terms
+        )
+    return matches_by_field
+
+
+def _segment_semantic_hint_text(segment: dict[str, Any]) -> str:
+    values: list[str] = []
+    for field_name in SEGMENT_SEMANTIC_HINT_FIELDS:
+        values.extend(_visual_metadata_values(segment.get(field_name)))
+    return " ".join(values)
+
+
+def _reference_cues(
+    segment: dict[str, Any],
+    entity: VisualEntity,
+    *,
+    domain_lexicon: DomainLexicon,
+) -> dict[str, list[str]]:
+    transcript_text = str(segment.get("transcript_text", ""))
+    segment_terms = _expanded_terms(transcript_text, domain_lexicon=domain_lexicon)
+    for candidate in _candidate_mentions(segment=segment, transcript_text=transcript_text):
+        segment_terms.update(_expanded_terms(candidate, domain_lexicon=domain_lexicon))
+
+    reference_terms = sorted(term for term in segment_terms if term in REFERENCE_CUE_TERMS)
+    if not reference_terms:
+        return {}
+
+    matches: dict[str, list[str]] = {}
+    for field_name in ("position", "visual_description", "relations"):
+        field_terms = _expanded_terms(
+            _visual_field_texts(entity).get(field_name, ""),
+            domain_lexicon=domain_lexicon,
+        )
+        matched_positions = sorted(term for term in field_terms if term in POSITION_CUE_TERMS)
+        if matched_positions:
+            matches[field_name] = sorted(set(reference_terms + matched_positions))
+    return matches
+
+
+def _domain_lexicon_matches(
+    segment: dict[str, Any],
+    entity: VisualEntity,
+    *,
+    domain_lexicon: DomainLexicon,
+) -> dict[str, list[str]]:
+    if not domain_lexicon.enabled:
+        return {}
+
+    transcript_text = str(segment.get("transcript_text", ""))
+    segment_sources = _canonical_sources(
+        " ".join([transcript_text, *_candidate_mentions(segment=segment, transcript_text=transcript_text)]),
+        domain_lexicon=domain_lexicon,
+    )
+    matches: dict[str, list[str]] = {}
+    for field_name, field_text in _visual_field_texts(entity).items():
+        field_sources = _canonical_sources(field_text, domain_lexicon=domain_lexicon)
+        field_matches: list[str] = []
+        for canonical in sorted(set(segment_sources) & set(field_sources)):
+            if not _informative_term(canonical):
+                continue
+            raw_terms = segment_sources[canonical] | field_sources[canonical]
+            if any(raw != canonical for raw in raw_terms):
+                field_matches.append(canonical)
+        if field_matches:
+            matches[field_name] = field_matches
+    return matches
+
+
 def _candidate_mentions(*, segment: dict[str, Any], transcript_text: str) -> list[str]:
     candidates = segment.get("mention_candidates")
     if not isinstance(candidates, list):
@@ -356,6 +523,15 @@ def _expanded_terms(text: str, *, domain_lexicon: DomainLexicon) -> set[str]:
     return {domain_lexicon.canonicalize(term) for term in _terms(text)}
 
 
+def _canonical_sources(text: str, *, domain_lexicon: DomainLexicon) -> dict[str, set[str]]:
+    sources: dict[str, set[str]] = {}
+    for term in _terms(text):
+        canonical = domain_lexicon.canonicalize(term)
+        if canonical:
+            sources.setdefault(canonical, set()).add(term)
+    return sources
+
+
 def _informative_term(term: str) -> bool:
     return len(term) >= 2 and not term.isdigit() and term not in STOP_TERMS
 
@@ -386,14 +562,29 @@ def _evidence_types(
     *,
     lexical_matches_by_field: dict[str, list[str]],
     mention_matches_by_field: dict[str, list[str]],
+    semantic_matches_by_field: dict[str, list[str]],
+    domain_lexicon_matches: dict[str, list[str]],
+    reference_cues: dict[str, list[str]],
 ) -> list[str]:
     evidence = ["time_overlap"]
     if any(lexical_matches_by_field.values()):
         evidence.append("lexical_match")
     if any(mention_matches_by_field.values()):
         evidence.append("mention_candidate")
+    if any(semantic_matches_by_field.values()):
+        evidence.append("semantic_hint")
+    if any(domain_lexicon_matches.values()):
+        evidence.append("domain_lexicon_match")
+    if any(reference_cues.values()):
+        evidence.append("reference_cue")
     for field_name in VISUAL_MATCH_FIELDS:
-        if lexical_matches_by_field.get(field_name) or mention_matches_by_field.get(field_name):
+        if (
+            lexical_matches_by_field.get(field_name)
+            or mention_matches_by_field.get(field_name)
+            or semantic_matches_by_field.get(field_name)
+            or domain_lexicon_matches.get(field_name)
+            or reference_cues.get(field_name)
+        ):
             evidence.append(VISUAL_FIELD_EVIDENCE[field_name])
     if evidence == ["time_overlap"]:
         evidence.append("timestamp_fallback")
@@ -406,16 +597,23 @@ def _link_type(
     mention_match: list[str],
     evidence: list[str],
 ) -> str:
+    parts = ["time_overlap"]
     if lexical_match and mention_match:
-        parts = ["time_overlap", "lexical_match", "mention_candidate"]
+        parts.extend(["lexical_match", "mention_candidate"])
     elif lexical_match:
-        parts = ["time_overlap", "lexical_match"]
+        parts.append("lexical_match")
     elif mention_match:
-        parts = ["time_overlap", "mention_candidate"]
-    else:
+        parts.append("mention_candidate")
+    elif not any(
+        evidence_type in evidence
+        for evidence_type in ("semantic_hint", "domain_lexicon_match", "reference_cue")
+    ):
         return "time_overlap"
 
     for evidence_type in (
+        "semantic_hint",
+        "domain_lexicon_match",
+        "reference_cue",
         "visual_description_match",
         "entity_type_match",
         "position_match",
@@ -430,6 +628,9 @@ def _score_breakdown(
     *,
     lexical_matches_by_field: dict[str, list[str]],
     mention_match: list[str],
+    semantic_match: list[str],
+    domain_lexicon_matches: dict[str, list[str]],
+    reference_cues: dict[str, list[str]],
 ) -> dict[str, float]:
     breakdown = {"time_overlap": TIME_OVERLAP_SCORE}
     for field_name in VISUAL_MATCH_FIELDS:
@@ -445,6 +646,21 @@ def _score_breakdown(
             MENTION_SCORE_BASE + (MENTION_SCORE_PER_EXTRA_TERM * max(0, len(mention_match) - 1)),
         )
         breakdown["mention_candidate"] = round(component, 3)
+    if semantic_match:
+        component = min(
+            SEMANTIC_HINT_SCORE_CAP,
+            SEMANTIC_HINT_SCORE_BASE + (SEMANTIC_HINT_SCORE_PER_EXTRA_TERM * max(0, len(semantic_match) - 1)),
+        )
+        breakdown["semantic_hint"] = round(component, 3)
+    domain_terms = _unique_sorted_terms(domain_lexicon_matches)
+    if domain_terms:
+        component = min(
+            DOMAIN_LEXICON_SCORE_CAP,
+            DOMAIN_LEXICON_SCORE_BASE + (DOMAIN_LEXICON_SCORE_PER_EXTRA_TERM * max(0, len(domain_terms) - 1)),
+        )
+        breakdown["domain_lexicon_match"] = round(component, 3)
+    if any(reference_cues.values()):
+        breakdown["reference_cue"] = REFERENCE_CUE_SCORE
     return breakdown
 
 
@@ -453,14 +669,29 @@ def _reason_metadata(
     entity: VisualEntity,
     lexical_matches_by_field: dict[str, list[str]],
     mention_matches_by_field: dict[str, list[str]],
+    semantic_matches_by_field: dict[str, list[str]],
+    domain_lexicon_matches: dict[str, list[str]],
+    reference_cues: dict[str, list[str]],
 ) -> dict[str, Any]:
     lexical_details = _nonempty_matches(lexical_matches_by_field)
     mention_details = _nonempty_matches(mention_matches_by_field)
-    matched_fields = sorted(set(lexical_details) | set(mention_details))
+    semantic_details = _nonempty_matches(semantic_matches_by_field)
+    domain_lexicon_details = _nonempty_matches(domain_lexicon_matches)
+    reference_details = _nonempty_matches(reference_cues)
+    matched_fields = sorted(
+        set(lexical_details)
+        | set(mention_details)
+        | set(semantic_details)
+        | set(domain_lexicon_details)
+        | set(reference_details)
+    )
     metadata: dict[str, Any] = {
         "summary": _reason_summary(
             lexical_matches_by_field=lexical_matches_by_field,
             mention_matches_by_field=mention_matches_by_field,
+            semantic_matches_by_field=semantic_matches_by_field,
+            domain_lexicon_matches=domain_lexicon_matches,
+            reference_cues=reference_cues,
         ),
         "matched_visual_fields": matched_fields,
         "visual_fields_considered": _visual_fields_considered(entity),
@@ -469,6 +700,12 @@ def _reason_metadata(
         metadata["lexical_matches_by_field"] = lexical_details
     if mention_details:
         metadata["mention_matches_by_field"] = mention_details
+    if semantic_details:
+        metadata["semantic_matches_by_field"] = semantic_details
+    if domain_lexicon_details:
+        metadata["domain_lexicon_matches_by_field"] = domain_lexicon_details
+    if reference_details:
+        metadata["reference_cues_by_field"] = reference_details
     if entity.source_model:
         metadata["source_model"] = entity.source_model
     if entity.source:
@@ -480,9 +717,22 @@ def _reason_summary(
     *,
     lexical_matches_by_field: dict[str, list[str]],
     mention_matches_by_field: dict[str, list[str]],
+    semantic_matches_by_field: dict[str, list[str]],
+    domain_lexicon_matches: dict[str, list[str]],
+    reference_cues: dict[str, list[str]],
 ) -> str:
-    if not any(lexical_matches_by_field.values()) and not any(mention_matches_by_field.values()):
+    if (
+        not any(lexical_matches_by_field.values())
+        and not any(mention_matches_by_field.values())
+        and not any(semantic_matches_by_field.values())
+        and not any(domain_lexicon_matches.values())
+        and not any(reference_cues.values())
+    ):
         return "timestamp_fallback_only"
+    if any(semantic_matches_by_field.values()):
+        return "semantic_hint_visual_match"
+    if any(domain_lexicon_matches.values()):
+        return "domain_lexicon_visual_match"
     if (
         lexical_matches_by_field.get("visual_description")
         or mention_matches_by_field.get("visual_description")
@@ -492,6 +742,8 @@ def _reason_summary(
         return "visual_description_match"
     if any(mention_matches_by_field.values()):
         return "mention_candidate_visual_match"
+    if any(reference_cues.values()):
+        return "reference_cue_visual_position_match"
     return "visual_lexical_match"
 
 
@@ -519,15 +771,14 @@ def _evidence_type_counts(links: list[EntityLink]) -> dict[str, int]:
         "time_overlap": sum(1 for link in links if link.time_overlap),
         "lexical_match": sum(1 for link in links if link.lexical_match),
         "mention_candidate": sum(1 for link in links if link.mention_candidate),
-        "timestamp_only": sum(
-            1 for link in links if not link.lexical_match and not link.mention_candidate
-        ),
-        "semantic_match": sum(
-            1 for link in links if link.lexical_match or link.mention_candidate
-        ),
+        "timestamp_only": sum(1 for link in links if _is_timestamp_only_link(link)),
+        "semantic_match": sum(1 for link in links if _is_semantic_link(link)),
     }
     for evidence_type in (
         "timestamp_fallback",
+        "semantic_hint",
+        "domain_lexicon_match",
+        "reference_cue",
         "visual_text_match",
         "visual_description_match",
         "entity_type_match",
@@ -536,6 +787,21 @@ def _evidence_type_counts(links: list[EntityLink]) -> dict[str, int]:
     ):
         counts[evidence_type] = sum(1 for link in links if evidence_type in link.evidence)
     return counts
+
+
+def _is_timestamp_only_link(link: EntityLink) -> bool:
+    return "timestamp_fallback" in link.evidence or (
+        not link.lexical_match
+        and not link.mention_candidate
+        and not any(
+            evidence_type in link.evidence
+            for evidence_type in ("semantic_hint", "domain_lexicon_match", "reference_cue")
+        )
+    )
+
+
+def _is_semantic_link(link: EntityLink) -> bool:
+    return not _is_timestamp_only_link(link)
 
 
 def _score_summary(links: list[EntityLink]) -> dict[str, float | None]:
@@ -628,10 +894,10 @@ def _update_project_manifest(
         "lexical_links": sum(1 for link in links if link.lexical_match),
         "mention_links": sum(1 for link in links if link.mention_candidate),
         "timestamp_only_links": sum(
-            1 for link in links if not link.lexical_match and not link.mention_candidate
+            1 for link in links if _is_timestamp_only_link(link)
         ),
         "semantic_links": sum(
-            1 for link in links if link.lexical_match or link.mention_candidate
+            1 for link in links if _is_semantic_link(link)
         ),
         "evidence_type_counts": evidence_type_counts,
         "score_summary": _score_summary(links),

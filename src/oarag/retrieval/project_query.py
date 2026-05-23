@@ -696,6 +696,8 @@ def _linked_entities_for_segment(
                 "time_overlap": link.time_overlap,
                 "lexical_match": link.lexical_match,
                 "mention_candidate": link.mention_candidate,
+                "score_breakdown": link.score_breakdown,
+                "reason_metadata": link.reason_metadata,
                 "explanation": _link_explanation(link),
                 "entity": entity.to_dict() if entity is not None else None,
             }
@@ -832,12 +834,46 @@ def _linked_entity_label(linked_entity: dict[str, Any]) -> str | None:
 
 
 def _link_explanation(link: EntityLink) -> str:
-    parts = [f"time overlap evidence (score={link.score:.2f})"]
+    if "timestamp_fallback" in link.evidence:
+        parts = [f"timestamp-only fallback (score={link.score:.2f})"]
+    else:
+        parts = [f"entity link evidence (score={link.score:.2f})"]
     if link.lexical_match:
         parts.append(f"shared terms: {', '.join(link.lexical_match)}")
     if link.mention_candidate:
         parts.append(f"mention/entity hint: {', '.join(link.mention_candidate)}")
+    semantic_matches = _metadata_match_terms(link.reason_metadata, "semantic_matches_by_field")
+    if semantic_matches:
+        parts.append(f"semantic hint: {', '.join(semantic_matches)}")
+    domain_matches = _metadata_match_terms(link.reason_metadata, "domain_lexicon_matches_by_field")
+    if domain_matches:
+        parts.append(f"domain alias: {', '.join(domain_matches)}")
+    reference_cues = _metadata_match_terms(link.reason_metadata, "reference_cues_by_field")
+    if reference_cues:
+        parts.append(f"reference/position cue: {', '.join(reference_cues)}")
+    if link.score_breakdown:
+        parts.append(
+            "score components: "
+            + ", ".join(
+                f"{key}={value:.2f}"
+                for key, value in sorted(link.score_breakdown.items())
+            )
+        )
     return "; ".join(parts)
+
+
+def _metadata_match_terms(metadata: dict[str, Any], key: str) -> list[str]:
+    values = metadata.get(key)
+    if not isinstance(values, dict):
+        return []
+    terms = {
+        str(item)
+        for matches in values.values()
+        if isinstance(matches, list)
+        for item in matches
+        if str(item).strip()
+    }
+    return sorted(terms)
 
 
 def _serialized_entity_sort_key(entity: dict[str, Any]) -> tuple[bool, float, str, str]:
