@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 import time
@@ -34,6 +35,7 @@ VLM_ALLOWED_ROW_STATUSES = {
     VLM_PARSE_FAILURE_STATUS,
 }
 _SENSITIVE_OPTION_PARTS = ("api_key", "apikey", "token", "secret", "password", "credential")
+_COMMAND_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 class VLMParseError(ValueError):
@@ -686,6 +688,13 @@ def _format_command(
     }
     formatted: list[str] = []
     for part in parts:
+        unknown_placeholders = [
+            match.group(1)
+            for match in _COMMAND_PLACEHOLDER_RE.finditer(part)
+            if match.group(1) not in values
+        ]
+        if unknown_placeholders:
+            raise ValueError(f"Unknown VLM command placeholder: {unknown_placeholders[0]}")
         resolved_part = part
         for key, value in values.items():
             resolved_part = resolved_part.replace(f"{{{key}}}", value)
@@ -708,13 +717,21 @@ def _run_command(
             input=stdin_payload,
         )
     except FileNotFoundError as exc:
-        raise RuntimeError(f"VLM backend command not found for frame_id={frame_id}: {command[0]}") from exc
+        raise RuntimeError(
+            f"VLM backend command not found for frame_id={frame_id}: "
+            f"{_command_executable_name(command)}"
+        ) from exc
     except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.strip() if exc.stderr else ""
         raise RuntimeError(
             f"VLM backend command failed for frame_id={frame_id}: "
-            f"{' '.join(command)} exited with {exc.returncode}\n{stderr}"
+            f"{_command_executable_name(command)} exited with {exc.returncode}"
         ) from exc
+
+
+def _command_executable_name(command: list[str]) -> str:
+    if not command:
+        return "<empty-command>"
+    return Path(command[0]).name or "<unknown-command>"
 
 
 def _command_uses_json_stdin(options: Mapping[str, Any]) -> bool:

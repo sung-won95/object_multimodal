@@ -350,6 +350,85 @@ def test_run_vlm_command_backend_schema_failures_become_parse_failure_rows(
     )
 
 
+def test_run_vlm_command_backend_failure_reason_redacts_command_secrets(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "secret_command_project"
+    secret = "SECRET_SHOULD_NOT_APPEAR"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": "frames/frame_000001.jpg",
+                "timestamp": 1.0,
+            }
+        ],
+    )
+
+    summary = run_vlm(
+        project_dir=project_dir,
+        backend="command",
+        model="fixture-vlm",
+        options={
+            "command": [
+                sys.executable,
+                "-c",
+                "import sys; sys.exit(7)",
+                "--api-key",
+                secret,
+            ],
+            "api_key": secret,
+        },
+    )
+
+    observations_text = (
+        project_dir / "manifests" / "vlm_visual_observations.jsonl"
+    ).read_text(encoding="utf-8")
+    manifest_text = (project_dir / "manifests" / "project_manifest.json").read_text(
+        encoding="utf-8"
+    )
+    rows = _read_jsonl(project_dir / "manifests" / "vlm_visual_observations.jsonl")
+
+    assert summary["status"] == "completed_with_errors"
+    assert rows[0]["status"] == "backend_failure"
+    assert rows[0]["metadata"]["failure_reason"].endswith("exited with 7")
+    assert "--api-key" not in rows[0]["metadata"]["failure_reason"]
+    assert secret not in observations_text
+    assert secret not in manifest_text
+
+
+def test_run_vlm_command_backend_rejects_unknown_placeholder(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "placeholder_project"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": "frames/frame_000001.jpg",
+                "timestamp": 1.0,
+            }
+        ],
+    )
+
+    summary = run_vlm(
+        project_dir=project_dir,
+        backend="command",
+        model="fixture-vlm",
+        options={"command": ["echo", "{unknown}"]},
+    )
+
+    rows = _read_jsonl(project_dir / "manifests" / "vlm_visual_observations.jsonl")
+
+    assert summary["status"] == "completed_with_errors"
+    assert rows[0]["status"] == "backend_failure"
+    assert rows[0]["metadata"]["failure_reason"] == (
+        "Unknown VLM command placeholder: unknown"
+    )
+
+
 def test_vlm_backend_errors_are_clear() -> None:
     with pytest.raises(ValueError, match="Unsupported VLM backend"):
         make_vlm_backend("missing-backend")
