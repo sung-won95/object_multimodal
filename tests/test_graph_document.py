@@ -22,7 +22,14 @@ def test_build_graph_document_converts_project_artifacts_deterministically(
         project_dir / "segments" / "lecture_segments_aligned.jsonl",
         [
             _segment("seg_1", 1, 0.0, 4.0, "Intro board", ["frame_000001"]),
-            _segment("seg_2", 2, 5.0, 9.0, "Bet size is on this board", ["frame_000006"]),
+            _segment(
+                "seg_2",
+                2,
+                5.0,
+                9.0,
+                "Bet size is on this board",
+                [{"frame_id": "frame_000006", "frame_path": "frames/frame_000006.jpg"}],
+            ),
         ],
     )
     _write_jsonl(
@@ -160,6 +167,76 @@ def test_build_graph_document_converts_project_artifacts_deterministically(
     assert ("LINKED_TO", "segment:seg_2", "visual_entity:sample_project:entity_board") in relationship_pairs
 
 
+def test_build_graph_document_keeps_scoped_frame_and_visual_keys_when_ids_collide(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    _write_json(
+        project_dir / "manifests" / "project_manifest.json",
+        {"project_id": "sample_project", "title": "Sample Lecture"},
+    )
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment(
+                "seg_1",
+                1,
+                0.0,
+                2.0,
+                "Shared id appears on the board",
+                [{"frame_id": "shared_id"}],
+            )
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "shared_id",
+                "project_id": "sample_project",
+                "video_id": "video_a",
+                "timestamp": 1.0,
+                "frame_path": "frames/shared_id.jpg",
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "shared_id",
+                "project_id": "sample_project",
+                "frame_id": "shared_id",
+                "timestamp": 1.0,
+                "text": "BOARD",
+                "entity_type": "ocr_text",
+                "confidence": 0.91,
+            }
+        ],
+    )
+
+    document = build_graph_document(project_dir=project_dir).to_dict()
+
+    nodes_by_key = {node["key"]: node for node in document["nodes"]}
+    assert nodes_by_key["frame:sample_project:shared_id"]["labels"] == ["Frame"]
+    assert nodes_by_key["visual_entity:sample_project:shared_id"]["labels"] == ["VisualEntity"]
+
+    relationship_pairs = {
+        (relationship["type"], relationship["start_node_key"], relationship["end_node_key"])
+        for relationship in document["relationships"]
+    }
+    assert (
+        "CONTAINS",
+        "frame:sample_project:shared_id",
+        "visual_entity:sample_project:shared_id",
+    ) in relationship_pairs
+    assert (
+        "ALIGNED_WITH",
+        "segment:seg_1",
+        "frame:sample_project:shared_id",
+    ) in relationship_pairs
+
+
 def test_build_graph_document_falls_back_when_optional_artifacts_are_missing(
     tmp_path: Path,
 ) -> None:
@@ -202,7 +279,7 @@ def _segment(
     start_time: float,
     end_time: float,
     transcript_text: str,
-    frame_refs: list[str],
+    frame_refs: list[object],
 ) -> dict:
     return {
         "segment_id": segment_id,

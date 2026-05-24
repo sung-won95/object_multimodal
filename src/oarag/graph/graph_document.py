@@ -318,7 +318,7 @@ class _GraphDocumentBuilder:
         links: list[EntityLink],
     ) -> None:
         for resolution in resolve_references(
-            segments=segments,
+            segments=_segments_with_string_frame_refs(segments),
             domain_lexicon=self.domain_lexicon,
             entities=entities,
             links=links,
@@ -646,11 +646,49 @@ def _frame_id(frame: dict[str, Any]) -> str:
     return ""
 
 
-def _aligned_frame_ids(segment: dict[str, Any], frames_by_id: dict[str, dict[str, Any]]) -> list[str]:
+def _aligned_frame_ids(
+    segment: dict[str, Any],
+    frames_by_id: dict[str, dict[str, Any]],
+) -> list[str]:
+    return sorted(
+        {frame_id for frame_id in _segment_frame_ids(segment) if frame_id in frames_by_id}
+    )
+
+
+def _segments_with_string_frame_refs(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for segment in segments:
+        if not isinstance(segment.get("frame_refs"), list):
+            normalized.append(segment)
+            continue
+        normalized_segment = dict(segment)
+        normalized_segment["frame_refs"] = _segment_frame_ids(segment)
+        normalized.append(normalized_segment)
+    return normalized
+
+
+def _segment_frame_ids(segment: dict[str, Any]) -> list[str]:
     frame_refs = segment.get("frame_refs")
-    if isinstance(frame_refs, list):
-        return sorted({str(frame_ref) for frame_ref in frame_refs if str(frame_ref) in frames_by_id})
-    return []
+    if not isinstance(frame_refs, list):
+        return []
+    return sorted(
+        {
+            frame_id
+            for frame_id in (_frame_ref_id(frame_ref) for frame_ref in frame_refs)
+            if frame_id
+        }
+    )
+
+
+def _frame_ref_id(frame_ref: Any) -> str:
+    if isinstance(frame_ref, dict):
+        frame_id = frame_ref.get("frame_id")
+        if frame_id is None:
+            return ""
+        return str(frame_id)
+    if frame_ref is None:
+        return ""
+    return str(frame_ref)
 
 
 def _temporally_near_frame_ids(
