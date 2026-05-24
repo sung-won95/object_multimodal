@@ -7,7 +7,13 @@ from oarag.benchmark import parse_time_hint, run_benchmark
 
 
 class FakeClient:
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | None = None,
+    ) -> dict:
         if "gravity" in query.lower():
             hits = [
                 {

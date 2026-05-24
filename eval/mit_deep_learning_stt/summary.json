@@ -1,0 +1,28 @@
+{
+  "run_id": "mit_deep_learning_stt_seed_v1",
+  "query_count": 48,
+  "video_count": 24,
+  "split_counts": {
+    "dev": 24,
+    "test": 24
+  },
+  "modality_counts": {
+    "audio": 16,
+    "both": 32
+  },
+  "question_type_counts": {
+    "audio_reasoning": 3,
+    "concept_explanation": 7,
+    "definition_lookup": 6,
+    "formula_table_lookup": 2,
+    "multimodal_grounded": 29,
+    "visual_object_reference": 1
+  },
+  "frame_backed_count": 32,
+  "linked_entity_backed_count": 21,
+  "index": "mit_deep_learning_stt_segments",
+  "visual_index": "mit_deep_learning_stt_visual_entities",
+  "license": "CC BY-NC-SA 4.0",
+  "source": "MIT OpenCourseWare 6.7960 Deep Learning, Fall 2024",
+  "missing_lecture_note": "Lecture 22 is absent from the MIT OCW gallery and from the local corpus."
+}

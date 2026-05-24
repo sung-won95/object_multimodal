@@ -82,6 +82,7 @@ def query_project(
     entity_links = [EntityLink.from_dict(row) for row in _read_optional_jsonl(resolved_entity_links_path)]
 
     segment_lookup = {str(segment.get("segment_id")): segment for segment in segments}
+    project_filter = _project_filter(project_dir=resolved_project_dir, segments=segments)
     frame_lookup = {frame_id(frame): frame for frame in frames}
     window_config = resolve_window_config(
         window_seconds=window_seconds,
@@ -99,7 +100,7 @@ def query_project(
         links_by_entity[link.entity_id].append(link)
 
     search_query = domain_lexicon.expand_query(query)
-    search_response = client.search(index_uid, search_query, limit=limit)
+    search_response = client.search(index_uid, search_query, limit=limit, filter=project_filter)
     segment_hits = search_response.get("hits", [])
 
     bundles: list[dict[str, Any]] = []
@@ -113,7 +114,12 @@ def query_project(
     visual_hits: list[dict[str, Any]] = []
     if visual_index_uid:
         try:
-            visual_search_response = client.search(visual_index_uid, search_query, limit=limit)
+            visual_search_response = client.search(
+                visual_index_uid,
+                search_query,
+                limit=limit,
+                filter=project_filter,
+            )
             visual_hits = visual_search_response.get("hits", [])
         except urllib.error.HTTPError as exc:
             if exc.code != 404:
@@ -467,6 +473,21 @@ def _resolve_visual_entity_target_segment(
         }
 
     return None, {"method": "unresolved"}
+
+
+def _project_filter(*, project_dir: Path, segments: list[dict[str, Any]]) -> str:
+    project_id = ""
+    for segment in segments:
+        candidate = str(segment.get("project_id") or "").strip()
+        if candidate:
+            project_id = candidate
+            break
+    project_id = project_id or project_dir.name
+    return f'project_id = "{_escape_meili_filter_string(project_id)}"'
+
+
+def _escape_meili_filter_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _best_entity_link(

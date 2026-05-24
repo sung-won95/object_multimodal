@@ -11,7 +11,7 @@ class FakeClient:
         self.processing_time_ms = processing_time_ms
         self.queries: list[str] = []
 
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+    def search(self, index_uid: str, query: str, limit: int = 10, filter: str | None = None) -> dict:
         self.queries.append(query)
         return {
             "hits": self.hits[:limit],
@@ -26,7 +26,7 @@ class MultiIndexFakeClient:
         self.hits_by_index = hits_by_index
         self.searches: list[tuple[str, str, int]] = []
 
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+    def search(self, index_uid: str, query: str, limit: int = 10, filter: str | None = None) -> dict:
         self.searches.append((index_uid, query, limit))
         return {
             "hits": self.hits_by_index.get(index_uid, [])[:limit],

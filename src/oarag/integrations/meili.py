@@ -406,12 +406,15 @@ class MeiliClient:
         query: str,
         limit: int = 10,
         show_ranking_score: bool = True,
+        filter: str | list[str] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "q": query,
             "limit": limit,
             "showRankingScore": show_ranking_score,
         }
+        if filter is not None:
+            payload["filter"] = filter
         return self._request("POST", f"/indexes/{quote(index_uid)}/search", payload)
 
     def wait_task(

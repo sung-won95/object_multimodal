@@ -19,7 +19,13 @@ DEFAULT_DELTAS = [5, 10, 15]
 
 
 class SearchClient(Protocol):
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict[str, Any]: ...
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | None = None,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -189,6 +195,7 @@ def run_local_project_suite(
     queries_path = _resolve_path(base_dir, suite["queries"])
     project_dir = _project_dir_from_suite(suite=suite, base_dir=base_dir, repo_root=repo_root)
     index_uid = str(suite["index"])
+    visual_index_uid = str(suite["visual_index"]) if suite.get("visual_index") else None
     limit = int(suite.get("limit", 5))
     neighbor_count = int(suite.get("neighbor_count", 1))
     suite_id = str(suite.get("suite_id") or project_dir.name)
@@ -219,6 +226,7 @@ def run_local_project_suite(
             index_uid=index_uid,
             project_dir=project_dir,
             query=str(query_row["query_text"]),
+            visual_index_uid=visual_index_uid,
             limit=limit,
             neighbor_count=neighbor_count,
             domain_lexicon_path=domain_lexicon_path,
@@ -235,6 +243,7 @@ def run_local_project_suite(
         processing_time_ms = response.get("processing_time_ms")
         latencies.append(_optional_float(processing_time_ms) or elapsed_ms)
         bundles = response.get("bundles", [])
+        response_counts = response.get("counts") if isinstance(response.get("counts"), dict) else {}
         top_candidate = bundles[0].get("candidate") if bundles else None
         expected_ranges = parse_time_hint(str(query_row.get("expected_time_hint") or ""))
         candidate_errors = [
@@ -257,6 +266,7 @@ def run_local_project_suite(
                 "query_id": str(query_row.get("query_id") or query_row.get("query_text")),
                 "video_id": query_row.get("video_id"),
                 "index": index_uid,
+                "visual_index": visual_index_uid,
                 "query_text": query_row.get("query_text"),
                 "expected_time_hint": query_row.get("expected_time_hint"),
                 "best_abs_error": best_error,
@@ -270,6 +280,11 @@ def run_local_project_suite(
                 "query_expansion": response.get("query_expansion"),
                 "rerank": (response.get("retrieval_context") or {}).get("rerank"),
                 "top_rerank": bundles[0].get("rerank") if bundles else None,
+                "search_hits": response_counts.get("search_hits"),
+                "segment_search_hits": response_counts.get("segment_search_hits"),
+                "visual_entity_search_hits": response_counts.get("visual_entity_search_hits"),
+                "bundled_visual_entities": response_counts.get("bundled_visual_entities"),
+                "bundled_linked_entities": response_counts.get("bundled_linked_entities"),
                 "processing_time_ms": processing_time_ms,
                 "elapsed_time_ms": round(elapsed_ms, 4),
             }
@@ -280,6 +295,7 @@ def run_local_project_suite(
         "suite_type": "local_project",
         "domain": domain,
         "index": index_uid,
+        "visual_index": visual_index_uid,
         "limit": limit,
         "query_count": len(rows),
         "domain_lexicon": domain_lexicon_metadata or _empty_domain_lexicon_metadata(),
