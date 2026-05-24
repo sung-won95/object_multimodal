@@ -9,6 +9,7 @@
 - `queries.jsonl`: 동일 내용을 JSONL로 저장한 버전
 - `suites/*.csv`: `benchmark-retrieval`이 강의별로 읽는 CSV
 - `benchmark_manifest.json`: 바로 실행 가능한 retrieval benchmark manifest
+- `domain_lexicon.json`: MIT Deep Learning 질의 확장을 위한 보수적 약어/동의어 seed
 - `benchmark_matrix_manifest.json`: segment/window retrieval-answer matrix manifest
 - `summary.json`: row count, split, modality 분포 요약
 
@@ -26,6 +27,11 @@
 python -m oarag benchmark-retrieval \
   --manifest eval/mit_deep_learning_stt/benchmark_manifest.json
 ```
+
+공통 lexicon을 쓰려면 각 suite에 `"domain_lexicon": "domain_lexicon.json"`을 추가한다.
+이 seed는 MIT OpenCourseWare 6.7960 Deep Learning 강의자료와 STT seed labels에서 파생된 보조 lexicon이며, 원자료와 동일하게 CC BY-NC-SA 4.0 출처 조건을 따른다.
+
+Matrix benchmark에서 lexicon variant를 쓰려면 manifest 또는 suite에 `"domain_lexicon": "domain_lexicon.json"`을 두고, variant의 `"use_domain_lexicon"`을 `true`로 둔다.
 
 ## Window Matrix Use
 

@@ -350,6 +350,7 @@ def run_retrieval_answer_matrix_suite(
                     client=client,
                     suite=suite,
                     variant=variant,
+                    base_dir=base_dir,
                     project_dir=project_dir,
                     run_id=run_id,
                     suite_id=suite_id,
@@ -517,8 +518,10 @@ def run_local_project_suite(
     suite_id = str(suite.get("suite_id") or project_dir.name)
     domain = str(suite.get("domain") or "local_project")
     video_filter = str(suite["video_id"]) if suite.get("video_id") is not None else None
-    domain_lexicon_path = (
-        Path(str(suite["domain_lexicon"])) if suite.get("domain_lexicon") is not None else None
+    domain_lexicon_path = _resolve_benchmark_domain_lexicon_path(
+        value=suite.get("domain_lexicon"),
+        base_dir=base_dir,
+        project_dir=project_dir,
     )
     rerank_enabled = bool(suite.get("rerank", False))
     rerank_time_hint = str(suite["rerank_time_hint"]) if suite.get("rerank_time_hint") else None
@@ -1086,6 +1089,7 @@ def _run_matrix_query(
     client: SearchClient,
     suite: dict[str, Any],
     variant: dict[str, Any],
+    base_dir: Path,
     project_dir: Path,
     run_id: str,
     suite_id: str,
@@ -1105,7 +1109,11 @@ def _run_matrix_query(
     visual_index_uid = _optional_str(_variant_value(suite, variant, "visual_index"))
     use_domain_lexicon = _bool_config(variant, "use_domain_lexicon", default=False)
     domain_lexicon_path = (
-        _optional_path(_variant_value(suite, variant, "domain_lexicon"))
+        _resolve_benchmark_domain_lexicon_path(
+            value=_variant_value(suite, variant, "domain_lexicon"),
+            base_dir=base_dir,
+            project_dir=project_dir,
+        )
         if use_domain_lexicon
         else None
     )
@@ -2209,6 +2217,32 @@ def _resolve_path(base_dir: Path, value: Any) -> Path:
     if path.is_absolute():
         return path.resolve()
     return (base_dir / path).resolve()
+
+
+def _resolve_benchmark_domain_lexicon_path(
+    *,
+    value: Any,
+    base_dir: Path,
+    project_dir: Path,
+) -> Path | None:
+    if value is None:
+        return None
+    path = Path(str(value)).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+
+    project_candidate = (project_dir / path).resolve()
+    if project_candidate.exists():
+        return project_candidate
+
+    manifest_candidate = (base_dir / path).resolve()
+    if manifest_candidate.exists():
+        return manifest_candidate
+
+    raise FileNotFoundError(
+        "Domain lexicon not found relative to project_dir or benchmark manifest: "
+        f"{project_candidate} ; {manifest_candidate}"
+    )
 
 
 def _resolve_output_dir(

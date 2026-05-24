@@ -500,6 +500,73 @@ def test_retrieval_ablation_public_fixture_outputs_are_sanitized(tmp_path: Path)
     assert "redacted" in public_text
 
 
+def test_local_project_resolves_domain_lexicon_relative_to_manifest(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            {
+                "segment_id": "seg_local_1",
+                "project_id": "local_project",
+                "video_id": "local_video",
+                "sample_id": "seg_local_1",
+                "sample_index": 1,
+                "start_time": 10.0,
+                "end_time": 14.0,
+                "timestamp_center": 12.0,
+                "transcript_text": "Bet size is visible",
+                "frame_refs": ["frame_000012"],
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000012", "timestamp": 12.0, "frame_path": "/tmp/frame.jpg"}],
+    )
+    _write_jsonl(project_dir / "manifests" / "visual_entities.jsonl", [])
+    _write_jsonl(project_dir / "manifests" / "entity_links.jsonl", [])
+
+    manifest_dir = tmp_path / "benchmarks"
+    manifest_dir.mkdir()
+    lexicon_path = manifest_dir / "domain_lexicon.json"
+    lexicon_path.write_text(
+        json.dumps({"aliases": {"bet": ["wager"], "size": ["sizing"]}}),
+        encoding="utf-8",
+    )
+    queries_path = manifest_dir / "queries.csv"
+    queries_path.write_text(
+        "query_id,video_id,query_text,expected_topic,expected_time_hint,expected_visual_hint,notes\n"
+        "q1,local_video,bet size 10-14s,bet sizing,10-14s,bet size text,safe\n",
+        encoding="utf-8",
+    )
+
+    manifest_path = manifest_dir / "benchmark.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "manifest_relative_lexicon",
+                "suites": [
+                    {
+                        "suite_id": "local_manifest_lexicon",
+                        "type": "local_project",
+                        "project_dir": str(project_dir),
+                        "queries": "queries.csv",
+                        "index": "local_index",
+                        "domain_lexicon": "domain_lexicon.json",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = run_benchmark(client=FakeClient(), manifest_path=manifest_path, repo_root=tmp_path)
+
+    suite = run.metrics["suites"][0]
+    assert suite["domain_lexicon"]["enabled"] is True
+    assert suite["domain_lexicon"]["source_path"] == str(lexicon_path.resolve())
+
+
 def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path) -> None:
     fixture_dir = Path("tests/fixtures/public_retrieval_ablation_project").resolve()
     client = FakeMatrixClient()
@@ -594,6 +661,61 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         assert sensitive not in public_text
     assert "raw_candidate_ids" in public_text
     assert "hashed" in public_text
+
+
+def test_retrieval_answer_matrix_resolves_domain_lexicon_relative_to_manifest(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = Path("tests/fixtures/public_retrieval_ablation_project").resolve()
+    manifest_dir = tmp_path / "matrix_manifest"
+    manifest_dir.mkdir()
+    (manifest_dir / "domain_lexicon.json").write_text(
+        json.dumps({"aliases": {"validation loss": ["loss curve"]}}),
+        encoding="utf-8",
+    )
+    manifest_path = manifest_dir / "benchmark_matrix_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "manifest_relative_matrix_lexicon",
+                "deltas": [5, 10, 15],
+                "suites": [
+                    {
+                        "suite_id": "public_matrix_manifest_lexicon",
+                        "type": "retrieval_answer_matrix",
+                        "domain": "public_synthetic",
+                        "project_dir": str(fixture_dir),
+                        "queries": str(fixture_dir / "queries.jsonl"),
+                        "index": "public_segments",
+                        "window_index": "public_windows",
+                        "visual_index": "public_visual_entities",
+                        "domain_lexicon": "domain_lexicon.json",
+                        "limit": 3,
+                        "neighbor_count": 0,
+                        "include_answer": False,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeMatrixClient()
+
+    run = run_benchmark(
+        client=client,
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "matrix",
+        repo_root=Path.cwd(),
+    )
+
+    rows = [
+        json.loads(line)
+        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+    ]
+    domain_row = next(row for row in rows if row["variant_id"] == "domain_lexicon")
+    assert domain_row["query_expansion"]["enabled"] is True
+    assert domain_row["query_expansion"]["applied"] is True
+    assert any(search[1] == "validation loss" for search in client.searches)
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
