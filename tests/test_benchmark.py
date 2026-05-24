@@ -197,6 +197,16 @@ class FakeMatrixClient:
         return {"hits": [], "processingTimeMs": 1, "indexUid": index_uid}
 
 
+MIT_PAPER_MATRIX_VARIANTS = [
+    "segment_lexical",
+    "domain_lexicon",
+    "hybrid",
+    "window",
+    "window_hybrid",
+    "rerank",
+]
+
+
 def test_parse_time_hint_extracts_multiple_ranges() -> None:
     assert parse_time_hint("95-102s or 126-131s") == [(95.0, 102.0), (126.0, 131.0)]
 
@@ -207,8 +217,11 @@ def test_mit_deep_learning_matrix_manifest_schema_smoke() -> None:
     manifest = json.loads(manifest_text)
     suites = manifest["suites"]
 
-    assert manifest["run_id"] == "mit_deep_learning_stt_window_matrix_v1"
-    assert manifest["output_dir"] == "../../reports/mit_deep_learning_eval/window_matrix_v1"
+    assert manifest["run_id"] == "mit_deep_learning_stt_paper_matrix_v1"
+    assert manifest["output_dir"] == "../../reports/mit_deep_learning_eval/paper_matrix_v1"
+    assert manifest["paper_matrix"]["required_variants"] == MIT_PAPER_MATRIX_VARIANTS
+    assert manifest["paper_matrix"]["baseline_variant_id"] == "segment_lexical"
+    assert manifest["paper_matrix"]["domain_lexicon"] == "domain_lexicon.json"
     assert len(suites) == 24
     assert {suite["type"] for suite in suites} == {"retrieval_answer_matrix"}
     assert {suite["window_index"] for suite in suites} == {"mit_deep_learning_stt_windows"}
@@ -217,9 +230,9 @@ def test_mit_deep_learning_matrix_manifest_schema_smoke() -> None:
         "mit_deep_learning_stt_visual_entities"
     }
 
-    required_variants = {"segment_lexical", "window", "window_hybrid"}
     for suite in suites:
-        assert required_variants.issubset(set(suite["variants"]))
+        assert suite["variants"] == MIT_PAPER_MATRIX_VARIANTS
+        assert suite["domain_lexicon"] == "domain_lexicon.json"
         assert suite["include_answer"] is True
         assert suite["dataset_descriptor"]["privacy"] == "aggregate_only"
         assert not Path(suite["project_dir"]).is_absolute()

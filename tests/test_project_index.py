@@ -87,6 +87,24 @@ class DeleteFailureMeiliClient(FakeMeiliClient):
         return {"status": "succeeded"}
 
 
+class CreateAlreadyExistsMeiliClient(FakeMeiliClient):
+    def wait_task(self, task, **kwargs):
+        self.calls.append(("wait_task", task, kwargs))
+        if task == {"taskUid": 2}:
+            payload = {
+                "status": "failed",
+                "error": {
+                    "code": "index_already_exists",
+                    "message": "index already exists",
+                },
+            }
+            ignored_error_codes = set(kwargs.get("ignored_error_codes", ()))
+            if "index_already_exists" in ignored_error_codes:
+                return payload
+            raise MeiliTaskError(2, "failed", payload)
+        return {"status": "succeeded"}
+
+
 def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -557,6 +575,68 @@ def test_index_project_windows_batches_documents_with_window_settings(tmp_path: 
     assert summary["settings_profile"] == LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE
     assert summary["settings_hash"] == lecture_window_settings_hash(settings_call[2])
     assert summary["semantic_source_field_counts"] == {"transcript_window_text": 3}
+
+
+def test_index_project_windows_ignores_existing_index_create_task(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(
+        segments_path,
+        [
+            _segment("seg_1", 1, 0.0, 2.0, "alpha", []),
+        ],
+    )
+    client = CreateAlreadyExistsMeiliClient()
+
+    summary = index_project_windows(
+        client,
+        index_uid="shared_windows",
+        project_dir=project_dir,
+        neighbor_count=0,
+    )
+
+    create_wait = next(
+        call
+        for call in client.calls
+        if call[0] == "wait_task" and call[1] == {"taskUid": 2}
+    )
+    assert create_wait[2]["ignored_error_codes"] == {"index_already_exists"}
+    assert (
+        "update_settings",
+        "shared_windows",
+        client.settings_by_index["shared_windows"],
+    ) in client.calls
+    assert summary["indexed_documents"] == 1
+    assert summary["configure_index"] is True
+
+
+def test_index_project_windows_can_append_without_reconfiguring_shared_index(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(
+        segments_path,
+        [
+            _segment("seg_1", 1, 0.0, 2.0, "alpha", []),
+        ],
+    )
+    client = FakeMeiliClient()
+
+    summary = index_project_windows(
+        client,
+        index_uid="shared_windows",
+        project_dir=project_dir,
+        configure_index=False,
+        neighbor_count=0,
+    )
+
+    assert ("delete_index", "shared_windows") not in client.calls
+    assert ("create_index", "shared_windows", "window_id") not in client.calls
+    assert not any(call[0] == "update_settings" for call in client.calls)
+    assert [call[0] for call in client.calls].count("add_documents") == 1
+    assert summary["indexed_documents"] == 1
+    assert summary["configure_index"] is False
 
 
 def test_index_project_windows_applies_hybrid_embedder_profile(tmp_path: Path) -> None:
