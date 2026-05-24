@@ -1,0 +1,38 @@
+{
+  "schema_version": "paper-bundle-expected-artifacts-v1",
+  "run_id": "mit_deep_learning_stt_paper_bundle_v1",
+  "manifest": "eval/mit_deep_learning_stt/paper_bundle_manifest.json",
+  "baseline_variant_id": "segment_lexical",
+  "required_variants": [
+    "segment_lexical",
+    "domain_lexicon",
+    "hybrid",
+    "window",
+    "window_hybrid",
+    "rerank"
+  ],
+  "expected_outputs": [
+    "metrics.json",
+    "metrics_summary.csv",
+    "query_results.jsonl",
+    "summary.md",
+    "paper_report/paper_table.md",
+    "paper_report/reproducibility.json",
+    "quality_gate_result.json",
+    "experiment_manifest.json",
+    "paper_metric_intervals/paper_metric_intervals.json",
+    "paper_readiness/paper_readiness_audit.json",
+    "paper_claims/claim_evidence_matrix.json",
+    "paper_artifact_registry.json",
+    "paper_bundle_result.json"
+  ],
+  "privacy": {
+    "payload": "artifact_filenames_variant_ids_and_status_fields_only",
+    "raw_queries": "excluded",
+    "answer_text": "excluded",
+    "transcript_content": "excluded",
+    "candidate_evidence_text": "excluded",
+    "local_paths": "excluded",
+    "private_eval_values": "excluded"
+  }
+}

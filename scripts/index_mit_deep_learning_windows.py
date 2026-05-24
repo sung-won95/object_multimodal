@@ -40,6 +40,7 @@ def main() -> None:
     client = None if args.build_only else MeiliClient(base_url=args.url, api_key=args.api_key)
     project_summaries: list[dict[str, Any]] = []
     for index, project in enumerate(projects):
+        configure_index = index == 0
         build_summary = None
         if not args.index_only:
             build_summary = build_project_windows(
@@ -60,6 +61,7 @@ def main() -> None:
                 project_dir=project["project_dir"],
                 batch_size=args.batch_size,
                 reset=args.reset and index == 0,
+                configure_index=configure_index,
                 windows=LECTURE_WINDOW_ARTIFACT_RELATIVE_PATH,
                 settings_profile=args.settings_profile,
                 hybrid_embedder_profile=args.hybrid_embedder_profile,
@@ -85,6 +87,7 @@ def main() -> None:
         "build_enabled": not args.index_only,
         "index_enabled": not args.build_only,
         "reset_requested": args.reset,
+        "index_configured_once": bool(projects) and not args.build_only,
         "projects": project_summaries,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -245,6 +248,7 @@ def _public_project_summary(
         summary["indexing"] = {
             "indexed_documents": index_summary.get("indexed_documents"),
             "indexed_batches": index_summary.get("indexed_batches"),
+            "configure_index": index_summary.get("configure_index"),
             "settings_profile": index_summary.get("settings_profile"),
             "settings_hash": index_summary.get("settings_hash"),
             "hybrid_embedder_profile": index_summary.get("hybrid_embedder_profile"),

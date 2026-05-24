@@ -9,6 +9,16 @@ from oarag.cli import build_parser
 from oarag.evaluation.paper_bundle import PaperBundleError, run_paper_bundle
 
 
+MIT_PAPER_MATRIX_VARIANTS = [
+    "segment_lexical",
+    "domain_lexicon",
+    "hybrid",
+    "window",
+    "window_hybrid",
+    "rerank",
+]
+
+
 class FakePaperBundleClient:
     def search(
         self,
@@ -216,3 +226,73 @@ def test_run_paper_bundle_cli_help_smoke(capsys: pytest.CaptureFixture[str]) -> 
     assert "--manifest" in help_text
     assert "--baseline-variant-id" in help_text
     assert "--sample-count" in help_text
+
+
+def test_mit_paper_bundle_manifest_and_skeleton_contract_are_private_safe() -> None:
+    manifest_path = Path("eval/mit_deep_learning_stt/paper_bundle_manifest.json")
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    suites = manifest["suites"]
+    bundle = manifest["paper_bundle"]
+
+    assert manifest["run_id"] == "mit_deep_learning_stt_paper_bundle_v1"
+    assert manifest["output_dir"] == "../../reports/mit_deep_learning_eval/paper_matrix_v1"
+    assert bundle["baseline_variant_id"] == "segment_lexical"
+    assert bundle["domain_lexicon"] == "domain_lexicon.json"
+    assert bundle["quality_gate_config"] == (
+        "../../reports/mit_deep_learning_eval/paper_matrix_v1/retrieval_quality_gate.json"
+    )
+    assert bundle["required_variants"] == MIT_PAPER_MATRIX_VARIANTS
+    assert len(suites) == 24
+    assert {suite["suite_id"] for suite in suites} == {
+        f"mitdl_lec{lecture:02d}" for lecture in range(1, 22)
+    } | {"mitdl_lec23", "mitdl_lec24", "mitdl_review"}
+    for suite in suites:
+        assert suite["type"] == "retrieval_answer_matrix"
+        assert suite["variants"] == MIT_PAPER_MATRIX_VARIANTS
+        assert suite["domain_lexicon"] == "domain_lexicon.json"
+        assert suite["include_answer"] is True
+        assert not Path(suite["project_dir"]).is_absolute()
+        assert not Path(suite["queries"]).is_absolute()
+
+    gate_path = Path("reports/mit_deep_learning_eval/paper_matrix_v1/retrieval_quality_gate.json")
+    gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    assert gate["gate_id"] == "mit_deep_learning_stt_paper_matrix_completeness_gate_v1"
+    assert len(gate["suites"]) == len(suites)
+    assert {suite["suite_id"] for suite in gate["suites"]} == {
+        suite["suite_id"] for suite in suites
+    }
+    assert all(
+        suite["required_variants"] == MIT_PAPER_MATRIX_VARIANTS for suite in gate["suites"]
+    )
+    assert all(
+        set(suite["thresholds"]) == {
+            "hit_at_10s",
+            "mrr_at_max_delta",
+            "grounded_answer_ratio",
+            "expected_citation_hit_ratio",
+        }
+        for suite in gate["suites"]
+    )
+
+    skeleton_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            Path("reports/mit_deep_learning_eval/README.md"),
+            Path("reports/mit_deep_learning_eval/paper_matrix_v1/README.md"),
+            Path("reports/mit_deep_learning_eval/paper_matrix_v1/expected_artifacts.json"),
+            Path("reports/mit_deep_learning_eval/paper_matrix_v1/paper_report_skeleton.md"),
+            gate_path,
+            manifest_path,
+        ]
+    )
+    for sensitive in [
+        "/Users/",
+        "/private/tmp",
+        "transcript_text",
+        "reference_answer",
+        "query_text",
+    ]:
+        assert sensitive not in skeleton_text
+    assert "candidate_evidence_text" in skeleton_text
+    assert "local_paths" in skeleton_text
