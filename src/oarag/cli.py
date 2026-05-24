@@ -328,6 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
         help="Meilisearch settings profile to apply to visual_entities.",
     )
+    _add_hybrid_embedder_index_options(index_visual_entities)
     index_visual_entities.set_defaults(func=cmd_index_project_visual_entities)
 
     ingest = subparsers.add_parser("ingest-video", help="Ingest a local lecture video")
@@ -1658,6 +1659,11 @@ def cmd_index_project_visual_entities(args: argparse.Namespace) -> None:
         reset=args.reset,
         visual_entities=args.visual_entities,
         settings_profile=args.settings_profile,
+        hybrid_embedder_profile=args.hybrid_embedder_profile,
+        hybrid_embedder_config=_hybrid_embedder_config_from_args(args),
+        hybrid_embedder_name=args.hybrid_embedder_name,
+        hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
+        hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -2064,6 +2070,7 @@ def cmd_benchmark_retrieval(args: argparse.Namespace) -> None:
                 "metrics": str(run.metrics_path),
                 "metrics_csv": str(run.metrics_csv_path),
                 "query_results": str(run.query_results_path),
+                "semantic_smoke": str(run.semantic_smoke_path),
                 "summary": str(run.summary_path),
             },
             ensure_ascii=False,
@@ -2149,6 +2156,7 @@ def cmd_run_paper_experiment(args: argparse.Namespace) -> None:
                 "metrics": str(run.benchmark.metrics_path),
                 "metrics_summary": str(run.benchmark.metrics_csv_path),
                 "query_results": str(run.benchmark.query_results_path),
+                "semantic_smoke": str(run.benchmark.semantic_smoke_path),
                 "summary": str(run.benchmark.summary_path),
                 "paper_report": str(run.report.output_dir),
                 "quality_gate_result": str(run.quality_gate_result_path),

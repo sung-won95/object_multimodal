@@ -24,6 +24,7 @@ from oarag.integrations.meili import (
     lecture_window_settings_snapshot,
     merge_hybrid_embedder_settings,
     normalize_hybrid_embedder_settings,
+    normalize_query_vector,
     visual_entity_settings,
     visual_entity_settings_snapshot,
 )
@@ -33,6 +34,11 @@ from oarag.core.schemas import (
     VisualEntity,
     ensure_lecture_segment_semantic_contract,
     slugify,
+)
+from oarag.retrieval.vectors import (
+    LOCAL_HASH_VECTOR_SOURCE,
+    deterministic_text_vector,
+    text_from_document_fields,
 )
 
 
@@ -384,6 +390,8 @@ def index_project_windows(
         lecture_window_settings(settings_profile),
         hybrid_settings,
     )
+    vector_specs = _user_provided_vector_specs(settings)
+    vector_summary = _new_document_vector_summary(vector_specs)
     settings_snapshot = lecture_window_settings_snapshot(
         settings,
         profile=settings_profile,
@@ -416,7 +424,12 @@ def index_project_windows(
     indexed_batches = 0
     semantic_source_field_counts: dict[str, int] = {}
     visual_entity_count = 0
-    for batch in iter_batches(documents, batch_size=batch_size):
+    indexed_documents_iter = _documents_with_user_provided_vectors(
+        documents,
+        specs=vector_specs,
+        summary=vector_summary,
+    )
+    for batch in iter_batches(indexed_documents_iter, batch_size=batch_size):
         client.wait_task(client.add_documents(index_uid, batch))
         indexed_documents += len(batch)
         indexed_batches += 1
@@ -444,6 +457,7 @@ def index_project_windows(
         "settings_profile": settings_snapshot["profile"],
         "settings_hash": settings_snapshot["hash"],
         "settings_snapshot": settings_snapshot,
+        "document_vectors": vector_summary,
     }
     _attach_hybrid_embedder_summary(
         summary,
@@ -486,6 +500,8 @@ def index_project_segments(
         lecture_segment_settings(settings_profile),
         hybrid_settings,
     )
+    vector_specs = _user_provided_vector_specs(settings)
+    vector_summary = _new_document_vector_summary(vector_specs)
     settings_snapshot = lecture_segment_settings_snapshot(
         settings,
         profile=settings_profile,
@@ -517,7 +533,12 @@ def index_project_segments(
         _segment_index_document(document, visual_entity_context=visual_entity_context)
         for document in iter_jsonl_documents(segments_path)
     )
-    for batch in iter_batches(documents, batch_size=batch_size):
+    indexed_documents_iter = _documents_with_user_provided_vectors(
+        documents,
+        specs=vector_specs,
+        summary=vector_summary,
+    )
+    for batch in iter_batches(indexed_documents_iter, batch_size=batch_size):
         client.wait_task(client.add_documents(index_uid, batch))
         indexed_documents += len(batch)
         indexed_batches += 1
@@ -542,6 +563,7 @@ def index_project_segments(
         "settings_profile": settings_snapshot["profile"],
         "settings_hash": settings_snapshot["hash"],
         "settings_snapshot": settings_snapshot,
+        "document_vectors": vector_summary,
     }
     _attach_hybrid_embedder_summary(
         summary,
@@ -560,15 +582,48 @@ def index_project_visual_entities(
     reset: bool = False,
     visual_entities: Path | None = None,
     settings_profile: str = VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+    hybrid_embedder_profile: str | None = None,
+    hybrid_embedder_config: dict[str, Any] | None = None,
+    hybrid_embedder_name: str = DEFAULT_HYBRID_EMBEDDER_NAME,
+    hybrid_embedder_dimensions: int | None = None,
+    hybrid_embedder_live_smoke: bool = False,
 ) -> dict[str, Any]:
     visual_entities_path = visual_entity_artifact_path(project_dir, visual_entities=visual_entities)
-    settings = visual_entity_settings(settings_profile)
-    settings_snapshot = visual_entity_settings_snapshot(settings, profile=settings_profile)
+    hybrid_settings, hybrid_snapshot = _resolve_hybrid_embedder_settings(
+        profile=hybrid_embedder_profile,
+        config=hybrid_embedder_config,
+        embedder_name=hybrid_embedder_name,
+        dimensions=hybrid_embedder_dimensions,
+        live_smoke=hybrid_embedder_live_smoke,
+    )
+    settings = merge_hybrid_embedder_settings(
+        visual_entity_settings(settings_profile),
+        hybrid_settings,
+    )
+    vector_specs = _user_provided_vector_specs(settings)
+    vector_summary = _new_document_vector_summary(vector_specs)
+    settings_snapshot = visual_entity_settings_snapshot(
+        settings,
+        profile=settings_profile,
+        redact_secrets=hybrid_snapshot is not None,
+    )
 
     if reset:
         client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
     client.wait_task(client.create_index(index_uid, primary_key="entity_id"))
-    client.wait_task(client.update_settings(index_uid, settings))
+    _apply_index_settings(
+        client,
+        index_uid=index_uid,
+        settings=settings,
+        settings_profile=settings_profile,
+        hybrid_snapshot=hybrid_snapshot,
+    )
+    hybrid_live_smoke = _run_hybrid_embedder_live_smoke(
+        client,
+        index_uid=index_uid,
+        hybrid_snapshot=hybrid_snapshot,
+        requested=hybrid_embedder_live_smoke,
+    )
 
     indexed_documents = 0
     indexed_batches = 0
@@ -578,7 +633,12 @@ def index_project_visual_entities(
         _visual_entity_index_document(document)
         for document in iter_jsonl_documents(visual_entities_path)
     )
-    for batch in iter_batches(documents, batch_size=batch_size):
+    indexed_documents_iter = _documents_with_user_provided_vectors(
+        documents,
+        specs=vector_specs,
+        summary=vector_summary,
+    )
+    for batch in iter_batches(indexed_documents_iter, batch_size=batch_size):
         client.wait_task(client.add_documents(index_uid, batch))
         indexed_documents += len(batch)
         indexed_batches += 1
@@ -591,7 +651,7 @@ def index_project_visual_entities(
             if source not in (None, ""):
                 source_counts[str(source)] = source_counts.get(str(source), 0) + 1
 
-    return {
+    summary = {
         "index": index_uid,
         "project_dir": str(project_dir),
         "visual_entities_path": str(visual_entities_path),
@@ -604,7 +664,14 @@ def index_project_visual_entities(
         "settings_profile": settings_snapshot["profile"],
         "settings_hash": settings_snapshot["hash"],
         "settings_snapshot": settings_snapshot,
+        "document_vectors": vector_summary,
     }
+    _attach_hybrid_embedder_summary(
+        summary,
+        hybrid_snapshot=hybrid_snapshot,
+        live_smoke=hybrid_live_smoke,
+    )
+    return summary
 
 
 def _resolve_hybrid_embedder_settings(
@@ -753,6 +820,124 @@ def _attach_hybrid_embedder_summary(
     summary["hybrid_embedder_hash"] = hybrid_snapshot["hash"]
     summary["hybrid_embedder_snapshot"] = hybrid_snapshot
     summary["hybrid_embedder_live_smoke"] = live_smoke or {"enabled": False}
+
+
+def _user_provided_vector_specs(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    embedders = settings.get("embedders") if isinstance(settings, dict) else None
+    if not isinstance(embedders, dict):
+        return []
+    specs: list[dict[str, Any]] = []
+    for embedder_name, embedder in embedders.items():
+        if not isinstance(embedder, dict) or embedder.get("source") != "userProvided":
+            continue
+        dimensions = embedder.get("dimensions")
+        if not isinstance(dimensions, int) or isinstance(dimensions, bool) or dimensions <= 0:
+            continue
+        name = str(embedder_name or "").strip()
+        if name:
+            specs.append({"name": name, "dimensions": dimensions})
+    return sorted(specs, key=lambda item: item["name"])
+
+
+def _new_document_vector_summary(specs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "enabled": bool(specs),
+        "source": "userProvided" if specs else None,
+        "generator": LOCAL_HASH_VECTOR_SOURCE if specs else None,
+        "purpose": "local_reproducibility_smoke_fallback" if specs else None,
+        "quality_claim": "none" if specs else None,
+        "embedder_names": [spec["name"] for spec in specs],
+        "dimensions_by_embedder": {
+            spec["name"]: spec["dimensions"] for spec in specs
+        },
+        "documents_seen": 0,
+        "documents_with_vectors": 0,
+        "generated_vector_count": 0,
+        "existing_vector_count": 0,
+    }
+
+
+def _documents_with_user_provided_vectors(
+    documents: Iterable[dict[str, Any]],
+    *,
+    specs: list[dict[str, Any]],
+    summary: dict[str, Any],
+) -> Iterator[dict[str, Any]]:
+    for document in documents:
+        summary["documents_seen"] += 1
+        indexed = _attach_user_provided_document_vectors(
+            document,
+            specs=specs,
+            summary=summary,
+        )
+        yield indexed
+
+
+def _attach_user_provided_document_vectors(
+    document: dict[str, Any],
+    *,
+    specs: list[dict[str, Any]],
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    if not specs:
+        return document
+    indexed = dict(document)
+    vectors = indexed.get("_vectors")
+    vectors = dict(vectors) if isinstance(vectors, dict) else {}
+    text = _document_vector_text(indexed)
+    document_had_vector = False
+    for spec in specs:
+        name = spec["name"]
+        dimensions = spec["dimensions"]
+        if name in vectors:
+            vectors[name] = normalize_query_vector(
+                vectors[name],
+                dimensions=dimensions,
+                field_name=f"document vector for embedder '{name}'",
+            )
+            summary["existing_vector_count"] += 1
+        else:
+            vectors[name] = deterministic_text_vector(text, dimensions=dimensions)
+            summary["generated_vector_count"] += 1
+        document_had_vector = True
+    indexed["_vectors"] = vectors
+    if document_had_vector:
+        summary["documents_with_vectors"] += 1
+    return indexed
+
+
+def _document_vector_text(document: dict[str, Any]) -> str:
+    text = text_from_document_fields(
+        document,
+        [
+            LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+            "transcript_window_text",
+            "transcript_text",
+            "normalized_text",
+            "text",
+            "visual_entities.text",
+            "visual_description",
+            "visual_entities.visual_description",
+            "entity_type",
+            "source_model",
+            "video_name",
+            "video_id",
+            "frame_id",
+            "segment_id",
+            "window_id",
+        ],
+    )
+    if text:
+        return text
+    return json.dumps(
+        {
+            "segment_id": document.get("segment_id"),
+            "window_id": document.get("window_id"),
+            "sample_id": document.get("sample_id"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
 
 
 def ensure_window_document_semantic_contract(document: dict[str, Any]) -> dict[str, Any]:

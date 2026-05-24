@@ -232,9 +232,11 @@ def _bundle_paths(
             artifacts.get("reproducibility_json"),
             base_dir,
         ),
-        semantic_smoke=semantic_smoke_path.expanduser().resolve()
-        if semantic_smoke_path is not None
-        else None,
+        semantic_smoke=_resolve_override_or_artifact(
+            semantic_smoke_path,
+            artifacts.get("semantic_smoke"),
+            base_dir,
+        ),
     )
 
 

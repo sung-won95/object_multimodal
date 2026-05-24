@@ -35,7 +35,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec02",
@@ -64,7 +66,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec03",
@@ -93,7 +97,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec04",
@@ -122,7 +128,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec05",
@@ -151,7 +159,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec06",
@@ -180,7 +190,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec07",
@@ -209,7 +221,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec08",
@@ -238,7 +252,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec09",
@@ -267,7 +283,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec10",
@@ -296,7 +314,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec11",
@@ -325,7 +345,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec12",
@@ -354,7 +376,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec13",
@@ -383,7 +407,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec14",
@@ -412,7 +438,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec15",
@@ -441,7 +469,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec16",
@@ -470,7 +500,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec17",
@@ -499,7 +531,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec18",
@@ -528,7 +562,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec19",
@@ -557,7 +593,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec20",
@@ -586,7 +624,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec21",
@@ -615,7 +655,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec23",
@@ -644,7 +686,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_lec24",
@@ -673,7 +717,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     },
     {
       "suite_id": "mitdl_review",
@@ -702,7 +748,9 @@
         "privacy": "aggregate_only",
         "dataset_id": "mit_deep_learning_stt_paper_matrix_v1"
       },
-      "domain_lexicon": "domain_lexicon.json"
+      "domain_lexicon": "domain_lexicon.json",
+      "hybrid_query_vector_dimensions": 384,
+      "hybrid_query_vector_embedder": "default"
     }
   ],
   "paper_matrix": {

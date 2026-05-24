@@ -45,6 +45,7 @@ DEFAULT_ABLATION_MODES = [
     "object-aligned",
 ]
 MATRIX_SCHEMA_VERSION = "retrieval-answer-ablation-matrix-v1"
+SEMANTIC_SMOKE_SCHEMA_VERSION = "semantic-live-smoke-aggregate-v1"
 DEFAULT_MATRIX_VARIANTS = [
     {
         "variant_id": "segment_lexical",
@@ -121,6 +122,7 @@ class BenchmarkRun:
     metrics_csv_path: Path
     query_results_path: Path
     summary_path: Path
+    semantic_smoke_path: Path
     metrics: dict[str, Any]
 
 
@@ -221,9 +223,11 @@ def run_benchmark(
     metrics_csv_path = resolved_output_dir / "metrics_summary.csv"
     query_results_path = resolved_output_dir / "query_results.jsonl"
     summary_path = resolved_output_dir / "summary.md"
+    semantic_smoke_path = resolved_output_dir / "semantic_smoke.json"
     write_json(metrics_path, metrics_payload)
     _write_metrics_summary_csv(metrics_csv_path, metrics_payload)
     write_jsonl(query_results_path, all_results)
+    write_json(semantic_smoke_path, _semantic_smoke_payload(metrics_payload, all_results))
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(_summary_markdown(metrics_payload), encoding="utf-8")
 
@@ -234,6 +238,7 @@ def run_benchmark(
         metrics_csv_path=metrics_csv_path,
         query_results_path=query_results_path,
         summary_path=summary_path,
+        semantic_smoke_path=semantic_smoke_path,
         metrics=metrics_payload,
     )
 
@@ -320,6 +325,80 @@ def run_retrieval_ablation_suite(
         item.get("mean_processing_time_ms") for item in mode_metrics
     )
     return metric, rows
+
+
+def _semantic_smoke_payload(
+    metrics: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    hybrid_variant_ids: set[str] = set()
+    for suite in _list_of_dicts(metrics.get("suites")):
+        if suite.get("suite_type") != "retrieval_answer_matrix":
+            continue
+        for variant in _list_of_dicts(suite.get("variants")):
+            config = variant.get("config") if isinstance(variant.get("config"), dict) else {}
+            if config.get("hybrid_retrieval") is True:
+                hybrid_variant_ids.add(str(variant.get("variant_id") or ""))
+
+    hybrid_rows = [
+        row
+        for row in rows
+        if row.get("suite_type") == "retrieval_answer_matrix"
+        and (
+            (row.get("config") or {}).get("hybrid_retrieval") is True
+            if isinstance(row.get("config"), dict)
+            else False
+        )
+    ]
+    semantic_rows = [
+        row
+        for row in hybrid_rows
+        if (
+            isinstance(row.get("top_candidate"), dict)
+            and row["top_candidate"].get("retrieval_mode") == "semantic"
+        )
+        or (
+            isinstance(row.get("semantic_retrieval"), dict)
+            and row["semantic_retrieval"].get("semantic_channel_executed") is True
+        )
+    ]
+    query_vector_rows = [
+        row
+        for row in hybrid_rows
+        if isinstance((row.get("config") or {}).get("query_vector"), dict)
+        and (row["config"]["query_vector"]).get("configured") is True
+    ]
+    ok = bool(hybrid_rows) and (bool(semantic_rows) or bool(query_vector_rows))
+    return {
+        "schema_version": SEMANTIC_SMOKE_SCHEMA_VERSION,
+        "run_id": metrics.get("run_id"),
+        "semantic_live_smoke": {
+            "ok": ok,
+            "passed": ok,
+            "method": "retrieval_answer_matrix_aggregate",
+        },
+        "counts": {
+            "hybrid_variant_count": len([item for item in hybrid_variant_ids if item]),
+            "hybrid_query_result_count": len(hybrid_rows),
+            "semantic_top_candidate_count": len(semantic_rows),
+            "query_vector_configured_count": len(query_vector_rows),
+            "semantic_channel_query_count": sum(
+                int((row.get("semantic_retrieval") or {}).get("semantic_call_count") or 0)
+                for row in hybrid_rows
+                if isinstance(row.get("semantic_retrieval"), dict)
+            ),
+        },
+        "hybrid_variant_ids": sorted(item for item in hybrid_variant_ids if item),
+        "privacy": {
+            "payload": "aggregate_counts_and_variant_ids_only",
+            "raw_queries": "excluded",
+            "answer_text": "excluded",
+            "transcript_content": "excluded",
+            "candidate_evidence_text": "excluded",
+            "local_paths": "excluded",
+            "raw_vectors": "excluded",
+        },
+    }
 
 
 def run_retrieval_answer_matrix_suite(
@@ -1122,6 +1201,18 @@ def _run_matrix_query(
         else None
     )
     rerank_time_hint = _matrix_rerank_time_hint(suite=suite, variant=variant, query_row=query_row)
+    hybrid_retrieval_enabled = _bool_config(variant, "hybrid_retrieval", default=False)
+    hybrid_query_vector = (
+        _matrix_query_vector_config(
+            suite=suite,
+            variant=variant,
+            query_row=query_row,
+            base_dir=base_dir,
+            project_dir=project_dir,
+        )
+        if hybrid_retrieval_enabled
+        else {}
+    )
     response = query_project(
         client=client,
         index_uid=index_uid,
@@ -1152,7 +1243,7 @@ def _run_matrix_query(
         rerank=_bool_config(variant, "rerank", default=False),
         rerank_time_hint=rerank_time_hint,
         rerank_backend=str(_variant_value(suite, variant, "rerank_backend") or "deterministic"),
-        hybrid_retrieval=_bool_config(variant, "hybrid_retrieval", default=False),
+        hybrid_retrieval=hybrid_retrieval_enabled,
         hybrid_embedder=str(
             _variant_value(suite, variant, "hybrid_embedder") or DEFAULT_HYBRID_EMBEDDER
         ),
@@ -1160,6 +1251,10 @@ def _run_matrix_query(
             _optional_float(_variant_value(suite, variant, "hybrid_semantic_ratio"))
             or DEFAULT_HYBRID_SEMANTIC_RATIO
         ),
+        hybrid_query_vector_embedder=hybrid_query_vector.get("embedder"),
+        hybrid_query_vector_name=hybrid_query_vector.get("name"),
+        hybrid_query_vector_dimensions=hybrid_query_vector.get("dimensions"),
+        hybrid_query_vector_manifest_path=hybrid_query_vector.get("manifest_path"),
     )
     answer_enabled = _bool_config(variant, "include_answer", default=include_answer)
     answer = compose_answer(response) if answer_enabled else None
@@ -1208,6 +1303,7 @@ def _run_matrix_query(
             visual_index_uid=visual_index_uid,
             index_kind=index_kind,
             use_domain_lexicon=use_domain_lexicon,
+            query_vector_config=hybrid_query_vector,
         ),
         "expected_time_available": bool(expected_ranges),
         "expected_segment_available": bool(expected_segment_ids),
@@ -1226,6 +1322,9 @@ def _run_matrix_query(
         "frame_backed": _bundles_have_frames(bundles),
         "linked_entity_backed": _bundles_have_linked_entities(bundles),
         "query_expansion": _public_query_expansion(response.get("query_expansion")),
+        "semantic_retrieval": _public_semantic_retrieval(
+            response.get("retrieval_context")
+        ),
         "top_candidate": _public_matrix_candidate(top_bundle),
         "answer": _public_answer_summary(answer),
         "answer_grounding": answer_grounding,
@@ -1393,6 +1492,59 @@ def _matrix_rerank_time_hint(
     return None
 
 
+def _matrix_query_vector_config(
+    *,
+    suite: dict[str, Any],
+    variant: dict[str, Any],
+    query_row: dict[str, Any],
+    base_dir: Path,
+    project_dir: Path,
+) -> dict[str, Any]:
+    manifest = _variant_value(
+        suite,
+        variant,
+        "hybrid_query_vector_manifest",
+    )
+    if manifest is None:
+        manifest = _variant_value(suite, variant, "query_vector_manifest")
+    name = _optional_str(_variant_value(suite, variant, "hybrid_query_vector_name"))
+    name_field = _optional_str(_variant_value(suite, variant, "hybrid_query_vector_name_field"))
+    if name_field and query_row.get(name_field):
+        name = str(query_row[name_field])
+    embedder = _optional_str(_variant_value(suite, variant, "hybrid_query_vector_embedder"))
+    dimensions = _optional_int(_variant_value(suite, variant, "hybrid_query_vector_dimensions"))
+
+    config: dict[str, Any] = {}
+    if manifest is not None:
+        config["manifest_path"] = _resolve_matrix_query_vector_manifest_path(
+            value=manifest,
+            base_dir=base_dir,
+            project_dir=project_dir,
+        )
+    if name is not None:
+        config["name"] = name
+    if embedder is not None:
+        config["embedder"] = embedder
+    if dimensions is not None:
+        config["dimensions"] = dimensions
+    return config
+
+
+def _resolve_matrix_query_vector_manifest_path(
+    *,
+    value: Any,
+    base_dir: Path,
+    project_dir: Path,
+) -> Path:
+    path = Path(str(value)).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    project_candidate = (project_dir / path).resolve()
+    if project_candidate.exists():
+        return project_candidate
+    return (base_dir / path).resolve()
+
+
 def _public_matrix_config(
     *,
     suite: dict[str, Any],
@@ -1401,11 +1553,15 @@ def _public_matrix_config(
     visual_index_uid: str | None,
     index_kind: str,
     use_domain_lexicon: bool,
+    query_vector_config: dict[str, Any],
 ) -> dict[str, Any]:
     candidate_pool_limit = _optional_int(_variant_value(suite, variant, "candidate_pool_limit"))
     result_limit = int(_variant_value(suite, variant, "limit") or 5)
+    config = _public_matrix_variant_config(variant)
+    if _bool_config(variant, "hybrid_retrieval", default=False):
+        config["query_vector"] = _public_query_vector_config(query_vector_config)
     return {
-        **_public_matrix_variant_config(variant),
+        **config,
         "index_kind": index_kind,
         "index_ref": f"index:{_short_hash(index_uid)}",
         "visual_index_ref": f"index:{_short_hash(visual_index_uid)}"
@@ -1414,6 +1570,29 @@ def _public_matrix_config(
         "limit": result_limit,
         "candidate_pool_limit": max(result_limit, candidate_pool_limit or result_limit),
         "domain_lexicon_enabled": use_domain_lexicon,
+    }
+
+
+def _public_query_vector_config(config: dict[str, Any]) -> dict[str, Any]:
+    manifest_path = config.get("manifest_path")
+    return {
+        "configured": bool(config),
+        "source": "manifest" if manifest_path is not None else "local_hash_v1"
+        if config.get("dimensions") is not None
+        else None,
+        "embedder": config.get("embedder"),
+        "dimensions": config.get("dimensions"),
+        "name_present": config.get("name") is not None,
+        "manifest_ref": f"artifact:{_short_hash(str(manifest_path))}"
+        if manifest_path is not None
+        else None,
+        "purpose": (
+            "local_reproducibility_smoke_fallback"
+            if config.get("dimensions") is not None and manifest_path is None
+            else "provided_query_vector"
+            if config
+            else None
+        ),
     }
 
 
@@ -1438,6 +1617,46 @@ def _public_query_expansion(value: Any) -> dict[str, Any]:
         "applied": bool(metadata.get("applied")),
         "added_term_count": int(metadata.get("added_term_count") or 0),
         "search_query_count": len(metadata.get("search_queries") or []),
+    }
+
+
+def _public_semantic_retrieval(value: Any) -> dict[str, Any]:
+    context = value if isinstance(value, dict) else {}
+    hybrid = context.get("hybrid_retrieval") if isinstance(context.get("hybrid_retrieval"), dict) else {}
+    searches = context.get("searches") if isinstance(context.get("searches"), dict) else {}
+    retrieval_modes_by_source: dict[str, list[str]] = {}
+    semantic_call_count = 0
+    semantic_hit_count = 0
+    query_vector_configured_count = 0
+    for source in ("segment", "window", "visual_entity"):
+        metadata = searches.get(source)
+        if not isinstance(metadata, dict):
+            continue
+        modes = [
+            str(mode)
+            for mode in metadata.get("retrieval_modes", [])
+            if isinstance(mode, str) and mode
+        ]
+        if modes:
+            retrieval_modes_by_source[source] = modes
+        for call in _list_of_dicts(metadata.get("calls")):
+            if call.get("retrieval_mode") != "semantic":
+                continue
+            semantic_call_count += 1
+            semantic_hit_count += int(call.get("hit_count") or 0)
+            query_vector = call.get("query_vector")
+            if isinstance(query_vector, dict) and query_vector.get("used") is True:
+                query_vector_configured_count += 1
+    semantic_channel_executed = semantic_call_count > 0 or any(
+        "semantic" in modes for modes in retrieval_modes_by_source.values()
+    )
+    return {
+        "hybrid_enabled": bool(hybrid.get("enabled")),
+        "semantic_channel_executed": semantic_channel_executed,
+        "semantic_call_count": semantic_call_count,
+        "semantic_hit_count": semantic_hit_count,
+        "query_vector_configured_count": query_vector_configured_count,
+        "retrieval_modes_by_source": retrieval_modes_by_source,
     }
 
 

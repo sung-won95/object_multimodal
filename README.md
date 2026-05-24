@@ -104,6 +104,48 @@ For concurrent worktrees, keep the Compose project name unique; host port
 `7700` is still shared, so only one default-port Meilisearch instance can run
 at a time.
 
+For hybrid retrieval with a Meilisearch `userProvided` embedder, enable the local
+vector store feature before indexing and provide vectors for indexed documents
+and queries. If a query also uses `--visual-index`, index visual entities with
+the same embedder profile as the primary segment/window index:
+
+```bash
+curl -X PATCH 'http://127.0.0.1:7700/experimental-features/' \
+  -H 'Authorization: Bearer dev-master-key' \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"vectorStore": true}'
+
+PYTHONPATH=src python -m oarag index-project \
+  --project-dir tests/fixtures/public_lecture_semantic_project \
+  --index public_lecture_semantic_fixture \
+  --reset \
+  --hybrid-embedder-profile manual_user_provided_v1 \
+  --hybrid-embedder-dimensions 384
+
+PYTHONPATH=src python -m oarag index-project-visual-entities \
+  --project-dir tests/fixtures/public_lecture_semantic_project \
+  --index public_lecture_semantic_visual_fixture \
+  --reset \
+  --hybrid-embedder-profile manual_user_provided_v1 \
+  --hybrid-embedder-dimensions 384
+
+PYTHONPATH=src python -m oarag query-project \
+  --project-dir tests/fixtures/public_lecture_semantic_project \
+  --index public_lecture_semantic_fixture \
+  --query "slope information lower loss" \
+  --limit 2 \
+  --neighbor-count 0 \
+  --hybrid-retrieval \
+  --hybrid-query-vector-embedder default \
+  --hybrid-query-vector-dimensions 384
+```
+
+When only `--hybrid-query-vector-dimensions` is supplied, OARAG creates
+deterministic hash vectors with `local_hash_v1`. This path is a dependency-free
+local reproducibility and smoke-test fallback only. It is recorded in metadata
+with `purpose: local_reproducibility_smoke_fallback` and `quality_claim: none`;
+do not cite it as semantic retrieval quality evidence.
+
 ## Retrieval Benchmark
 
 Run cross-domain retrieval benchmarks from a JSON manifest:

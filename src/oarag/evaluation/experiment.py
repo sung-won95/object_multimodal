@@ -141,6 +141,7 @@ def _experiment_manifest(
             "metrics": _relative_artifact(benchmark.metrics_path, output_dir),
             "metrics_summary": _relative_artifact(benchmark.metrics_csv_path, output_dir),
             "query_results": _relative_artifact(benchmark.query_results_path, output_dir),
+            "semantic_smoke": _relative_artifact(benchmark.semantic_smoke_path, output_dir),
             "summary": _relative_artifact(benchmark.summary_path, output_dir),
             "paper_report_dir": _relative_artifact(report.output_dir, output_dir),
             "paper_table_csv": _relative_artifact(report.paper_table_csv_path, output_dir),
@@ -163,7 +164,12 @@ def _experiment_manifest(
             {
                 "stage": "benchmark",
                 "status": "passed",
-                "artifacts": ["metrics.json", "metrics_summary.csv", "query_results.jsonl"],
+                "artifacts": [
+                    "metrics.json",
+                    "metrics_summary.csv",
+                    "query_results.jsonl",
+                    "semantic_smoke.json",
+                ],
             },
             {
                 "stage": "report",
