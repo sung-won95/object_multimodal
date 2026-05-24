@@ -152,6 +152,21 @@ def test_graph_document_adds_reference_mention_and_resolution_relationships(tmp_
             }
         ],
     )
+    _write_jsonl(
+        project_dir / "manifests" / "entity_links.jsonl",
+        [
+            {
+                "link_id": "link_seg_intro_entity_pot_odds_board",
+                "project_id": "sample_project",
+                "segment_id": "seg_intro",
+                "entity_id": "entity_pot_odds_board",
+                "frame_id": "frame_000001",
+                "link_type": "time_overlap+lexical_match",
+                "score": 1.2,
+                "evidence": ["time_overlap", "lexical_match"],
+            }
+        ],
+    )
     _write_json(
         project_dir / "domain_lexicon.json",
         {"aliases": {"pot odds": ["pot odds"], "board": ["보드"]}},
