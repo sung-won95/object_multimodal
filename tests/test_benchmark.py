@@ -122,7 +122,7 @@ class FakeAblationClient:
 
 class FakeMatrixClient:
     def __init__(self) -> None:
-        self.searches: list[tuple[str, str, str]] = []
+        self.searches: list[tuple[str, str, str, list[float] | None]] = []
 
     def search(
         self,
@@ -130,10 +130,11 @@ class FakeMatrixClient:
         query: str,
         limit: int = 10,
         hybrid: dict | None = None,
+        vector: list[float] | None = None,
         filter: str | list[str] | None = None,
     ) -> dict:
         mode = "semantic" if hybrid else "lexical"
-        self.searches.append((index_uid, query, mode))
+        self.searches.append((index_uid, query, mode, vector))
         if index_uid == "public_windows":
             hits = [
                 {
@@ -233,6 +234,8 @@ def test_mit_deep_learning_matrix_manifest_schema_smoke() -> None:
     for suite in suites:
         assert suite["variants"] == MIT_PAPER_MATRIX_VARIANTS
         assert suite["domain_lexicon"] == "domain_lexicon.json"
+        assert suite["hybrid_query_vector_dimensions"] == 384
+        assert suite["hybrid_query_vector_embedder"] == "default"
         assert suite["include_answer"] is True
         assert suite["dataset_descriptor"]["privacy"] == "aggregate_only"
         assert not Path(suite["project_dir"]).is_absolute()
@@ -594,6 +597,7 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert run.metrics_csv_path.exists()
     assert run.query_results_path.exists()
     assert run.summary_path.exists()
+    assert run.semantic_smoke_path.exists()
     assert run.metrics["query_count"] == 6
     suite = run.metrics["suites"][0]
     assert suite["schema_version"] == "retrieval-answer-ablation-matrix-v1"
@@ -632,6 +636,10 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         "query_terms_grounded_in_candidate": 1
     }
     assert any(search[2] == "semantic" for search in client.searches)
+    semantic_smoke = json.loads(run.semantic_smoke_path.read_text(encoding="utf-8"))
+    assert semantic_smoke["schema_version"] == "semantic-live-smoke-aggregate-v1"
+    assert semantic_smoke["semantic_live_smoke"]["passed"] is True
+    assert semantic_smoke["privacy"]["raw_vectors"] == "excluded"
 
     rows = [
         json.loads(line)
@@ -668,6 +676,7 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
             run.metrics_path.read_text(encoding="utf-8"),
             run.metrics_csv_path.read_text(encoding="utf-8"),
             run.query_results_path.read_text(encoding="utf-8"),
+            run.semantic_smoke_path.read_text(encoding="utf-8"),
             run.summary_path.read_text(encoding="utf-8"),
         ]
     )
@@ -741,6 +750,75 @@ def test_retrieval_answer_matrix_resolves_domain_lexicon_relative_to_manifest(
     assert domain_row["query_expansion"]["enabled"] is True
     assert domain_row["query_expansion"]["applied"] is True
     assert any(search[1] == "validation loss" for search in client.searches)
+
+
+def test_retrieval_answer_matrix_generates_sanitized_local_hash_query_vectors(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = Path("tests/fixtures/public_retrieval_ablation_project").resolve()
+    manifest_path = tmp_path / "benchmark_matrix_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "local_hash_matrix_vector_smoke",
+                "suites": [
+                    {
+                        "suite_id": "public_matrix_local_hash",
+                        "type": "retrieval_answer_matrix",
+                        "domain": "public_synthetic",
+                        "project_dir": str(fixture_dir),
+                        "queries": str(fixture_dir / "queries.jsonl"),
+                        "index": "public_segments",
+                        "window_index": "public_windows",
+                        "visual_index": "public_visual_entities",
+                        "variants": ["hybrid", "window_hybrid"],
+                        "limit": 3,
+                        "neighbor_count": 0,
+                        "include_answer": False,
+                        "hybrid_query_vector_dimensions": 3,
+                        "hybrid_query_vector_embedder": "default",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeMatrixClient()
+
+    run = run_benchmark(
+        client=client,
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "matrix",
+        repo_root=Path.cwd(),
+    )
+
+    rows = [
+        json.loads(line)
+        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert {row["variant_id"] for row in rows} == {"hybrid", "window_hybrid"}
+    assert any(search[3] is not None and len(search[3]) == 3 for search in client.searches)
+    for row in rows:
+        query_vector = row["config"]["query_vector"]
+        assert query_vector == {
+            "configured": True,
+            "source": "local_hash_v1",
+            "embedder": "default",
+            "dimensions": 3,
+            "name_present": False,
+            "manifest_ref": None,
+            "purpose": "local_reproducibility_smoke_fallback",
+        }
+    semantic_smoke = json.loads(run.semantic_smoke_path.read_text(encoding="utf-8"))
+    assert semantic_smoke["semantic_live_smoke"]["passed"] is True
+    public_text = "\n".join(
+        [
+            run.query_results_path.read_text(encoding="utf-8"),
+            run.semantic_smoke_path.read_text(encoding="utf-8"),
+        ]
+    )
+    assert '"vector": [' not in public_text
+    assert "PUBLIC RAW QUERY" not in public_text
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

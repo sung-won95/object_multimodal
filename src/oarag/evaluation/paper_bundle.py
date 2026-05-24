@@ -134,6 +134,7 @@ def run_paper_bundle(
             "metrics": experiment.benchmark.metrics_path,
             "metrics_summary": experiment.benchmark.metrics_csv_path,
             "query_results": experiment.benchmark.query_results_path,
+            "semantic_smoke": experiment.benchmark.semantic_smoke_path,
             "summary": experiment.benchmark.summary_path,
             "paper_report_dir": experiment.report.output_dir,
             "paper_table_csv": experiment.report.paper_table_csv_path,
@@ -151,6 +152,7 @@ def run_paper_bundle(
             artifacts=[
                 experiment.benchmark.metrics_path,
                 experiment.benchmark.query_results_path,
+                experiment.benchmark.semantic_smoke_path,
                 experiment.report.output_dir,
                 experiment.quality_gate_result_path,
                 experiment.experiment_manifest_path,
@@ -383,6 +385,7 @@ def _collect_existing_artifacts(output_dir: Path) -> dict[str, Path | None]:
         "metrics": output_dir / "metrics.json",
         "metrics_summary": output_dir / "metrics_summary.csv",
         "query_results": output_dir / "query_results.jsonl",
+        "semantic_smoke": output_dir / "semantic_smoke.json",
         "summary": output_dir / "summary.md",
         "paper_report_dir": output_dir / "paper_report",
         "paper_table_csv": output_dir / "paper_report" / "paper_table.csv",

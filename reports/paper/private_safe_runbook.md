@@ -32,6 +32,28 @@ The bundle runs these stages in order and records the stage status in
 If a stage fails, the command names the failed stage and leaves any already generated
 private-safe artifacts in the output directory.
 
+## Hybrid Vector Smoke
+
+For local paper-docker runs that exercise `hybrid` or `window_hybrid`, enable
+Meilisearch vector store before indexing:
+
+```bash
+docker compose up -d meilisearch
+curl -X PATCH 'http://127.0.0.1:7700/experimental-features/' \
+  -H 'Authorization: Bearer dev-master-key' \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"vectorStore": true}'
+```
+
+Use a `userProvided` embedder profile when indexing segment/window/visual documents.
+OARAG will attach `_vectors.<embedder>` for the local smoke path when the
+document does not already provide one. If a query vector manifest is unavailable,
+`hybrid_query_vector_dimensions` can activate the deterministic `local_hash_v1`
+fallback. This fallback is only for dependency-free local reproducibility and
+smoke completion; it is not semantic quality evidence. Public artifacts must keep
+only aggregate/sanitized metadata such as `purpose: local_reproducibility_smoke_fallback`
+and `quality_claim: none`, never raw query vectors.
+
 ## Advanced / Fallback Manual Flow
 
 Use the manual flow only for debugging, partial reruns, or comparing an individual

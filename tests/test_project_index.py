@@ -439,7 +439,24 @@ def test_index_project_segments_applies_hybrid_embedder_profile_and_live_smoke(
         "checked_embedder_names": ["lecture_embedder"],
         "settings_hash": summary["hybrid_embedder_hash"],
     }
+    assert summary["document_vectors"] == {
+        "enabled": True,
+        "source": "userProvided",
+        "generator": "local_hash_v1",
+        "purpose": "local_reproducibility_smoke_fallback",
+        "quality_claim": "none",
+        "embedder_names": ["lecture_embedder"],
+        "dimensions_by_embedder": {"lecture_embedder": 768},
+        "documents_seen": 1,
+        "documents_with_vectors": 1,
+        "generated_vector_count": 1,
+        "existing_vector_count": 0,
+    }
     assert summary["settings_snapshot"]["settings"]["embedders"] == settings_call[2]["embedders"]
+    add_call = next(call for call in client.calls if call[0] == "add_documents")
+    vector = add_call[2][0]["_vectors"]["lecture_embedder"]
+    assert len(vector) == 768
+    assert all(isinstance(item, float) for item in vector)
 
 
 def test_index_project_segments_redacts_hybrid_embedder_credentials_in_summary(
@@ -671,6 +688,11 @@ def test_index_project_windows_applies_hybrid_embedder_profile(tmp_path: Path) -
         "embedders": settings_call[2]["embedders"]
     }
     assert summary["hybrid_embedder_live_smoke"] == {"enabled": False}
+    assert summary["document_vectors"]["purpose"] == "local_reproducibility_smoke_fallback"
+    assert summary["document_vectors"]["quality_claim"] == "none"
+    assert summary["document_vectors"]["generated_vector_count"] == 1
+    add_call = next(call for call in client.calls if call[0] == "add_documents")
+    assert len(add_call[2][0]["_vectors"]["default"]) == 512
 
 
 def test_index_project_visual_entities_batches_documents(tmp_path: Path) -> None:
@@ -746,6 +768,59 @@ def test_index_project_visual_entities_preserves_optional_segment_hint(tmp_path:
     add_call = next(call for call in client.calls if call[0] == "add_documents")
     assert add_call[2][0]["segment_id"] == "seg_1"
     assert add_call[2][0]["video_id"] == "video_1"
+
+
+def test_index_project_visual_entities_applies_hybrid_embedder_profile(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    visual_entities_path = project_dir / "manifests" / "visual_entities.jsonl"
+    write_jsonl(
+        visual_entities_path,
+        [_visual_entity("entity_a", "frame_000001", "matrix A", 1.0)],
+    )
+    client = FakeMeiliClient()
+
+    summary = index_project_visual_entities(
+        client,
+        index_uid="local_visual_entities",
+        project_dir=project_dir,
+        hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+        hybrid_embedder_dimensions=4,
+        hybrid_embedder_live_smoke=True,
+    )
+
+    settings_call = next(call for call in client.calls if call[0] == "update_settings")
+    assert settings_call[2]["embedders"] == {
+        "default": {"source": "userProvided", "dimensions": 4}
+    }
+    add_call = next(call for call in client.calls if call[0] == "add_documents")
+    vector = add_call[2][0]["_vectors"]["default"]
+    assert len(vector) == 4
+    assert all(isinstance(item, float) for item in vector)
+    assert summary["settings_hash"] == visual_entity_settings_hash(settings_call[2])
+    assert summary["hybrid_embedder_hash"] == hybrid_embedder_settings_hash(
+        settings_call[2]["embedders"]
+    )
+    assert summary["hybrid_embedder_live_smoke"] == {
+        "enabled": True,
+        "ok": True,
+        "checked_embedder_names": ["default"],
+        "settings_hash": summary["hybrid_embedder_hash"],
+    }
+    assert summary["document_vectors"] == {
+        "enabled": True,
+        "source": "userProvided",
+        "generator": "local_hash_v1",
+        "purpose": "local_reproducibility_smoke_fallback",
+        "quality_claim": "none",
+        "embedder_names": ["default"],
+        "dimensions_by_embedder": {"default": 4},
+        "documents_seen": 1,
+        "documents_with_vectors": 1,
+        "generated_vector_count": 1,
+        "existing_vector_count": 0,
+    }
 
 
 def _segment(

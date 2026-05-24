@@ -3,6 +3,7 @@ from pathlib import Path
 
 from oarag.cli import build_parser
 from oarag.project_query import query_project
+from oarag.retrieval.vectors import deterministic_text_vector
 
 
 PUBLIC_USER_PROVIDED_VECTOR_PROJECT = (
@@ -1030,6 +1031,60 @@ def test_query_project_userprovided_vector_hits_semantic_channel_without_leaking
     assert "0.111111" not in serialized
     assert "0.222222" not in serialized
     assert "0.333333" not in serialized
+
+
+def test_query_project_generates_local_hash_vector_for_smoke_fallback(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_vector", 1, 0.0, 2.0, "Public hash vector target", []),
+        ],
+    )
+    client = HybridVectorFakeClient(
+        {
+            ("local_segments", "hash fallback query", "semantic"): [
+                {
+                    "segment_id": "seg_vector",
+                    "sample_id": "seg_vector",
+                    "video_id": "video",
+                    "start_time": 0.0,
+                    "end_time": 2.0,
+                    "timestamp_center": 1.0,
+                    "transcript_text": "Public hash vector target",
+                    "_rankingScore": 0.91,
+                }
+            ],
+        }
+    )
+
+    response = query_project(
+        client=client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        query="hash fallback query",
+        limit=1,
+        neighbor_count=0,
+        hybrid_retrieval=True,
+        hybrid_query_vector_embedder="default",
+        hybrid_query_vector_dimensions=3,
+    )
+
+    expected_vector = deterministic_text_vector("hash fallback query", dimensions=3)
+    assert client.searches[1]["vector"] == expected_vector
+    assert response["retrieval_context"]["hybrid_retrieval"]["query_vector"] == {
+        "used": True,
+        "embedder": "default",
+        "dimensions": 3,
+        "source": "local_hash_v1",
+        "purpose": "local_reproducibility_smoke_fallback",
+        "quality_claim": "none",
+    }
+    serialized = json.dumps(response, sort_keys=True)
+    assert "local_reproducibility_smoke_fallback" in serialized
+    assert '"vector": [' not in serialized
 
 
 def test_query_project_hybrid_vector_supports_legacy_clients_without_filter_kwarg(

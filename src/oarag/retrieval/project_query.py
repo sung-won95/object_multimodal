@@ -28,6 +28,7 @@ from oarag.retrieval.evidence import (
 from oarag.integrations.meili import MeiliClient, normalize_query_vector
 from oarag.retrieval.project_index import segment_artifact_path
 from oarag.retrieval.rerank import DEFAULT_RERANK_BACKEND, rerank_bundles, rerank_metadata
+from oarag.retrieval.vectors import LOCAL_HASH_VECTOR_SOURCE, deterministic_text_vector
 from oarag.core.schemas import EntityLink, SearchCandidate, VisualEntity
 
 
@@ -155,6 +156,7 @@ def query_project(
         project_dir=resolved_project_dir,
         hybrid_retrieval=hybrid_retrieval,
         hybrid_embedder=hybrid_embedder,
+        query_text=query,
         query_vector=hybrid_query_vector,
         query_vector_embedder=hybrid_query_vector_embedder,
         query_vector_name=hybrid_query_vector_name,
@@ -1064,6 +1066,7 @@ def _resolve_hybrid_query_vector(
     project_dir: Path,
     hybrid_retrieval: bool,
     hybrid_embedder: str | None,
+    query_text: str,
     query_vector: list[float] | None,
     query_vector_embedder: str | None,
     query_vector_name: str | None,
@@ -1111,6 +1114,18 @@ def _resolve_hybrid_query_vector(
         manifest_dimensions = manifest_spec.get("dimensions")
         vector_source = "manifest"
 
+    if (
+        raw_vector is None
+        and query_vector_dimensions is not None
+        and vector_source == "argument"
+    ):
+        raw_vector = deterministic_text_vector(
+            query_text,
+            dimensions=query_vector_dimensions,
+        )
+        manifest_dimensions = query_vector_dimensions
+        vector_source = LOCAL_HASH_VECTOR_SOURCE
+
     if raw_vector is None:
         requested = vector_embedder or embedder
         raise ValueError(
@@ -1150,6 +1165,9 @@ def _resolve_hybrid_query_vector(
         "dimensions": len(vector),
         "source": vector_source,
     }
+    if vector_source == LOCAL_HASH_VECTOR_SOURCE:
+        metadata["purpose"] = "local_reproducibility_smoke_fallback"
+        metadata["quality_claim"] = "none"
     if vector_name is not None:
         metadata["name"] = vector_name
     return {

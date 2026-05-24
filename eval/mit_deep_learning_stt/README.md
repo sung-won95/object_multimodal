@@ -39,21 +39,43 @@ Matrix benchmark에서 lexicon variant를 쓰려면 manifest 또는 suite에 `"d
 Matrix benchmark는 24개 lecture suite를 `segment_lexical`, `domain_lexicon`, `hybrid`, `window`, `window_hybrid`, `rerank` 변형으로 실행한다.
 실행 전 Meilisearch가 떠 있어야 하며, manifest가 가리키는 MIT project artifacts와 기존 segment/visual entity index가 준비되어 있어야 한다.
 `rerank` 변형은 최종 반환 `limit`과 별개로 더 깊은 후보 풀을 조회해 deterministic reranker가 rank 밖 후보를 재정렬할 수 있게 한다.
+`hybrid`와 `window_hybrid`는 Meilisearch vector store가 켜져 있고, segment/window/visual index에 `userProvided` embedder와 `_vectors.default`가 있어야 한다.
+로컬 paper docker에서는 먼저 다음처럼 vector store를 켠 뒤, segment/window/visual index를 `manual_user_provided_v1` profile로 다시 적재한다.
+
+```bash
+docker compose up -d meilisearch
+curl -X PATCH 'http://127.0.0.1:7700/experimental-features/' \
+  -H 'Authorization: Bearer dev-master-key' \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"vectorStore": true}'
+```
+
+MIT manifest의 `hybrid_query_vector_dimensions: 384`는 `local_hash_v1` query vector fallback을 사용해 1-suite/all-variant smoke를 재현 가능하게 만든다.
+이 deterministic hash vector는 semantic 품질 claim이 아니라 local reproducibility/smoke 전용 fallback이며, 공개 artifact에는 `purpose: local_reproducibility_smoke_fallback`, `quality_claim: none` metadata만 남기고 raw vector 값은 남기지 않는다.
 
 Partial smoke를 먼저 돌릴 때는 공개 출력 원칙을 유지한 채 suite 수만 줄인 임시 manifest를 만들 수 있다.
 
 ```bash
-jq '.suites |= .[:4]' \
+jq '.suites |= .[:1]' \
   eval/mit_deep_learning_stt/benchmark_matrix_manifest.json \
-  > /tmp/mit_deep_learning_matrix_partial.json
+  > /tmp/mit_deep_learning_matrix_1suite.json
 python -m oarag benchmark-retrieval \
-  --manifest /tmp/mit_deep_learning_matrix_partial.json \
-  --output-dir reports/mit_deep_learning_eval/paper_matrix_partial_smoke
+  --manifest /tmp/mit_deep_learning_matrix_1suite.json \
+  --output-dir reports/mit_deep_learning_eval/paper_matrix_1suite_smoke
 ```
 
 ```bash
 python scripts/index_mit_deep_learning_windows.py --build-only
-python scripts/index_mit_deep_learning_windows.py --index-only --reset
+python -m oarag index-project-visual-entities \
+  --project-dir artifacts/paper_mit_deep_learning/projects/<project> \
+  --index mit_deep_learning_stt_visual_entities \
+  --reset \
+  --hybrid-embedder-profile manual_user_provided_v1 \
+  --hybrid-embedder-dimensions 384
+python scripts/index_mit_deep_learning_windows.py --index-only --reset \
+  --hybrid-embedder-profile manual_user_provided_v1 \
+  --hybrid-embedder-dimensions 384 \
+  --hybrid-embedder-live-smoke
 python -m oarag benchmark-retrieval \
   --manifest eval/mit_deep_learning_stt/benchmark_matrix_manifest.json
 ```
