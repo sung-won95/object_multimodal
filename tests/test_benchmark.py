@@ -201,6 +201,39 @@ def test_parse_time_hint_extracts_multiple_ranges() -> None:
     assert parse_time_hint("95-102s or 126-131s") == [(95.0, 102.0), (126.0, 131.0)]
 
 
+def test_mit_deep_learning_matrix_manifest_schema_smoke() -> None:
+    manifest_path = Path("eval/mit_deep_learning_stt/benchmark_matrix_manifest.json")
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    suites = manifest["suites"]
+
+    assert manifest["run_id"] == "mit_deep_learning_stt_window_matrix_v1"
+    assert manifest["output_dir"] == "../../reports/mit_deep_learning_eval/window_matrix_v1"
+    assert len(suites) == 24
+    assert {suite["type"] for suite in suites} == {"retrieval_answer_matrix"}
+    assert {suite["window_index"] for suite in suites} == {"mit_deep_learning_stt_windows"}
+    assert {suite["index"] for suite in suites} == {"mit_deep_learning_stt_segments"}
+    assert {suite["visual_index"] for suite in suites} == {
+        "mit_deep_learning_stt_visual_entities"
+    }
+
+    required_variants = {"segment_lexical", "window", "window_hybrid"}
+    for suite in suites:
+        assert required_variants.issubset(set(suite["variants"]))
+        assert suite["include_answer"] is True
+        assert suite["dataset_descriptor"]["privacy"] == "aggregate_only"
+        assert not Path(suite["project_dir"]).is_absolute()
+        assert not Path(suite["queries"]).is_absolute()
+        assert suite["project_dir"].startswith(
+            "../../artifacts/paper_mit_deep_learning/projects/"
+        )
+        assert suite["queries"].startswith("suites/")
+
+    assert "/Users/" not in manifest_text
+    assert "transcript_text" not in manifest_text
+    assert "reference_answer" not in manifest_text
+
+
 def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
     eduvidqa_path = tmp_path / "eduvidqa.jsonl"
     _write_jsonl(
