@@ -459,6 +459,37 @@ def test_index_project_segments_applies_hybrid_embedder_profile_and_live_smoke(
     assert all(isinstance(item, float) for item in vector)
 
 
+def test_index_project_segments_can_append_without_reconfiguring_shared_index(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(segments_path, [{"segment_id": "s1", "transcript_text": "alpha"}])
+    client = FakeMeiliClient()
+
+    summary = index_project_segments(
+        client,
+        index_uid="shared_segments",
+        project_dir=project_dir,
+        reset=True,
+        configure_index=False,
+        hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+        hybrid_embedder_dimensions=4,
+        hybrid_embedder_live_smoke=True,
+    )
+
+    assert ("delete_index", "shared_segments") not in client.calls
+    assert ("create_index", "shared_segments", "segment_id") not in client.calls
+    assert not any(call[0] == "update_settings" for call in client.calls)
+    assert ("get_settings", "shared_segments") not in client.calls
+    assert [call[0] for call in client.calls].count("add_documents") == 1
+    add_call = next(call for call in client.calls if call[0] == "add_documents")
+    assert len(add_call[2][0]["_vectors"]["default"]) == 4
+    assert summary["indexed_documents"] == 1
+    assert summary["configure_index"] is False
+    assert summary["hybrid_embedder_live_smoke"] == {"enabled": False}
+
+
 def test_index_project_segments_redacts_hybrid_embedder_credentials_in_summary(
     tmp_path: Path,
 ) -> None:
@@ -821,6 +852,40 @@ def test_index_project_visual_entities_applies_hybrid_embedder_profile(
         "generated_vector_count": 1,
         "existing_vector_count": 0,
     }
+
+
+def test_index_project_visual_entities_can_append_without_reconfiguring_shared_index(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    visual_entities_path = project_dir / "manifests" / "visual_entities.jsonl"
+    write_jsonl(
+        visual_entities_path,
+        [_visual_entity("entity_a", "frame_000001", "matrix A", 1.0)],
+    )
+    client = FakeMeiliClient()
+
+    summary = index_project_visual_entities(
+        client,
+        index_uid="shared_visual_entities",
+        project_dir=project_dir,
+        reset=True,
+        configure_index=False,
+        hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+        hybrid_embedder_dimensions=4,
+        hybrid_embedder_live_smoke=True,
+    )
+
+    assert ("delete_index", "shared_visual_entities") not in client.calls
+    assert ("create_index", "shared_visual_entities", "entity_id") not in client.calls
+    assert not any(call[0] == "update_settings" for call in client.calls)
+    assert ("get_settings", "shared_visual_entities") not in client.calls
+    assert [call[0] for call in client.calls].count("add_documents") == 1
+    add_call = next(call for call in client.calls if call[0] == "add_documents")
+    assert len(add_call[2][0]["_vectors"]["default"]) == 4
+    assert summary["indexed_documents"] == 1
+    assert summary["configure_index"] is False
+    assert summary["hybrid_embedder_live_smoke"] == {"enabled": False}
 
 
 def _segment(

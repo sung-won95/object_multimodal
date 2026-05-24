@@ -474,6 +474,7 @@ def index_project_segments(
     project_dir: Path,
     batch_size: int = 500,
     reset: bool = False,
+    configure_index: bool = True,
     segments: Path | None = None,
     visual_entities: Path | None = None,
     settings_profile: str = LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
@@ -508,22 +509,24 @@ def index_project_segments(
         redact_secrets=hybrid_snapshot is not None,
     )
 
-    if reset:
-        client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
-    client.wait_task(client.create_index(index_uid, primary_key="segment_id"))
-    _apply_index_settings(
-        client,
-        index_uid=index_uid,
-        settings=settings,
-        settings_profile=settings_profile,
-        hybrid_snapshot=hybrid_snapshot,
-    )
-    hybrid_live_smoke = _run_hybrid_embedder_live_smoke(
-        client,
-        index_uid=index_uid,
-        hybrid_snapshot=hybrid_snapshot,
-        requested=hybrid_embedder_live_smoke,
-    )
+    hybrid_live_smoke = None
+    if configure_index:
+        if reset:
+            client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
+        client.wait_task(client.create_index(index_uid, primary_key="segment_id"))
+        _apply_index_settings(
+            client,
+            index_uid=index_uid,
+            settings=settings,
+            settings_profile=settings_profile,
+            hybrid_snapshot=hybrid_snapshot,
+        )
+        hybrid_live_smoke = _run_hybrid_embedder_live_smoke(
+            client,
+            index_uid=index_uid,
+            hybrid_snapshot=hybrid_snapshot,
+            requested=hybrid_embedder_live_smoke,
+        )
 
     indexed_documents = 0
     indexed_batches = 0
@@ -556,6 +559,7 @@ def index_project_segments(
         "visual_entities_path": str(visual_entities_path) if visual_entities_path else None,
         "batch_size": batch_size,
         "reset": reset,
+        "configure_index": configure_index,
         "indexed_documents": indexed_documents,
         "indexed_batches": indexed_batches,
         "embedded_visual_entities": embedded_visual_entity_count,
@@ -580,6 +584,7 @@ def index_project_visual_entities(
     project_dir: Path,
     batch_size: int = 500,
     reset: bool = False,
+    configure_index: bool = True,
     visual_entities: Path | None = None,
     settings_profile: str = VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     hybrid_embedder_profile: str | None = None,
@@ -608,22 +613,24 @@ def index_project_visual_entities(
         redact_secrets=hybrid_snapshot is not None,
     )
 
-    if reset:
-        client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
-    client.wait_task(client.create_index(index_uid, primary_key="entity_id"))
-    _apply_index_settings(
-        client,
-        index_uid=index_uid,
-        settings=settings,
-        settings_profile=settings_profile,
-        hybrid_snapshot=hybrid_snapshot,
-    )
-    hybrid_live_smoke = _run_hybrid_embedder_live_smoke(
-        client,
-        index_uid=index_uid,
-        hybrid_snapshot=hybrid_snapshot,
-        requested=hybrid_embedder_live_smoke,
-    )
+    hybrid_live_smoke = None
+    if configure_index:
+        if reset:
+            client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
+        client.wait_task(client.create_index(index_uid, primary_key="entity_id"))
+        _apply_index_settings(
+            client,
+            index_uid=index_uid,
+            settings=settings,
+            settings_profile=settings_profile,
+            hybrid_snapshot=hybrid_snapshot,
+        )
+        hybrid_live_smoke = _run_hybrid_embedder_live_smoke(
+            client,
+            index_uid=index_uid,
+            hybrid_snapshot=hybrid_snapshot,
+            requested=hybrid_embedder_live_smoke,
+        )
 
     indexed_documents = 0
     indexed_batches = 0
@@ -657,6 +664,7 @@ def index_project_visual_entities(
         "visual_entities_path": str(visual_entities_path),
         "batch_size": batch_size,
         "reset": reset,
+        "configure_index": configure_index,
         "indexed_documents": indexed_documents,
         "indexed_batches": indexed_batches,
         "semantic_source_field_counts": semantic_source_field_counts,
