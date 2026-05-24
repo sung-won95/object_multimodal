@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "aliases": {
+    "adam optimizer": [
+      "adam"
+    ],
+    "attention": [
+      "attention mechanism"
+    ],
+    "autograd": [
+      "auto grad",
+      "automatic differentiation",
+      "autodiff"
+    ],
+    "backpropagation": [
+      "back propagation",
+      "backprop",
+      "loss.backward"
+    ],
+    "batch size": [
+      "mini-batch size",
+      "minibatch size"
+    ],
+    "convolutional neural network": [
+      "cnn",
+      "convnet",
+      "convolutional network"
+    ],
+    "contrastive learning": [
+      "contrastive loss",
+      "contrastive objective"
+    ],
+    "cross attention": [
+      "cross-attention"
+    ],
+    "diffusion model": [
+      "diffusion",
+      "score-based model"
+    ],
+    "empirical risk": [
+      "training risk"
+    ],
+    "equivariance": [
+      "equivariant"
+    ],
+    "generative adversarial network": [
+      "adversarial network",
+      "gan"
+    ],
+    "gradient descent": [
+      "gd",
+      "steepest descent"
+    ],
+    "graph neural network": [
+      "gnn",
+      "graph net",
+      "graph network"
+    ],
+    "greedy decoding": [
+      "greedy sampling",
+      "greedy search"
+    ],
+    "ground truth": [
+      "label",
+      "target label"
+    ],
+    "in context learning": [
+      "icl",
+      "in-context learning"
+    ],
+    "large language model": [
+      "llm"
+    ],
+    "language model": [
+      "lm"
+    ],
+    "latent variable": [
+      "latent",
+      "z"
+    ],
+    "layer normalization": [
+      "layer norm",
+      "layernorm",
+      "normalization layer"
+    ],
+    "learning rate": [
+      "eta",
+      "step size"
+    ],
+    "long short-term memory": [
+      "long short term memory",
+      "lstm"
+    ],
+    "maximum likelihood estimation": [
+      "maximum likelihood",
+      "mle"
+    ],
+    "multi-layer perceptron": [
+      "mlp",
+      "multilayer perceptron"
+    ],
+    "neural network": [
+      "neural net",
+      "nn"
+    ],
+    "objective function": [
+      "cost function",
+      "loss function"
+    ],
+    "out of distribution": [
+      "ood",
+      "out-of-distribution"
+    ],
+    "permutation invariance": [
+      "permutation invariant"
+    ],
+    "population risk": [
+      "expected risk"
+    ],
+    "rectified linear unit": [
+      "relu"
+    ],
+    "recurrent neural network": [
+      "recurrent network",
+      "rnn"
+    ],
+    "reinforcement learning": [
+      "rl"
+    ],
+    "reinforcement learning from human feedback": [
+      "human feedback",
+      "rlhf"
+    ],
+    "residual connection": [
+      "resnet connection",
+      "skip connection"
+    ],
+    "rms normalization": [
+      "rms norm",
+      "rms-norm",
+      "rmsnorm"
+    ],
+    "scaling laws": [
+      "scale laws",
+      "scaling law"
+    ],
+    "self attention": [
+      "self-attention"
+    ],
+    "softmax": [
+      "soft max"
+    ],
+    "stochastic gradient descent": [
+      "sgd"
+    ],
+    "transformer": [
+      "transformers"
+    ],
+    "transfer learning": [
+      "fine tuning",
+      "finetuning"
+    ],
+    "variational autoencoder": [
+      "vae",
+      "variational auto-encoder"
+    ]
+  }
+}
