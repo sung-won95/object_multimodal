@@ -65,14 +65,9 @@ python -m oarag benchmark-retrieval \
 ```
 
 ```bash
-python scripts/index_mit_deep_learning_windows.py --build-only
-python -m oarag index-project-visual-entities \
-  --project-dir artifacts/paper_mit_deep_learning/projects/<project> \
-  --index mit_deep_learning_stt_visual_entities \
-  --reset \
-  --hybrid-embedder-profile manual_user_provided_v1 \
-  --hybrid-embedder-dimensions 384
-python scripts/index_mit_deep_learning_windows.py --index-only --reset \
+python scripts/index_mit_deep_learning_retrieval_indexes.py --reset \
+  --manifest eval/mit_deep_learning_stt/benchmark_matrix_manifest.json \
+  --stages segment,window,visual \
   --hybrid-embedder-profile manual_user_provided_v1 \
   --hybrid-embedder-dimensions 384 \
   --hybrid-embedder-live-smoke
@@ -80,9 +75,13 @@ python -m oarag benchmark-retrieval \
   --manifest eval/mit_deep_learning_stt/benchmark_matrix_manifest.json
 ```
 
-`--build-only`는 각 project artifact 아래 `segments/lecture_windows.jsonl`만 만든다.
-두 번째 명령은 같은 window artifact를 `mit_deep_learning_stt_windows` Meilisearch index로 적재한다.
-`window_hybrid`를 실제로 쓰려면 window index의 Meilisearch embedder 설정이 segment index와 호환되어야 하므로, 필요한 경우 스크립트의 `--hybrid-embedder-profile`과 `--hybrid-embedder-dimensions`를 함께 지정한다.
+`index_mit_deep_learning_retrieval_indexes.py`는 manifest의 모든 project를 순회하며 shared
+`mit_deep_learning_stt_segments`, `mit_deep_learning_stt_windows`,
+`mit_deep_learning_stt_visual_entities` index를 준비한다. 각 stage의 첫 project에서만 index
+생성/settings/live smoke를 실행하고 이후 project는 같은 shared index에 document만 append한다.
+window stage는 각 project artifact 아래 `segments/lecture_windows.jsonl`을 만든 뒤 적재한다.
+스크립트 출력은 project별 aggregate count, vector summary, settings hash, display-safe project ref만
+포함하며 raw transcript/query/vector나 로컬 절대 경로는 남기지 않는다.
 
 Full paper bundle skeleton:
 
