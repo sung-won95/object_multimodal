@@ -115,7 +115,14 @@ def test_graph_document_adds_reference_mention_and_resolution_relationships(tmp_
     _write_jsonl(
         project_dir / "segments" / "lecture_segments_aligned.jsonl",
         [
-            _segment("seg_intro", 0.0, 4.0, "Pot odds appears on this board.", ["frame_000001"], ["pot odds"]),
+            _segment(
+                "seg_intro",
+                0.0,
+                4.0,
+                "Pot odds appears on this board.",
+                [{"frame_id": "frame_000001", "frame_path": "frames/frame_000001.jpg"}],
+                ["pot odds"],
+            ),
             _segment("seg_ref", 8.0, 10.0, "아까 말했던 개념을 다시 보겠습니다.", [], []),
         ],
     )
@@ -183,7 +190,11 @@ def test_graph_document_adds_reference_mention_and_resolution_relationships(tmp_
     assert ("REFERS_TO", "segment:seg_ref", reference_key) in relationship_pairs
     assert ("RESOLVES_TO", reference_key, "segment:seg_intro") in relationship_pairs
     assert ("RESOLVES_TO", reference_key, "concept:pot_odds") in relationship_pairs
-    assert ("RESOLVES_TO", reference_key, "visual_entity:entity_pot_odds_board") in relationship_pairs
+    assert (
+        "RESOLVES_TO",
+        reference_key,
+        "visual_entity:sample_project:entity_pot_odds_board",
+    ) in relationship_pairs
 
     resolves_relationships = [
         relationship
@@ -199,7 +210,7 @@ def _segment(
     start_time: float,
     end_time: float,
     transcript_text: str,
-    frame_refs: list[str],
+    frame_refs: list[object],
     mention_candidates: list[str],
 ) -> dict:
     return {
