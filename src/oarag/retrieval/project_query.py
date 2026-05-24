@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -1371,19 +1372,61 @@ def _run_search_channel(
     filter: str | list[str] | None = None,
 ) -> dict[str, Any]:
     hybrid = channel.get("hybrid")
+    kwargs: dict[str, Any] = {"limit": limit}
+    if filter is not None:
+        kwargs["filter"] = filter
     if isinstance(hybrid, dict):
+        kwargs["hybrid"] = hybrid
         vector = channel.get("vector")
         if vector is not None:
-            return client.search(
-                index_uid,
-                search_query,
-                limit=limit,
-                hybrid=hybrid,
-                vector=vector,
-                filter=filter,
-            )
-        return client.search(index_uid, search_query, limit=limit, hybrid=hybrid, filter=filter)
-    return client.search(index_uid, search_query, limit=limit, filter=filter)
+            kwargs["vector"] = vector
+    return _search_with_supported_kwargs(client, index_uid, search_query, kwargs)
+
+
+def _search_with_supported_kwargs(
+    client: MeiliClient,
+    index_uid: str,
+    query: str,
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    supported_kwargs = {
+        key: value
+        for key, value in kwargs.items()
+        if key != "filter" or _search_accepts_keyword(client, "filter")
+    }
+    try:
+        return client.search(index_uid, query, **supported_kwargs)
+    except TypeError as exc:
+        if "filter" in supported_kwargs and _is_unexpected_keyword_error(exc, "filter"):
+            fallback_kwargs = {
+                key: value for key, value in supported_kwargs.items() if key != "filter"
+            }
+            return client.search(index_uid, query, **fallback_kwargs)
+        raise
+
+
+def _search_accepts_keyword(client: MeiliClient, keyword: str) -> bool:
+    try:
+        parameters = inspect.signature(client.search).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    for parameter in parameters:
+        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == keyword and parameter.kind in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }:
+            return True
+    return False
+
+
+def _is_unexpected_keyword_error(exc: TypeError, keyword: str) -> bool:
+    message = str(exc)
+    return (
+        f"unexpected keyword argument '{keyword}'" in message
+        or f'unexpected keyword argument "{keyword}"' in message
+    )
 
 
 def _selected_hit_fields(occurrence: dict[str, Any]) -> dict[str, Any]:
