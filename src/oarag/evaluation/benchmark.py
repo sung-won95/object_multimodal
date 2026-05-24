@@ -103,7 +103,13 @@ ABLATION_MODE_ALIASES = {
 
 
 class SearchClient(Protocol):
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict[str, Any]: ...
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -505,6 +511,7 @@ def run_local_project_suite(
     queries_path = _resolve_path(base_dir, suite["queries"])
     project_dir = _project_dir_from_suite(suite=suite, base_dir=base_dir, repo_root=repo_root)
     index_uid = str(suite["index"])
+    visual_index_uid = _optional_str(suite.get("visual_index"))
     limit = int(suite.get("limit", 5))
     neighbor_count = int(suite.get("neighbor_count", 1))
     suite_id = str(suite.get("suite_id") or project_dir.name)
@@ -539,6 +546,7 @@ def run_local_project_suite(
         response = query_project(
             client=client,
             index_uid=index_uid,
+            visual_index_uid=visual_index_uid,
             project_dir=project_dir,
             query=str(query_row["query_text"]),
             limit=limit,
@@ -585,6 +593,7 @@ def run_local_project_suite(
                 "query_id": str(query_row.get("query_id") or query_row.get("query_text")),
                 "video_id": query_row.get("video_id"),
                 "index": index_uid,
+                "visual_index": visual_index_uid,
                 "query_text": query_row.get("query_text"),
                 "expected_time_hint": query_row.get("expected_time_hint"),
                 "best_abs_error": best_error,
@@ -611,6 +620,7 @@ def run_local_project_suite(
         "suite_type": "local_project",
         "domain": domain,
         "index": index_uid,
+        "visual_index": visual_index_uid,
         "limit": limit,
         "query_count": len(rows),
         "domain_lexicon": domain_lexicon_metadata or _empty_domain_lexicon_metadata(),

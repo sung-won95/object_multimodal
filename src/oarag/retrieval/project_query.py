@@ -125,6 +125,7 @@ def query_project(
     entity_links = [EntityLink.from_dict(row) for row in _read_optional_jsonl(resolved_entity_links_path)]
 
     segment_lookup = {str(segment.get("segment_id")): segment for segment in segments}
+    project_filter = _project_filter(project_dir=resolved_project_dir, segments=segments)
     frame_lookup = {frame_id(frame): frame for frame in frames}
     window_config = resolve_window_config(
         window_seconds=window_seconds,
@@ -165,6 +166,7 @@ def query_project(
         queries=search_queries,
         limit=limit,
         channels=search_channels,
+        filter=project_filter,
     )
     primary_hit_records = _search_hit_records(search_response)
     primary_hits = [record["hit"] for record in primary_hit_records]
@@ -186,6 +188,7 @@ def query_project(
                 queries=search_queries,
                 limit=limit,
                 channels=search_channels,
+                filter=project_filter,
             )
             visual_hits = visual_search_response.get("hits", [])
         except urllib.error.HTTPError as exc:
@@ -589,7 +592,8 @@ def _visual_entity_from_hit(
     entity_lookup: dict[str, VisualEntity],
 ) -> VisualEntity:
     entity_id = str(hit.get("entity_id", ""))
-    existing = entity_lookup.get(entity_id)
+    local_entity_id = str(hit.get("local_entity_id") or entity_id)
+    existing = entity_lookup.get(local_entity_id)
     if existing is not None:
         return existing
     return VisualEntity.from_dict(hit)
@@ -644,7 +648,7 @@ def _resolve_visual_entity_target_segment(
         return hit_segment_id, {"method": "hit_segment_id", "segment_id": hit_segment_id}
 
     link = _best_entity_link(
-        entity_id=entity.entity_id,
+        entity_id=str(hit.get("local_entity_id") or entity.entity_id),
         links_by_entity=links_by_entity,
         segment_lookup=segment_lookup,
     )
@@ -659,7 +663,7 @@ def _resolve_visual_entity_target_segment(
     frame_candidates = [
         segment
         for segment in segments
-        if entity.frame_id and entity.frame_id in {str(ref) for ref in segment.get("frame_refs") or []}
+        if entity.frame_id and entity.frame_id in _segment_frame_ref_ids(segment)
     ]
     if frame_candidates:
         selected = _nearest_segment_to_timestamp(
@@ -742,6 +746,21 @@ def _segment_timestamp_distance(segment: dict[str, Any], timestamp: float | None
     if window[0] <= timestamp <= window[1]:
         return 0.0
     return min(abs(timestamp - window[0]), abs(timestamp - window[1]))
+
+
+def _segment_frame_ref_ids(segment: dict[str, Any]) -> set[str]:
+    frame_ids: set[str] = set()
+    frame_refs = segment.get("frame_refs")
+    if not isinstance(frame_refs, list):
+        return frame_ids
+    for frame_ref in frame_refs:
+        if isinstance(frame_ref, dict):
+            value = frame_ref.get("frame_id")
+        else:
+            value = frame_ref
+        if value not in (None, ""):
+            frame_ids.add(str(value))
+    return frame_ids
 
 
 def _primary_retrieval_entry(entries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1229,6 +1248,21 @@ def _non_empty_string(value: Any) -> str | None:
     return stripped or None
 
 
+def _project_filter(*, project_dir: Path, segments: list[dict[str, Any]]) -> str:
+    project_id = ""
+    for segment in segments:
+        candidate = str(segment.get("project_id") or "").strip()
+        if candidate:
+            project_id = candidate
+            break
+    project_id = project_id or project_dir.name
+    return f'project_id = "{_escape_meili_filter_string(project_id)}"'
+
+
+def _escape_meili_filter_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _search_with_expanded_queries(
     *,
     client: MeiliClient,
@@ -1236,6 +1270,7 @@ def _search_with_expanded_queries(
     queries: list[str],
     limit: int,
     channels: list[dict[str, Any]] | None = None,
+    filter: str | list[str] | None = None,
 ) -> dict[str, Any]:
     search_channels = channels or _search_channels_for_retrieval(
         hybrid_retrieval=False,
@@ -1255,6 +1290,7 @@ def _search_with_expanded_queries(
                 search_query=search_query,
                 limit=limit,
                 channel=channel,
+                filter=filter,
             )
             responses.append(response)
             hits = response.get("hits", [])
@@ -1332,6 +1368,7 @@ def _run_search_channel(
     search_query: str,
     limit: int,
     channel: dict[str, Any],
+    filter: str | list[str] | None = None,
 ) -> dict[str, Any]:
     hybrid = channel.get("hybrid")
     if isinstance(hybrid, dict):
@@ -1343,9 +1380,10 @@ def _run_search_channel(
                 limit=limit,
                 hybrid=hybrid,
                 vector=vector,
+                filter=filter,
             )
-        return client.search(index_uid, search_query, limit=limit, hybrid=hybrid)
-    return client.search(index_uid, search_query, limit=limit)
+        return client.search(index_uid, search_query, limit=limit, hybrid=hybrid, filter=filter)
+    return client.search(index_uid, search_query, limit=limit, filter=filter)
 
 
 def _selected_hit_fields(occurrence: dict[str, Any]) -> dict[str, Any]:

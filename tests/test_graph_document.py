@@ -134,8 +134,8 @@ def test_build_graph_document_converts_project_artifacts_deterministically(
         "project:sample_project",
         "video:video_a",
         "segment:seg_2",
-        "frame:frame_000006",
-        "visual_entity:entity_board",
+        "frame:sample_project:frame_000006",
+        "visual_entity:sample_project:entity_board",
         "concept:bet",
         "concept:board",
         "concept:size",
@@ -147,13 +147,17 @@ def test_build_graph_document_converts_project_artifacts_deterministically(
     }
     assert ("HAS_VIDEO", "project:sample_project", "video:video_a") in relationship_pairs
     assert ("HAS_SEGMENT", "video:video_a", "segment:seg_2") in relationship_pairs
-    assert ("HAS_FRAME", "video:video_a", "frame:frame_000006") in relationship_pairs
-    assert ("ALIGNED_WITH", "segment:seg_2", "frame:frame_000006") in relationship_pairs
-    assert ("TEMPORALLY_NEAR", "segment:seg_2", "frame:frame_000007") in relationship_pairs
-    assert ("CONTAINS", "frame:frame_000006", "visual_entity:entity_board") in relationship_pairs
+    assert ("HAS_FRAME", "video:video_a", "frame:sample_project:frame_000006") in relationship_pairs
+    assert ("ALIGNED_WITH", "segment:seg_2", "frame:sample_project:frame_000006") in relationship_pairs
+    assert ("TEMPORALLY_NEAR", "segment:seg_2", "frame:sample_project:frame_000007") in relationship_pairs
+    assert (
+        "CONTAINS",
+        "frame:sample_project:frame_000006",
+        "visual_entity:sample_project:entity_board",
+    ) in relationship_pairs
     assert ("MENTIONS", "segment:seg_2", "concept:bet") in relationship_pairs
-    assert ("REPRESENTS", "visual_entity:entity_board", "concept:bet") in relationship_pairs
-    assert ("LINKED_TO", "segment:seg_2", "visual_entity:entity_board") in relationship_pairs
+    assert ("REPRESENTS", "visual_entity:sample_project:entity_board", "concept:bet") in relationship_pairs
+    assert ("LINKED_TO", "segment:seg_2", "visual_entity:sample_project:entity_board") in relationship_pairs
 
 
 def test_build_graph_document_falls_back_when_optional_artifacts_are_missing(

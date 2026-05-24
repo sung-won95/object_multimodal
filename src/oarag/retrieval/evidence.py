@@ -253,7 +253,10 @@ def collect_frame_metadata(
     seen: set[str] = set()
     for segment in segments:
         for frame_ref in segment.get("frame_refs") or []:
-            frame_id_value = str(frame_ref)
+            if isinstance(frame_ref, dict):
+                frame_id_value = str(frame_ref.get("frame_id") or "")
+            else:
+                frame_id_value = str(frame_ref)
             if not frame_id_value or frame_id_value in seen:
                 continue
             seen.add(frame_id_value)

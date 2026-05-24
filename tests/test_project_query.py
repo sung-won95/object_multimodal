@@ -16,7 +16,13 @@ class FakeClient:
         self.processing_time_ms = processing_time_ms
         self.queries: list[str] = []
 
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+    ) -> dict:
         self.queries.append(query)
         return {
             "hits": self.hits[:limit],
@@ -29,10 +35,16 @@ class FakeClient:
 class MultiIndexFakeClient:
     def __init__(self, hits_by_index: dict[str, list[dict]]) -> None:
         self.hits_by_index = hits_by_index
-        self.searches: list[tuple[str, str, int]] = []
+        self.searches: list[tuple[str, str, int, str | list[str] | None]] = []
 
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
-        self.searches.append((index_uid, query, limit))
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+    ) -> dict:
+        self.searches.append((index_uid, query, limit, filter))
         return {
             "hits": self.hits_by_index.get(index_uid, [])[:limit],
             "processingTimeMs": 3,
@@ -46,7 +58,13 @@ class QueryAwareFakeClient:
         self.hits_by_query = hits_by_query
         self.queries: list[str] = []
 
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+    ) -> dict:
         self.queries.append(query)
         return {
             "hits": self.hits_by_query.get(query, [])[:limit],
@@ -67,6 +85,7 @@ class HybridFakeClient:
         query: str,
         limit: int = 10,
         hybrid: dict | None = None,
+        filter: str | list[str] | None = None,
     ) -> dict:
         mode = "semantic" if hybrid else "lexical"
         self.searches.append((index_uid, query, limit, mode, hybrid))
@@ -90,6 +109,7 @@ class HybridVectorFakeClient:
         limit: int = 10,
         hybrid: dict | None = None,
         vector: list[float] | None = None,
+        filter: str | list[str] | None = None,
     ) -> dict:
         mode = "semantic" if hybrid else "lexical"
         self.searches.append(
@@ -420,6 +440,8 @@ def test_query_project_merges_visual_entity_hits_with_segment_targets(tmp_path: 
                         6.0,
                         frame_path="/tmp/f6.jpg",
                     ),
+                    "entity_id": "project__entity_grid",
+                    "local_entity_id": "entity_grid",
                     "_rankingScore": 0.93,
                 }
             ],
@@ -436,8 +458,8 @@ def test_query_project_merges_visual_entity_hits_with_segment_targets(tmp_path: 
     )
 
     assert client.searches == [
-        ("local_segments", "range grid", 5),
-        ("local_visual_entities", "range grid", 5),
+        ("local_segments", "range grid", 5, 'project_id = "project"'),
+        ("local_visual_entities", "range grid", 5, 'project_id = "project"'),
     ]
     assert [candidate["source"] for candidate in response["candidates"]] == [
         "segment",
@@ -469,7 +491,16 @@ def test_query_project_builds_bundle_from_visual_entity_only_hit(tmp_path: Path)
     project_dir = tmp_path / "project"
     _write_jsonl(
         project_dir / "segments" / "lecture_segments_aligned.jsonl",
-        [_segment("seg_1", 1, 5.0, 9.0, "Look at this grid", ["frame_000006"])],
+        [
+            _segment(
+                "seg_1",
+                1,
+                5.0,
+                9.0,
+                "Look at this grid",
+                [{"frame_id": "frame_000006"}],
+            )
+        ],
     )
     _write_jsonl(
         project_dir / "manifests" / "frames_manifest.jsonl",
@@ -491,6 +522,8 @@ def test_query_project_builds_bundle_from_visual_entity_only_hit(tmp_path: Path)
                         6.0,
                         frame_path="/tmp/f6.jpg",
                     ),
+                    "entity_id": "project__entity_grid",
+                    "local_entity_id": "entity_grid",
                     "_rankingScore": 0.93,
                 }
             ],
@@ -561,12 +594,12 @@ def test_query_project_expands_query_when_domain_lexicon_exists(tmp_path: Path) 
     )
 
     assert client.searches == [
-        ("local_segments", "wager sizing", 5),
-        ("local_segments", "bet", 5),
-        ("local_segments", "size", 5),
-        ("local_visual_entities", "wager sizing", 5),
-        ("local_visual_entities", "bet", 5),
-        ("local_visual_entities", "size", 5),
+        ("local_segments", "wager sizing", 5, 'project_id = "project"'),
+        ("local_segments", "bet", 5, 'project_id = "project"'),
+        ("local_segments", "size", 5, 'project_id = "project"'),
+        ("local_visual_entities", "wager sizing", 5, 'project_id = "project"'),
+        ("local_visual_entities", "bet", 5, 'project_id = "project"'),
+        ("local_visual_entities", "size", 5, 'project_id = "project"'),
     ]
     assert response["query"] == "wager sizing"
     assert response["domain_lexicon"]["enabled"] is True
