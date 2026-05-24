@@ -480,7 +480,11 @@ class _GraphDocumentBuilder:
         return self.project_id
 
     def _node_key(self, namespace: str, local_id: str) -> str:
-        return f"{namespace}:{slugify(str(local_id))}"
+        scoped_namespaces = {"frame", "visual_entity"}
+        local_key = slugify(str(local_id))
+        if namespace in scoped_namespaces:
+            return f"{namespace}:{slugify(self.project_id)}:{local_key}"
+        return f"{namespace}:{local_key}"
 
 
 def _optional_segment_path(project_dir: Path, segments_path: Path | None) -> Path:

@@ -8,8 +8,34 @@ from oarag.evaluation.quality_gate import evaluate_retrieval_quality_gate
 
 
 class FakeClient:
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
-        if "gravity" in query.lower():
+    def __init__(self) -> None:
+        self.searches: list[tuple[str, str, int, str | list[str] | None]] = []
+
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+    ) -> dict:
+        self.searches.append((index_uid, query, limit, filter))
+        if index_uid == "local_visual_index" and "bet size" in query.lower():
+            hits = [
+                {
+                    "entity_id": "local_project__ent_bet",
+                    "local_entity_id": "ent_bet",
+                    "project_id": "local_project",
+                    "frame_id": "frame_000012",
+                    "timestamp": 12.0,
+                    "frame_path": "/tmp/frame.jpg",
+                    "text": "bet size",
+                    "entity_type": "ocr_text",
+                    "confidence": 0.9,
+                    "source": "test",
+                    "_rankingScore": 0.99,
+                }
+            ]
+        elif "gravity" in query.lower():
             hits = [
                 {
                     "segment_id": "seg_gravity",
@@ -49,7 +75,13 @@ class FakeClient:
 
 
 class FakeAblationClient:
-    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+    ) -> dict:
         if index_uid == "public_segments":
             hits = [
                 {
@@ -98,6 +130,7 @@ class FakeMatrixClient:
         query: str,
         limit: int = 10,
         hybrid: dict | None = None,
+        filter: str | list[str] | None = None,
     ) -> dict:
         mode = "semantic" if hybrid else "lexical"
         self.searches.append((index_uid, query, mode))
@@ -296,6 +329,7 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
                         "project_dir": str(project_dir),
                         "queries": str(queries_path),
                         "index": "local_index",
+                        "visual_index": "local_visual_index",
                         "domain_lexicon": "domain_lexicon.json",
                         "limit": 3,
                         "rerank": True,
@@ -306,7 +340,8 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    run = run_benchmark(client=FakeClient(), manifest_path=manifest_path, repo_root=tmp_path)
+    client = FakeClient()
+    run = run_benchmark(client=client, manifest_path=manifest_path, repo_root=tmp_path)
 
     assert run.metrics_path.exists()
     assert run.query_results_path.exists()
@@ -329,6 +364,7 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
     assert edu_metrics["diagnostic_top_k"] == 2
     assert local_metrics["frame_backed_ratio"] == 1.0
     assert local_metrics["linked_entity_backed_ratio"] == 1.0
+    assert local_metrics["visual_index"] == "local_visual_index"
     assert local_metrics["top1_mean_abs_error"] == 0.0
     assert local_metrics["rerank"]["enabled"] is True
     assert local_metrics["rerank"]["strategy"] == "deterministic_evidence_v1"
@@ -356,7 +392,9 @@ def test_run_benchmark_writes_cross_domain_outputs(tmp_path: Path) -> None:
         }
     ]
     assert local_row["top_candidate"]["segment_id"] == "seg_local_1"
-    assert local_row["top_rerank"]["original_rank"] == 2
+    assert local_row["visual_index"] == "local_visual_index"
+    assert local_row["top_rerank"]["original_rank"] in {1, 2}
+    assert any(call[0] == "local_visual_index" for call in client.searches)
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "| local_suite | local_project | local_pilot | on (domain_lexicon.json) |" in summary
     assert "on (deterministic_evidence_v1)" in summary

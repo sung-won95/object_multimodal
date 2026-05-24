@@ -1,0 +1,792 @@
+{
+  "run_id": "mit_deep_learning_stt_seed_v1",
+  "suite_count": 24,
+  "query_count": 48,
+  "deltas": [
+    5,
+    10,
+    15,
+    30
+  ],
+  "suites": [
+    {
+      "suite_id": "mitdl_lec01",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 97.115,
+      "top1_mean_abs_error": 632.285,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 0.5,
+      "linked_entity_backed_ratio": 0.5,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec02",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 458.85,
+      "top1_mean_abs_error": 458.85,
+      "mrr_at_max_delta": 0.5,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 0.5,
+      "mean_processing_time_ms": 12.4874,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.5,
+      "hit_at_30s": 0.5
+    },
+    {
+      "suite_id": "mitdl_lec03",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 296.895,
+      "top1_mean_abs_error": 1203.49,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 0.0,
+      "linked_entity_backed_ratio": 0.0,
+      "mean_processing_time_ms": 6.5569,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec04",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 1005.035,
+      "top1_mean_abs_error": 1066.66,
+      "mrr_at_max_delta": 0.5,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.5,
+      "hit_at_15s": 0.5,
+      "hit_at_30s": 0.5
+    },
+    {
+      "suite_id": "mitdl_lec05",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 139.11,
+      "top1_mean_abs_error": 139.11,
+      "mrr_at_max_delta": 0.5,
+      "frame_backed_ratio": 0.5,
+      "linked_entity_backed_ratio": 0.5,
+      "mean_processing_time_ms": 9.0136,
+      "hit_at_5s": 0.5,
+      "hit_at_10s": 0.5,
+      "hit_at_15s": 0.5,
+      "hit_at_30s": 0.5
+    },
+    {
+      "suite_id": "mitdl_lec06",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 338.985,
+      "top1_mean_abs_error": 2435.095,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 0.5,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec07",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 485.225,
+      "top1_mean_abs_error": 2104.395,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 0.5,
+      "linked_entity_backed_ratio": 0.0,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec08",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 152.005,
+      "top1_mean_abs_error": 288.74,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 9.737,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec09",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 1680.565,
+      "top1_mean_abs_error": 2572.49,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 0.5,
+      "linked_entity_backed_ratio": 0.5,
+      "mean_processing_time_ms": 29.0808,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec10",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 1023.325,
+      "top1_mean_abs_error": 1361.525,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec11",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 193.645,
+      "top1_mean_abs_error": 479.82,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec12",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 2.045,
+      "top1_mean_abs_error": 2.045,
+      "mrr_at_max_delta": 1.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 1.5,
+      "hit_at_5s": 1.0,
+      "hit_at_10s": 1.0,
+      "hit_at_15s": 1.0,
+      "hit_at_30s": 1.0
+    },
+    {
+      "suite_id": "mitdl_lec13",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 933.27,
+      "top1_mean_abs_error": 933.27,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 0.0,
+      "linked_entity_backed_ratio": 0.0,
+      "mean_processing_time_ms": 6.9516,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec14",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 16.73,
+      "top1_mean_abs_error": 1236.9,
+      "mrr_at_max_delta": 0.5,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.5,
+      "hit_at_10s": 0.5,
+      "hit_at_15s": 0.5,
+      "hit_at_30s": 0.5
+    },
+    {
+      "suite_id": "mitdl_lec15",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 349.135,
+      "top1_mean_abs_error": 992.665,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 0.0,
+      "linked_entity_backed_ratio": 0.0,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec16",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 174.24,
+      "top1_mean_abs_error": 1599.205,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 9.5104,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec17",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 391.29,
+      "top1_mean_abs_error": 1117.85,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 1.5,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec18",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 40.55,
+      "top1_mean_abs_error": 287.695,
+      "mrr_at_max_delta": 0.5,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 0.5,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.5,
+      "hit_at_10s": 0.5,
+      "hit_at_15s": 0.5,
+      "hit_at_30s": 0.5
+    },
+    {
+      "suite_id": "mitdl_lec19",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 299.33,
+      "top1_mean_abs_error": 3072.985,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 9.4789,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec20",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 184.85,
+      "top1_mean_abs_error": 825.15,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 0.5,
+      "linked_entity_backed_ratio": 0.5,
+      "mean_processing_time_ms": 14.6227,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec21",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 47.935,
+      "top1_mean_abs_error": 1368.68,
+      "mrr_at_max_delta": 0.5,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.5,
+      "hit_at_10s": 0.5,
+      "hit_at_15s": 0.5,
+      "hit_at_30s": 0.5
+    },
+    {
+      "suite_id": "mitdl_lec23",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 600.19,
+      "top1_mean_abs_error": 1028.08,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 10.3018,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_lec24",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 141.46,
+      "top1_mean_abs_error": 1128.825,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 1.0,
+      "linked_entity_backed_ratio": 1.0,
+      "mean_processing_time_ms": 1.0,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    },
+    {
+      "suite_id": "mitdl_review",
+      "suite_type": "local_project",
+      "domain": "mit_deep_learning_stt_seed",
+      "index": "mit_deep_learning_stt_segments",
+      "visual_index": "mit_deep_learning_stt_visual_entities",
+      "limit": 5,
+      "query_count": 2,
+      "domain_lexicon": {
+        "enabled": false,
+        "source_path": null,
+        "canonical_term_count": 0,
+        "alias_count": 0,
+        "term_count": 0
+      },
+      "rerank": {
+        "enabled": false,
+        "strategy": null,
+        "weights": null,
+        "time_hint_source": "query_text"
+      },
+      "mean_abs_error": 339.825,
+      "top1_mean_abs_error": 1173.225,
+      "mrr_at_max_delta": 0.0,
+      "frame_backed_ratio": 0.5,
+      "linked_entity_backed_ratio": 0.0,
+      "mean_processing_time_ms": 4.9442,
+      "hit_at_5s": 0.0,
+      "hit_at_10s": 0.0,
+      "hit_at_15s": 0.0,
+      "hit_at_30s": 0.0
+    }
+  ],
+  "anti_overfit": {
+    "domain_count": 1,
+    "domains": {
+      "mit_deep_learning_stt_seed": {
+        "suite_count": 24,
+        "query_count": 48,
+        "mean_hit_at_10s": 0.1458,
+        "mean_mrr_at_max_delta": 0.1667
+      }
+    }
+  }
+}

@@ -823,6 +823,12 @@ def _visual_entity_index_document(document: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"visual entity document is missing frame_id: {entity.entity_id}")
 
     indexed = entity.to_dict()
+    local_entity_id = entity.entity_id
+    project_id = str(indexed.get("project_id") or "").strip()
+    if project_id:
+        indexed["local_entity_id"] = local_entity_id
+        if not local_entity_id.startswith(f"{project_id}__"):
+            indexed["entity_id"] = f"{project_id}__{local_entity_id}"
     for optional_field in ("video_id", "segment_id"):
         if document.get(optional_field) not in (None, ""):
             indexed[optional_field] = document[optional_field]

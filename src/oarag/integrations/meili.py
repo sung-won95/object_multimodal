@@ -233,8 +233,11 @@ VISUAL_ENTITY_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
         ],
         "filterableAttributes": [
             "project_id",
+            "local_entity_id",
             "frame_id",
             "entity_id",
+            "video_id",
+            "segment_id",
             "entity_type",
             "source",
             "source_model",
@@ -247,8 +250,11 @@ VISUAL_ENTITY_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
         ],
         "displayedAttributes": [
             "entity_id",
+            "local_entity_id",
             "project_id",
             "frame_id",
+            "video_id",
+            "segment_id",
             "timestamp",
             "frame_path",
             "bbox",
@@ -739,12 +745,15 @@ class MeiliClient:
         hybrid: dict[str, Any] | None = None,
         vector: list[float] | None = None,
         show_ranking_score_details: bool = False,
+        filter: str | list[str] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "q": query,
             "limit": limit,
             "showRankingScore": show_ranking_score,
         }
+        if filter is not None:
+            payload["filter"] = filter
         if hybrid is not None:
             payload["hybrid"] = hybrid
         if vector is not None:

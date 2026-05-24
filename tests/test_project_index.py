@@ -616,9 +616,21 @@ def test_index_project_visual_entities_batches_documents(tmp_path: Path) -> None
     settings_call = next(call for call in client.calls if call[0] == "update_settings")
     assert len(add_calls) == 2
     assert add_calls[0][1] == "local_visual_entities"
-    assert add_calls[0][2] == rows[:2]
-    assert add_calls[1][2] == rows[2:]
+    assert [document["entity_id"] for document in add_calls[0][2]] == [
+        "project__entity_a",
+        "project__entity_b",
+    ]
+    assert [document["local_entity_id"] for document in add_calls[0][2]] == [
+        "entity_a",
+        "entity_b",
+    ]
+    assert add_calls[1][2][0]["entity_id"] == "project__entity_c"
+    assert add_calls[1][2][0]["local_entity_id"] == "entity_c"
     assert settings_call[1] == "local_visual_entities"
+    assert "local_entity_id" in settings_call[2]["filterableAttributes"]
+    assert "local_entity_id" in settings_call[2]["displayedAttributes"]
+    assert "segment_id" in settings_call[2]["displayedAttributes"]
+    assert "video_id" in settings_call[2]["displayedAttributes"]
     assert ("delete_index", "local_visual_entities") in client.calls
     assert ("create_index", "local_visual_entities", "entity_id") in client.calls
     assert summary["index"] == "local_visual_entities"
