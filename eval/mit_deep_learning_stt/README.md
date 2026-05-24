@@ -38,6 +38,18 @@ Matrix benchmark에서 lexicon variant를 쓰려면 manifest 또는 suite에 `"d
 
 Matrix benchmark는 24개 lecture suite를 `segment_lexical`, `domain_lexicon`, `hybrid`, `window`, `window_hybrid`, `rerank` 변형으로 실행한다.
 실행 전 Meilisearch가 떠 있어야 하며, manifest가 가리키는 MIT project artifacts와 기존 segment/visual entity index가 준비되어 있어야 한다.
+`rerank` 변형은 최종 반환 `limit`과 별개로 더 깊은 후보 풀을 조회해 deterministic reranker가 rank 밖 후보를 재정렬할 수 있게 한다.
+
+Partial smoke를 먼저 돌릴 때는 공개 출력 원칙을 유지한 채 suite 수만 줄인 임시 manifest를 만들 수 있다.
+
+```bash
+jq '.suites |= .[:4]' \
+  eval/mit_deep_learning_stt/benchmark_matrix_manifest.json \
+  > /tmp/mit_deep_learning_matrix_partial.json
+python -m oarag benchmark-retrieval \
+  --manifest /tmp/mit_deep_learning_matrix_partial.json \
+  --output-dir reports/mit_deep_learning_eval/paper_matrix_partial_smoke
+```
 
 ```bash
 python scripts/index_mit_deep_learning_windows.py --build-only

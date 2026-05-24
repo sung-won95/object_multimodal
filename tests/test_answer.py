@@ -83,6 +83,45 @@ def test_ask_project_returns_grounded_answer_with_citations(tmp_path: Path) -> N
     assert answer["no_answer_policy"]["reason"] == "query_terms_grounded_in_candidate"
 
 
+def test_ask_project_grounds_answer_against_domain_expansion_terms(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [_segment("seg_1", 1, 5.0, 9.0, "Bet size appears on the board.", [])],
+    )
+    (project_dir / "domain_lexicon.json").write_text(
+        json.dumps({"aliases": {"bet": ["wager"]}}),
+        encoding="utf-8",
+    )
+
+    response = ask_project(
+        client=FakeClient(
+            [
+                {
+                    "segment_id": "seg_1",
+                    "sample_id": "seg_1",
+                    "video_id": "video",
+                    "start_time": 5.0,
+                    "end_time": 9.0,
+                    "timestamp_center": 7.0,
+                    "transcript_text": "Bet size appears on the board.",
+                    "_rankingScore": 0.88,
+                }
+            ]
+        ),
+        index_uid="local_segments",
+        project_dir=project_dir,
+        query="wager",
+        neighbor_count=0,
+    )
+
+    assert response["query_expansion"]["search_queries"] == ["wager", "bet"]
+    assert response["answer_type"] == GROUNDED_ANSWER
+    signals = response["answer"]["no_answer_policy"]["signals"]
+    assert signals["support_query_count"] == 2
+    assert signals["matched_query_terms"] == ["bet"]
+
+
 def test_ask_project_preserves_window_hybrid_rerank_metadata_in_answer_evidence(
     tmp_path: Path,
 ) -> None:

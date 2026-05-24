@@ -728,6 +728,14 @@ def build_parser() -> argparse.ArgumentParser:
     query_project.add_argument("--query", required=True)
     query_project.add_argument("--limit", type=int, default=5)
     query_project.add_argument(
+        "--candidate-pool-limit",
+        type=int,
+        help=(
+            "Retrieve this many candidates per search channel before final limiting. "
+            "Useful with --rerank to let the reranker see deeper candidates."
+        ),
+    )
+    query_project.add_argument(
         "--segments",
         type=Path,
         help="Optional segment JSONL path. Relative paths are resolved from project dir.",
@@ -861,6 +869,14 @@ def build_parser() -> argparse.ArgumentParser:
     location.add_argument("--project-dir", type=Path, help="Project artifact directory")
     ask_project_parser.add_argument("--query", required=True)
     ask_project_parser.add_argument("--limit", type=int, default=5)
+    ask_project_parser.add_argument(
+        "--candidate-pool-limit",
+        type=int,
+        help=(
+            "Retrieve this many candidates per search channel before final limiting. "
+            "Useful with --rerank to let the reranker see deeper candidates."
+        ),
+    )
     ask_project_parser.add_argument(
         "--segments",
         type=Path,
@@ -1870,6 +1886,7 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         project_dir=project_dir,
         query=args.query,
         limit=args.limit,
+        candidate_pool_limit=args.candidate_pool_limit,
         segments_path=args.segments,
         frames_manifest_path=args.frames_manifest,
         visual_entities_path=args.visual_entities,
@@ -1913,6 +1930,7 @@ def cmd_ask_project(args: argparse.Namespace) -> None:
         project_dir=project_dir,
         query=args.query,
         limit=args.limit,
+        candidate_pool_limit=args.candidate_pool_limit,
         segments_path=args.segments,
         frames_manifest_path=args.frames_manifest,
         visual_entities_path=args.visual_entities,

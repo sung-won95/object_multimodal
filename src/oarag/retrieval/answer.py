@@ -83,6 +83,7 @@ def ask_project(
     retrieval_index_kind: str = SEGMENT_HIT_SOURCE,
     visual_index_uid: str | None = None,
     limit: int = 5,
+    candidate_pool_limit: int | None = None,
     segments_path: Path | None = None,
     frames_manifest_path: Path | None = None,
     visual_entities_path: Path | None = None,
@@ -111,6 +112,7 @@ def ask_project(
         project_dir=project_dir,
         query=query,
         limit=limit,
+        candidate_pool_limit=candidate_pool_limit,
         segments_path=segments_path,
         frames_manifest_path=frames_manifest_path,
         visual_entities_path=visual_entities_path,
@@ -206,6 +208,7 @@ def _compose_deterministic_answer(
     policy: NoAnswerPolicy,
 ) -> dict[str, Any]:
     query = str(retrieval_response.get("query") or "")
+    support_queries = _support_queries(retrieval_response, fallback_query=query)
     bundles = _list_of_dicts(retrieval_response.get("bundles"))
     citations = [
         _citation_for_bundle(
@@ -219,12 +222,16 @@ def _compose_deterministic_answer(
     candidate_evidence = _candidate_evidence_items(
         bundles=bundles,
         citations=citations,
-        query=query,
+        support_queries=support_queries,
         retrieval_response=retrieval_response,
         limit=policy.candidate_evidence_limit,
     )
     top_bundle = bundles[0] if bundles else None
-    top_signals = _support_signals(top_bundle, query=query) if top_bundle else _empty_signals(query)
+    top_signals = (
+        _support_signals(top_bundle, support_queries=support_queries)
+        if top_bundle
+        else _empty_signals(support_queries)
+    )
     answer_type, reason = _answer_type_from_signals(
         has_bundle=top_bundle is not None,
         signals=top_signals,
@@ -332,7 +339,7 @@ def _candidate_evidence_items(
     *,
     bundles: list[dict[str, Any]],
     citations: list[dict[str, Any]],
-    query: str,
+    support_queries: list[str],
     retrieval_response: dict[str, Any],
     limit: int,
 ) -> list[dict[str, Any]]:
@@ -356,7 +363,7 @@ def _candidate_evidence_items(
                 "text": text,
                 "modalities": _modalities_for_bundle(bundle),
                 "citation_ids": [citation["citation_id"]],
-                "support": _support_signals(bundle, query=query),
+                "support": _support_signals(bundle, support_queries=support_queries),
                 **_answer_bundle_retrieval_metadata(
                     bundle=bundle,
                     retrieval_response=retrieval_response,
@@ -424,10 +431,14 @@ def _answer_bundle_retrieval_metadata(
     return metadata
 
 
-def _support_signals(bundle: dict[str, Any] | None, *, query: str) -> dict[str, Any]:
-    query_terms = _tokenize(query)
+def _support_signals(
+    bundle: dict[str, Any] | None,
+    *,
+    support_queries: list[str],
+) -> dict[str, Any]:
+    query_terms = _support_query_terms(support_queries)
     if bundle is None:
-        return _empty_signals(query)
+        return _empty_signals(support_queries)
     candidate = _candidate(bundle)
     text_parts = _bundle_text_parts(bundle)
     evidence_terms = _tokenize(" ".join(text_parts))
@@ -443,6 +454,7 @@ def _support_signals(bundle: dict[str, Any] | None, *, query: str) -> dict[str, 
     query_overlap_ratio = len(matched_terms) / len(query_terms) if query_terms else 0.0
     return {
         "query_term_count": len(query_terms),
+        "support_query_count": len(support_queries),
         "matched_query_terms": matched_terms,
         "query_overlap_ratio": round(query_overlap_ratio, 4),
         "search_score": search_score,
@@ -457,9 +469,10 @@ def _support_signals(bundle: dict[str, Any] | None, *, query: str) -> dict[str, 
     }
 
 
-def _empty_signals(query: str) -> dict[str, Any]:
+def _empty_signals(support_queries: list[str]) -> dict[str, Any]:
     return {
-        "query_term_count": len(_tokenize(query)),
+        "query_term_count": len(_support_query_terms(support_queries)),
+        "support_query_count": len(support_queries),
         "matched_query_terms": [],
         "query_overlap_ratio": 0.0,
         "search_score": None,
@@ -661,6 +674,38 @@ def _validate_answer_schema(answer: dict[str, Any]) -> None:
         )
     if "schema_version" not in answer:
         raise ValueError("Answer backend response must include schema_version")
+
+
+def _support_queries(retrieval_response: dict[str, Any], *, fallback_query: str) -> list[str]:
+    queries: list[str] = []
+    seen: set[str] = set()
+    for candidate in [fallback_query, *_expanded_search_queries(retrieval_response)]:
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        normalized = text.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        queries.append(text)
+    return queries
+
+
+def _expanded_search_queries(retrieval_response: dict[str, Any]) -> list[str]:
+    expansion = retrieval_response.get("query_expansion")
+    if not isinstance(expansion, dict):
+        return []
+    queries = expansion.get("search_queries")
+    if not isinstance(queries, list):
+        return []
+    return [str(query) for query in queries if str(query or "").strip()]
+
+
+def _support_query_terms(support_queries: list[str]) -> set[str]:
+    terms: set[str] = set()
+    for query in support_queries:
+        terms.update(_tokenize(query))
+    return terms
 
 
 def _tokenize(value: str) -> set[str]:
