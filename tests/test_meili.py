@@ -45,7 +45,7 @@ from oarag.schemas import (
 
 
 EXPECTED_DEFAULT_SETTINGS_HASH = "f0a9515744b51f74ba52310b07940174f99f040f7f7a6935e3678a0445e95917"
-EXPECTED_VISUAL_ENTITY_SETTINGS_HASH = "5cb877a0006ff93448b2c06680fc566f41bd3d54cd527b6b2282c0e1b158ccdc"
+EXPECTED_VISUAL_ENTITY_SETTINGS_HASH = "2f8f2529ea5760191cc3f14551d1befd98873f4fa765420f082e72e9f5fc8bd6"
 EXPECTED_WINDOW_SETTINGS_HASH = "c42ed8c97d77620012254b45e2d6b3961f12e2211b0f8ac78759f844f07503e8"
 EXPECTED_HYBRID_EMBEDDER_SETTINGS_HASH = "d7e2a5244531c3c149b0415962e6b114cc8b7a39df3eb24b5acbbaf14f12cab3"
 PUBLIC_USER_PROVIDED_VECTOR_PROJECT = (
@@ -294,14 +294,20 @@ def test_visual_entity_settings_payload_indexes_direct_visual_evidence() -> None
     ]
     assert settings["filterableAttributes"] == [
         "project_id",
+        "local_entity_id",
         "frame_id",
         "entity_id",
+        "video_id",
+        "segment_id",
         "entity_type",
         "source",
         "source_model",
         "semantic_source_fields",
         "timestamp",
     ]
+    assert "local_entity_id" in settings["displayedAttributes"]
+    assert "video_id" in settings["displayedAttributes"]
+    assert "segment_id" in settings["displayedAttributes"]
     assert "semantic_source_fields" in settings["displayedAttributes"]
     assert "frame_path" in settings["displayedAttributes"]
     assert "source_video_path" not in settings["displayedAttributes"]

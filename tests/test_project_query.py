@@ -130,6 +130,53 @@ class HybridVectorFakeClient:
         }
 
 
+class LegacyMultiIndexNoFilterClient:
+    def __init__(self, hits_by_index: dict[str, list[dict]]) -> None:
+        self.hits_by_index = hits_by_index
+        self.searches: list[tuple[str, str, int]] = []
+
+    def search(self, index_uid: str, query: str, limit: int = 10) -> dict:
+        self.searches.append((index_uid, query, limit))
+        return {
+            "hits": self.hits_by_index.get(index_uid, [])[:limit],
+            "processingTimeMs": 2,
+            "indexUid": index_uid,
+            "query": query,
+        }
+
+
+class LegacyHybridVectorNoFilterClient:
+    def __init__(self, hits_by_call: dict[tuple[str, str, str], list[dict]]) -> None:
+        self.hits_by_call = hits_by_call
+        self.searches: list[dict] = []
+
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        hybrid: dict | None = None,
+        vector: list[float] | None = None,
+    ) -> dict:
+        mode = "semantic" if hybrid else "lexical"
+        self.searches.append(
+            {
+                "index": index_uid,
+                "query": query,
+                "limit": limit,
+                "mode": mode,
+                "hybrid": hybrid,
+                "vector": vector,
+            }
+        )
+        return {
+            "hits": self.hits_by_call.get((index_uid, query, mode), [])[:limit],
+            "processingTimeMs": 2,
+            "indexUid": index_uid,
+            "query": query,
+        }
+
+
 def test_query_project_returns_multimodal_bundle(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     _write_jsonl(
@@ -508,7 +555,15 @@ def test_query_project_builds_bundle_from_visual_entity_only_hit(tmp_path: Path)
     )
     _write_jsonl(
         project_dir / "manifests" / "visual_entities.jsonl",
-        [_visual_entity("entity_grid", "frame_000006", "range grid", 6.0, frame_path="/tmp/f6.jpg")],
+        [
+            _visual_entity(
+                "entity_grid",
+                "frame_000006",
+                "range grid",
+                6.0,
+                frame_path="/tmp/f6.jpg",
+            )
+        ],
     )
     client = MultiIndexFakeClient(
         {
@@ -551,6 +606,82 @@ def test_query_project_builds_bundle_from_visual_entity_only_hit(tmp_path: Path)
     ]
     assert bundle["visual_entities"][0]["text"] == "range grid"
     assert "visual_entity=range grid" in response["summary_lines"][0]
+
+
+def test_query_project_supports_legacy_search_clients_without_filter_kwarg(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [_segment("seg_1", 1, 5.0, 9.0, "Look at this grid", ["frame_000006"])],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000006", "timestamp": 6.0, "frame_path": "/tmp/f6.jpg"}],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            _visual_entity(
+                "entity_grid",
+                "frame_000006",
+                "range grid",
+                6.0,
+                frame_path="/tmp/f6.jpg",
+            )
+        ],
+    )
+    client = LegacyMultiIndexNoFilterClient(
+        {
+            "local_segments": [
+                {
+                    "segment_id": "seg_1",
+                    "sample_id": "seg_1",
+                    "video_id": "video",
+                    "start_time": 5.0,
+                    "end_time": 9.0,
+                    "timestamp_center": 7.0,
+                    "transcript_text": "Look at this grid",
+                    "_rankingScore": 0.82,
+                }
+            ],
+            "local_visual_entities": [
+                {
+                    **_visual_entity(
+                        "entity_grid",
+                        "frame_000006",
+                        "range grid",
+                        6.0,
+                        frame_path="/tmp/f6.jpg",
+                    ),
+                    "entity_id": "project__entity_grid",
+                    "local_entity_id": "entity_grid",
+                    "_rankingScore": 0.93,
+                }
+            ],
+        }
+    )
+
+    response = query_project(
+        client=client,
+        index_uid="local_segments",
+        visual_index_uid="local_visual_entities",
+        project_dir=project_dir,
+        query="range grid",
+        neighbor_count=0,
+    )
+
+    assert client.searches == [
+        ("local_segments", "range grid", 5),
+        ("local_visual_entities", "range grid", 5),
+    ]
+    assert response["counts"]["search_hits"] == 2
+    assert response["counts"]["bundles"] == 1
+    assert [candidate["source"] for candidate in response["candidates"]] == [
+        "segment",
+        "visual_entity",
+    ]
 
 
 def test_query_project_expands_query_when_domain_lexicon_exists(tmp_path: Path) -> None:
@@ -899,6 +1030,67 @@ def test_query_project_userprovided_vector_hits_semantic_channel_without_leaking
     assert "0.111111" not in serialized
     assert "0.222222" not in serialized
     assert "0.333333" not in serialized
+
+
+def test_query_project_hybrid_vector_supports_legacy_clients_without_filter_kwarg(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [_segment("seg_vector", 1, 0.0, 2.0, "Public vector target", [])],
+    )
+    query_vector = [0.111111, 0.222222, 0.333333]
+    client = LegacyHybridVectorNoFilterClient(
+        {
+            ("local_segments", "opaque miss", "semantic"): [
+                {
+                    "segment_id": "seg_vector",
+                    "sample_id": "seg_vector",
+                    "video_id": "video",
+                    "start_time": 0.0,
+                    "end_time": 2.0,
+                    "timestamp_center": 1.0,
+                    "transcript_text": "Public vector target",
+                    "_rankingScore": 0.91,
+                }
+            ],
+        }
+    )
+
+    response = query_project(
+        client=client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        query="opaque miss",
+        limit=1,
+        neighbor_count=0,
+        hybrid_retrieval=True,
+        hybrid_query_vector=query_vector,
+        hybrid_query_vector_embedder="default",
+        hybrid_query_vector_dimensions=3,
+    )
+
+    assert client.searches == [
+        {
+            "index": "local_segments",
+            "query": "opaque miss",
+            "limit": 1,
+            "mode": "lexical",
+            "hybrid": None,
+            "vector": None,
+        },
+        {
+            "index": "local_segments",
+            "query": "opaque miss",
+            "limit": 1,
+            "mode": "semantic",
+            "hybrid": {"embedder": "default", "semanticRatio": 1.0},
+            "vector": query_vector,
+        },
+    ]
+    assert response["bundles"][0]["candidate"]["segment_id"] == "seg_vector"
+    assert response["bundles"][0]["candidate"]["retrieval_mode"] == "semantic"
 
 
 def test_query_project_loads_userprovided_vector_manifest_for_window_search() -> None:
