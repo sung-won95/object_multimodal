@@ -1348,6 +1348,81 @@ def test_query_project_rerank_reorders_bundles_and_records_breakdown(tmp_path: P
     assert "rerank_score=" in response["summary_lines"][0]
 
 
+def test_query_project_candidate_pool_limit_lets_rerank_promote_deep_candidate(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_wrong", 1, 100.0, 104.0, "Introductory aside", []),
+            _segment("seg_filler", 2, 50.0, 54.0, "General context", []),
+            _segment("seg_target", 3, 10.0, 14.0, "Target concept appears here", []),
+        ],
+    )
+    client = MultiIndexFakeClient(
+        {
+            "local_segments": [
+                {
+                    "segment_id": "seg_wrong",
+                    "sample_id": "seg_wrong",
+                    "video_id": "video",
+                    "start_time": 100.0,
+                    "end_time": 104.0,
+                    "timestamp_center": 102.0,
+                    "transcript_text": "Introductory aside",
+                    "_rankingScore": 0.95,
+                },
+                {
+                    "segment_id": "seg_filler",
+                    "sample_id": "seg_filler",
+                    "video_id": "video",
+                    "start_time": 50.0,
+                    "end_time": 54.0,
+                    "timestamp_center": 52.0,
+                    "transcript_text": "General context",
+                    "_rankingScore": 0.8,
+                },
+                {
+                    "segment_id": "seg_target",
+                    "sample_id": "seg_target",
+                    "video_id": "video",
+                    "start_time": 10.0,
+                    "end_time": 14.0,
+                    "timestamp_center": 12.0,
+                    "transcript_text": "Target concept appears here",
+                    "_rankingScore": 0.4,
+                },
+            ]
+        }
+    )
+
+    response = query_project(
+        client=client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        query="target concept",
+        limit=1,
+        candidate_pool_limit=3,
+        neighbor_count=0,
+        rerank=True,
+        rerank_time_hint="10-14s",
+    )
+
+    assert client.searches == [
+        ("local_segments", "target concept", 3, 'project_id = "project"')
+    ]
+    assert response["retrieval_context"]["candidate_generation"] == {
+        "result_limit": 1,
+        "candidate_pool_limit": 3,
+        "pool_expanded": True,
+    }
+    assert response["counts"]["candidate_pool_targets"] == 3
+    assert len(response["bundles"]) == 1
+    assert response["bundles"][0]["candidate"]["segment_id"] == "seg_target"
+    assert response["bundles"][0]["rerank"]["original_rank"] == 3
+
+
 def test_query_project_rerank_backend_option_records_private_safe_breakdown(
     tmp_path: Path,
 ) -> None:

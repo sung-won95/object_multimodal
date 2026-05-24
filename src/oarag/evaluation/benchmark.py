@@ -83,6 +83,7 @@ DEFAULT_MATRIX_VARIANTS = [
         "label": "Deterministic rerank",
         "index_kind": SEGMENT_HIT_SOURCE,
         "rerank": True,
+        "candidate_pool_limit": 30,
         "use_domain_lexicon": False,
     },
 ]
@@ -514,6 +515,7 @@ def run_local_project_suite(
     index_uid = str(suite["index"])
     visual_index_uid = _optional_str(suite.get("visual_index"))
     limit = int(suite.get("limit", 5))
+    candidate_pool_limit = _optional_int(suite.get("candidate_pool_limit"))
     neighbor_count = int(suite.get("neighbor_count", 1))
     suite_id = str(suite.get("suite_id") or project_dir.name)
     domain = str(suite.get("domain") or "local_project")
@@ -553,6 +555,7 @@ def run_local_project_suite(
             project_dir=project_dir,
             query=str(query_row["query_text"]),
             limit=limit,
+            candidate_pool_limit=candidate_pool_limit,
             neighbor_count=neighbor_count,
             domain_lexicon_path=domain_lexicon_path,
             rerank=rerank_enabled,
@@ -625,6 +628,7 @@ def run_local_project_suite(
         "index": index_uid,
         "visual_index": visual_index_uid,
         "limit": limit,
+        "candidate_pool_limit": candidate_pool_limit or limit,
         "query_count": len(rows),
         "domain_lexicon": domain_lexicon_metadata or _empty_domain_lexicon_metadata(),
         "rerank": _suite_rerank_metadata(
@@ -1126,6 +1130,9 @@ def _run_matrix_query(
         project_dir=project_dir,
         query=query_text,
         limit=int(_variant_value(suite, variant, "limit") or 5),
+        candidate_pool_limit=_optional_int(
+            _variant_value(suite, variant, "candidate_pool_limit")
+        ),
         segments_path=_optional_path(_variant_value(suite, variant, "segments")),
         frames_manifest_path=_optional_path(_variant_value(suite, variant, "frames_manifest")),
         visual_entities_path=_optional_path(_variant_value(suite, variant, "visual_entities")),
@@ -1268,6 +1275,8 @@ def _matrix_variant_metrics(
         "mean_elapsed_time_ms": _mean_or_none(row.get("elapsed_time_ms") for row in rows),
         "warning_ratio": _ratio(rows, "warning_count"),
         "source_counts": _source_counts(rows),
+        "answer_policy_reason_counts": _answer_policy_reason_counts(rows),
+        "answer_grounding_gap_counts": _answer_grounding_gap_counts(rows),
     }
     for delta in deltas:
         metric[f"hit_at_{delta}s"] = _ratio_hit(rows, str(delta))
@@ -1393,6 +1402,8 @@ def _public_matrix_config(
     index_kind: str,
     use_domain_lexicon: bool,
 ) -> dict[str, Any]:
+    candidate_pool_limit = _optional_int(_variant_value(suite, variant, "candidate_pool_limit"))
+    result_limit = int(_variant_value(suite, variant, "limit") or 5)
     return {
         **_public_matrix_variant_config(variant),
         "index_kind": index_kind,
@@ -1400,19 +1411,24 @@ def _public_matrix_config(
         "visual_index_ref": f"index:{_short_hash(visual_index_uid)}"
         if visual_index_uid is not None
         else None,
-        "limit": int(_variant_value(suite, variant, "limit") or 5),
+        "limit": result_limit,
+        "candidate_pool_limit": max(result_limit, candidate_pool_limit or result_limit),
         "domain_lexicon_enabled": use_domain_lexicon,
     }
 
 
 def _public_matrix_variant_config(variant: dict[str, Any]) -> dict[str, Any]:
-    return {
+    config = {
         "index_kind": _normalize_index_kind(variant.get("index_kind", SEGMENT_HIT_SOURCE)),
         "domain_lexicon": _bool_config(variant, "use_domain_lexicon", default=False),
         "hybrid_retrieval": _bool_config(variant, "hybrid_retrieval", default=False),
         "rerank": _bool_config(variant, "rerank", default=False),
         "answer": _bool_config(variant, "include_answer", default=True),
     }
+    candidate_pool_limit = _optional_int(variant.get("candidate_pool_limit"))
+    if candidate_pool_limit is not None:
+        config["candidate_pool_limit"] = candidate_pool_limit
+    return config
 
 
 def _public_query_expansion(value: Any) -> dict[str, Any]:
@@ -1776,6 +1792,42 @@ def _grounding_positive_ratio(rows: list[dict[str, Any]], key: str) -> float | N
     if not values:
         return None
     return round(sum(1.0 if value > 0 else 0.0 for value in values) / len(values), 4)
+
+
+def _answer_policy_reason_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        answer = row.get("answer")
+        if not isinstance(answer, dict) or not answer.get("enabled"):
+            counts["answer_disabled"] += 1
+            continue
+        reason = str(answer.get("policy_reason") or "unknown")
+        counts[reason] += 1
+    return dict(sorted(counts.items()))
+
+
+def _answer_grounding_gap_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        grounding = row.get("answer_grounding")
+        if not isinstance(grounding, dict) or not grounding.get("enabled"):
+            counts["answer_disabled"] += 1
+            continue
+        if not grounding.get("expected_available"):
+            counts["expected_hint_missing"] += 1
+            continue
+        if not ((row.get("answer") or {}).get("citation_count") or 0):
+            counts["citation_missing"] += 1
+        if grounding.get("expected_citation_hit") is False:
+            counts["retrieval_localization_miss"] += 1
+        unsupported = _optional_float(grounding.get("unsupported_claim_count"))
+        if unsupported is not None and unsupported > 0:
+            counts["unsupported_claims"] += 1
+        if grounding.get("expected_citation_hit") is True and (
+            unsupported is None or unsupported <= 0
+        ):
+            counts["grounded_expected_citation"] += 1
+    return dict(sorted(counts.items()))
 
 
 def _matrix_privacy_payload() -> dict[str, Any]:
@@ -2376,19 +2428,22 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 "are omitted.",
                 "Grounding proxy metrics use deterministic expected hint overlap for regression "
                 "tracking; they do not replace full LLM answer quality review.",
+                "Grounding gap counts separate answer policy decisions from retrieval localization "
+                "misses in the JSON metrics.",
                 "",
-                "| suite | variant | queries | Hit@10s | MRR | frame-backed | linked-backed | grounded | cite P | cite R | expected hit | unsupported | latency ms |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                "| suite | variant | queries | pool | Hit@10s | MRR | frame-backed | linked-backed | grounded | cite P | cite R | expected hit | unsupported | latency ms |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for suite, variant in matrix_variants:
             lines.append(
-                "| {suite_id} | {variant_id} | {query_count} | {hit10} | {mrr} | "
+                "| {suite_id} | {variant_id} | {query_count} | {pool} | {hit10} | {mrr} | "
                 "{frame} | {linked} | {grounded} | {precision} | {recall} | {hit} | "
                 "{unsupported} | {latency} |".format(
                     suite_id=suite.get("suite_id"),
                     variant_id=variant.get("variant_id"),
                     query_count=variant.get("query_count") or 0,
+                    pool=(variant.get("config") or {}).get("candidate_pool_limit", "-"),
                     hit10=_format_metric(variant.get("hit_at_10s")),
                     mrr=_format_metric(variant.get("mrr_at_max_delta")),
                     frame=_format_metric(variant.get("frame_backed_ratio")),

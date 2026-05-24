@@ -66,6 +66,7 @@ def query_project(
     retrieval_index_kind: str = SEGMENT_HIT_SOURCE,
     visual_index_uid: str | None = None,
     limit: int = 5,
+    candidate_pool_limit: int | None = None,
     segments_path: Path | None = None,
     frames_manifest_path: Path | None = None,
     visual_entities_path: Path | None = None,
@@ -94,6 +95,11 @@ def query_project(
         valid = ", ".join(sorted(PRIMARY_INDEX_KINDS))
         raise ValueError(f"Unknown retrieval_index_kind: {retrieval_index_kind}. Valid kinds: {valid}")
 
+    result_limit = _positive_int(limit, field_name="limit")
+    resolved_candidate_pool_limit = _candidate_pool_limit(
+        result_limit=result_limit,
+        candidate_pool_limit=candidate_pool_limit,
+    )
     resolved_project_dir = project_dir.expanduser().resolve()
     domain_lexicon = (
         DomainLexicon()
@@ -165,7 +171,7 @@ def query_project(
         client=client,
         index_uid=index_uid,
         queries=search_queries,
-        limit=limit,
+        limit=resolved_candidate_pool_limit,
         channels=search_channels,
         filter=project_filter,
     )
@@ -187,7 +193,7 @@ def query_project(
                 client=client,
                 index_uid=visual_index_uid,
                 queries=search_queries,
-                limit=limit,
+                limit=resolved_candidate_pool_limit,
                 channels=search_channels,
                 filter=project_filter,
             )
@@ -321,7 +327,7 @@ def query_project(
     merged_targets = sorted(
         entries_by_target.items(),
         key=lambda item: _target_merge_sort_key(item[0], item[1]),
-    )[:limit]
+    )[: (resolved_candidate_pool_limit if rerank else result_limit)]
 
     for merged_rank, (target_segment_id, entries) in enumerate(merged_targets, start=1):
         primary_entry = _primary_retrieval_entry(entries)
@@ -453,6 +459,7 @@ def query_project(
             timestamp_hint=rerank_time_hint,
             backend=rerank_backend,
         )
+        bundles = bundles[:result_limit]
         summary_lines = _refresh_bundle_summaries(bundles)
 
     return {
@@ -506,6 +513,11 @@ def query_project(
                 channels=search_channels,
             ),
             "window_config": window_config,
+            "candidate_generation": {
+                "result_limit": result_limit,
+                "candidate_pool_limit": resolved_candidate_pool_limit,
+                "pool_expanded": resolved_candidate_pool_limit > result_limit,
+            },
             "rerank": rerank_context,
         },
         "counts": {
@@ -526,6 +538,9 @@ def query_project(
             "project_entity_links": len(entity_links),
             "bundled_visual_entities": bundled_entity_total,
             "bundled_linked_entities": bundled_link_total,
+            "result_limit": result_limit,
+            "candidate_pool_limit": resolved_candidate_pool_limit,
+            "candidate_pool_targets": len(merged_targets),
         },
         "summary_lines": summary_lines,
         "warnings": warnings,
@@ -1249,6 +1264,27 @@ def _non_empty_string(value: Any) -> str | None:
     return stripped or None
 
 
+def _positive_int(value: Any, *, field_name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a positive integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+    return parsed
+
+
+def _candidate_pool_limit(
+    *,
+    result_limit: int,
+    candidate_pool_limit: int | None,
+) -> int:
+    if candidate_pool_limit is None:
+        return result_limit
+    parsed = _positive_int(candidate_pool_limit, field_name="candidate_pool_limit")
+    return max(result_limit, parsed)
+
+
 def _project_filter(*, project_dir: Path, segments: list[dict[str, Any]]) -> str:
     project_id = ""
     for segment in segments:
@@ -1302,6 +1338,7 @@ def _search_with_expanded_queries(
                 "query_index": query_index,
                 "retrieval_mode": channel["mode"],
                 "channel_index": channel_index,
+                "limit": limit,
                 "hit_count": len(hits),
                 "processing_time_ms": response.get("processingTimeMs"),
             }
@@ -1355,6 +1392,7 @@ def _search_with_expanded_queries(
     aggregate["processingTimeMs"] = _combined_processing_time_ms(*responses)
     aggregate["query"] = queries[0] if len(queries) == 1 else queries
     aggregate["queries"] = queries
+    aggregate["limit"] = limit
     aggregate["retrievalModes"] = [channel["mode"] for channel in search_channels]
     aggregate["searchCalls"] = search_calls
     aggregate["hitCountBeforeLimit"] = len(hit_records)
@@ -1515,6 +1553,7 @@ def _search_metadata(response: dict[str, Any] | None, index_uid: str | None) -> 
         return None
     metadata = {
         "index": index_uid,
+        "limit": response.get("limit"),
         "processing_time_ms": response.get("processingTimeMs"),
         "hit_count": len(response.get("hits", [])),
     }
@@ -1532,6 +1571,7 @@ def _search_metadata(response: dict[str, Any] | None, index_uid: str | None) -> 
                     "query_index",
                     "retrieval_mode",
                     "channel_index",
+                    "limit",
                     "hit_count",
                     "processing_time_ms",
                     "query_vector",

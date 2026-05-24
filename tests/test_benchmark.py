@@ -613,6 +613,7 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["window"]["config"]["index_kind"] == "window"
     assert suite["variant_metrics"]["window_hybrid"]["config"]["hybrid_retrieval"] is True
     assert suite["variant_metrics"]["rerank"]["config"]["rerank"] is True
+    assert suite["variant_metrics"]["rerank"]["config"]["candidate_pool_limit"] == 30
     assert suite["variant_metrics"]["window"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["rerank"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["rerank"]["grounded_answer_ratio"] == 1.0
@@ -621,6 +622,15 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["window"]["expected_citation_hit_ratio"] == 1.0
     assert suite["variant_metrics"]["window"]["mean_unsupported_claim_count"] == 0.0
     assert suite["variant_metrics"]["rerank"]["mean_unsupported_claim_count"] == 2.0
+    assert suite["variant_metrics"]["window"]["answer_grounding_gap_counts"] == {
+        "grounded_expected_citation": 1
+    }
+    assert suite["variant_metrics"]["segment_lexical"]["answer_grounding_gap_counts"] == {
+        "unsupported_claims": 1
+    }
+    assert suite["variant_metrics"]["segment_lexical"]["answer_policy_reason_counts"] == {
+        "query_terms_grounded_in_candidate": 1
+    }
     assert any(search[2] == "semantic" for search in client.searches)
 
     rows = [
@@ -636,6 +646,8 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert all(row["answer_grounding"]["expected_citation_hit"] is True for row in rows)
     assert all(row["answer_grounding"]["citation_recall"] is not None for row in rows)
     assert all(row["config"]["index_ref"].startswith("index:") for row in rows)
+    rerank_row = next(row for row in rows if row["variant_id"] == "rerank")
+    assert rerank_row["config"]["candidate_pool_limit"] == 30
 
     metrics_csv = run.metrics_csv_path.read_text(encoding="utf-8")
     assert "variant,segment_lexical" in metrics_csv
