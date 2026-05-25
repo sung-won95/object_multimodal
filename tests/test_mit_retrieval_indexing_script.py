@@ -144,6 +144,33 @@ def test_mit_retrieval_indexing_script_uses_shared_indexes_and_public_summary(
     assert "hybrid_embedder_snapshot" not in output
 
 
+def test_project_vector_manifest_resolves_explicit_and_project_relative_paths(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    project = {"project_dir": tmp_path / "project_a"}
+
+    explicit = module._project_vector_manifest(
+        project=project,
+        explicit_path=tmp_path / "vectors" / "segments.json",
+        default_relative=Path("manifests/segment_vectors.json"),
+    )
+    relative = module._project_vector_manifest(
+        project=project,
+        explicit_path=None,
+        default_relative=Path("manifests/segment_vectors.json"),
+    )
+    missing = module._project_vector_manifest(
+        project=project,
+        explicit_path=None,
+        default_relative=None,
+    )
+
+    assert explicit == (tmp_path / "vectors" / "segments.json").resolve()
+    assert relative == (tmp_path / "project_a" / "manifests" / "segment_vectors.json").resolve()
+    assert missing is None
+
+
 def _index_summary(*, kwargs: dict, documents: int) -> dict:
     return {
         "index": kwargs["index_uid"],

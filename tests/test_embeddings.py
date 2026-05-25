@@ -10,6 +10,7 @@ from oarag.embeddings.manifest import (
     QUERY_VECTOR_MANIFEST_SCHEMA_VERSION,
     VECTOR_MANIFEST_SCHEMA_VERSION,
     build_vector_manifest,
+    load_vector_manifest,
     load_input_records,
 )
 from oarag.embeddings.providers import (
@@ -124,6 +125,51 @@ def test_load_input_records_supports_csv(tmp_path: Path) -> None:
     path.write_text("query_id,question\nq1,What is loss?\n", encoding="utf-8")
 
     assert load_input_records(path) == [{"query_id": "q1", "question": "What is loss?"}]
+
+
+def test_load_vector_manifest_indexes_records_by_embedder(tmp_path: Path) -> None:
+    output_path = tmp_path / "vectors.json"
+    build_vector_manifest(
+        records=[{"segment_id": "seg_1", "semantic_text": "gradient"}],
+        provider=DeterministicFixtureEmbeddingProvider(dimensions=4),
+        output_path=output_path,
+        id_field="segment_id",
+        text_fields=["semantic_text"],
+        embedder="lecture_embedder",
+    )
+
+    loaded = load_vector_manifest(output_path)
+
+    record = loaded.get(embedder="lecture_embedder", record_ids=["seg_1"])
+    assert loaded.schema_version == VECTOR_MANIFEST_SCHEMA_VERSION
+    assert loaded.dimensions_by_embedder == {"lecture_embedder": 4}
+    assert loaded.record_count == 1
+    assert record is not None
+    assert record.record_id == "seg_1"
+    assert len(record.vector) == 4
+    assert loaded.public_summary()["provider"]["provider"] == "deterministic_fixture"
+
+
+def test_load_vector_manifest_rejects_duplicate_ids(tmp_path: Path) -> None:
+    path = tmp_path / "vectors.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": VECTOR_MANIFEST_SCHEMA_VERSION,
+                "kind": "document",
+                "embedder": "default",
+                "dimensions": 2,
+                "records": [
+                    {"id": "seg_1", "vector": [1.0, 0.0]},
+                    {"id": "seg_1", "vector": [0.0, 1.0]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="duplicate"):
+        load_vector_manifest(path)
 
 
 def test_openai_compatible_provider_posts_embedding_request(monkeypatch) -> None:

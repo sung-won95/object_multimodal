@@ -97,6 +97,7 @@ def test_index_project_accepts_project_id() -> None:
     assert args.hybrid_embedder_name == "default"
     assert args.hybrid_embedder_dimensions is None
     assert args.hybrid_embedder_live_smoke is False
+    assert args.vector_manifest is None
 
 
 def test_index_project_accepts_project_dir() -> None:
@@ -155,6 +156,7 @@ def test_cmd_index_project_forwards_settings_profile(monkeypatch, capsys) -> Non
     assert calls["index_kwargs"]["settings_profile"] == LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
     assert calls["index_kwargs"]["hybrid_embedder_profile"] is None
     assert calls["index_kwargs"]["hybrid_embedder_config"] is None
+    assert calls["index_kwargs"]["vector_manifest"] is None
     assert json.loads(capsys.readouterr().out)["settings_profile"] == (
         LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
     )
@@ -195,6 +197,8 @@ def test_cmd_index_project_forwards_hybrid_embedder_options(monkeypatch, capsys)
             "--hybrid-embedder-dimensions",
             "768",
             "--hybrid-embedder-live-smoke",
+            "--vector-manifest",
+            "manifests/segment_vectors.json",
         ]
     )
 
@@ -208,6 +212,7 @@ def test_cmd_index_project_forwards_hybrid_embedder_options(monkeypatch, capsys)
     assert calls["index_kwargs"]["hybrid_embedder_name"] == "lecture_embedder"
     assert calls["index_kwargs"]["hybrid_embedder_dimensions"] == 768
     assert calls["index_kwargs"]["hybrid_embedder_live_smoke"] is True
+    assert calls["index_kwargs"]["vector_manifest"] == Path("manifests/segment_vectors.json")
     assert json.loads(capsys.readouterr().out)["hybrid_embedder_live_smoke"] is True
 
 
@@ -297,6 +302,7 @@ def test_index_project_windows_cli_defaults() -> None:
     assert args.hybrid_embedder_name == "default"
     assert args.hybrid_embedder_dimensions is None
     assert args.hybrid_embedder_live_smoke is False
+    assert args.vector_manifest is None
     assert args.neighbor_count == 1
 
 
@@ -350,6 +356,7 @@ def test_cmd_index_project_windows_forwards_settings_profile(monkeypatch, capsys
     )
     assert calls["index_kwargs"]["hybrid_embedder_dimensions"] == 512
     assert calls["index_kwargs"]["windows"].as_posix() == "segments/lecture_windows.jsonl"
+    assert calls["index_kwargs"]["vector_manifest"] is None
     assert calls["index_kwargs"]["window_before_seconds"] == 3.0
     assert calls["index_kwargs"]["window_after_seconds"] == 5.0
     assert json.loads(capsys.readouterr().out)["settings_profile"] == (
@@ -375,6 +382,7 @@ def test_index_project_visual_entities_cli_defaults() -> None:
     assert args.batch_size == 500
     assert args.reset is False
     assert args.settings_profile == VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
+    assert args.vector_manifest is None
 
 
 def test_cmd_index_project_visual_entities_forwards_settings_profile(monkeypatch, capsys) -> None:
@@ -418,6 +426,7 @@ def test_cmd_index_project_visual_entities_forwards_settings_profile(monkeypatch
     assert calls["client"] is fake_client
     assert calls["index_kwargs"]["settings_profile"] == VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
     assert calls["index_kwargs"]["visual_entities"].as_posix() == "manifests/visual_entities.jsonl"
+    assert calls["index_kwargs"]["vector_manifest"] is None
     assert json.loads(capsys.readouterr().out)["settings_profile"] == (
         VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
     )

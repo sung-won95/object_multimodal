@@ -112,6 +112,39 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
             handle.write(json.dumps(row) + "\n")
 
 
+def write_vector_manifest(
+    path: Path,
+    *,
+    records: list[dict],
+    embedder: str = "default",
+    dimensions: int = 3,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "oarag-vector-manifest-v1",
+                "kind": "document",
+                "embedder": embedder,
+                "provider": {
+                    "provider": "openai_compatible",
+                    "model": "text-embedding-test",
+                    "dimensions": dimensions,
+                },
+                "dimensions": dimensions,
+                "embedders": {
+                    embedder: {
+                        "source": "userProvided",
+                        "dimensions": dimensions,
+                    }
+                },
+                "records": records,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_segment_artifact_prefers_aligned_file(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     segments_dir = project_dir / "segments"
@@ -488,6 +521,112 @@ def test_index_project_segments_can_append_without_reconfiguring_shared_index(
     assert summary["indexed_documents"] == 1
     assert summary["configure_index"] is False
     assert summary["hybrid_embedder_live_smoke"] == {"enabled": False}
+
+
+def test_index_project_segments_uses_real_vector_manifest_fail_closed(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(
+        segments_path,
+        [
+            {"segment_id": "s1", "transcript_text": "alpha"},
+            {"segment_id": "s2", "transcript_text": "beta"},
+        ],
+    )
+    manifest_path = project_dir / "manifests" / "segment_vectors.json"
+    write_vector_manifest(
+        manifest_path,
+        records=[
+            {"id": "s1", "embedder": "default", "dimensions": 3, "vector": [1.0, 0.0, 0.0]},
+            {"id": "s2", "embedder": "default", "dimensions": 3, "vector": [0.0, 1.0, 0.0]},
+        ],
+    )
+    client = FakeMeiliClient()
+
+    summary = index_project_segments(
+        client,
+        index_uid="local_segments",
+        project_dir=project_dir,
+        hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+        hybrid_embedder_dimensions=3,
+        vector_manifest=Path("manifests/segment_vectors.json"),
+    )
+
+    add_call = next(call for call in client.calls if call[0] == "add_documents")
+    assert add_call[2][0]["_vectors"]["default"] == [1.0, 0.0, 0.0]
+    assert add_call[2][1]["_vectors"]["default"] == [0.0, 1.0, 0.0]
+    assert summary["document_vectors"]["generator"] is None
+    assert summary["document_vectors"]["purpose"] == "real_embedding_manifest"
+    assert summary["document_vectors"]["quality_claim"] == "provider_embedding"
+    assert summary["document_vectors"]["manifest_vector_count"] == 2
+    assert summary["document_vectors"]["expected_vector_count"] == 2
+    assert summary["document_vectors"]["generated_vector_count"] == 0
+    assert summary["document_vectors"]["manifest"]["provider"] == {
+        "provider": "openai_compatible",
+        "model": "text-embedding-test",
+        "dimensions": 3,
+    }
+
+
+def test_index_project_segments_vector_manifest_missing_record_fails(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(
+        segments_path,
+        [
+            {"segment_id": "s1", "transcript_text": "alpha"},
+            {"segment_id": "s2", "transcript_text": "beta"},
+        ],
+    )
+    manifest_path = project_dir / "manifests" / "segment_vectors.json"
+    write_vector_manifest(
+        manifest_path,
+        records=[
+            {"id": "s1", "embedder": "default", "dimensions": 3, "vector": [1.0, 0.0, 0.0]},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="missing a vector"):
+        index_project_segments(
+            FakeMeiliClient(),
+            index_uid="local_segments",
+            project_dir=project_dir,
+            configure_index=False,
+            hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+            hybrid_embedder_dimensions=3,
+            vector_manifest=manifest_path,
+        )
+
+
+def test_index_project_segments_vector_manifest_dimension_mismatch_fails(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(segments_path, [{"segment_id": "s1", "transcript_text": "alpha"}])
+    manifest_path = project_dir / "manifests" / "segment_vectors.json"
+    write_vector_manifest(
+        manifest_path,
+        records=[
+            {"id": "s1", "embedder": "default", "dimensions": 2, "vector": [1.0, 0.0]},
+        ],
+        dimensions=2,
+    )
+
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        index_project_segments(
+            FakeMeiliClient(),
+            index_uid="local_segments",
+            project_dir=project_dir,
+            configure_index=False,
+            hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+            hybrid_embedder_dimensions=3,
+            vector_manifest=manifest_path,
+        )
 
 
 def test_index_project_segments_redacts_hybrid_embedder_credentials_in_summary(

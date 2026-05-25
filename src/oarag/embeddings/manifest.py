@@ -3,7 +3,9 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
@@ -16,6 +18,57 @@ from oarag.retrieval.vectors import text_from_document_fields
 VECTOR_MANIFEST_SCHEMA_VERSION = "oarag-vector-manifest-v1"
 QUERY_VECTOR_MANIFEST_SCHEMA_VERSION = "oarag-query-vectors-v1"
 SUPPORTED_MANIFEST_KINDS = ("document", "query")
+
+
+@dataclass(frozen=True)
+class LoadedVectorRecord:
+    record_id: str
+    embedder: str
+    dimensions: int
+    vector: list[float]
+    text_hash: str | None
+
+
+@dataclass(frozen=True)
+class LoadedVectorManifest:
+    path: Path
+    content_hash: str
+    schema_version: str | None
+    kind: str | None
+    embedder: str | None
+    provider: dict[str, Any]
+    dimensions_by_embedder: dict[str, int]
+    records_by_embedder: dict[str, dict[str, LoadedVectorRecord]]
+    record_count: int
+
+    @property
+    def embedder_names(self) -> list[str]:
+        return sorted(self.records_by_embedder)
+
+    def get(self, *, embedder: str, record_ids: Iterable[str]) -> LoadedVectorRecord | None:
+        records = self.records_by_embedder.get(embedder, {})
+        for record_id in record_ids:
+            vector_record = records.get(record_id)
+            if vector_record is not None:
+                return vector_record
+        return None
+
+    def public_summary(self) -> dict[str, Any]:
+        provider = self.provider
+        return {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "source": "manifest",
+            "provider": {
+                "provider": provider.get("provider"),
+                "model": provider.get("model"),
+                "dimensions": provider.get("dimensions"),
+            },
+            "dimensions_by_embedder": dict(self.dimensions_by_embedder),
+            "embedder_names": self.embedder_names,
+            "record_count": self.record_count,
+            "hash": self.content_hash,
+        }
 
 
 def load_input_records(path: Path, *, input_format: str = "auto") -> list[dict[str, Any]]:
@@ -151,6 +204,72 @@ def public_manifest_summary(manifest: dict[str, Any], *, output_path: Path | Non
     return summary
 
 
+def load_vector_manifest(path: Path) -> LoadedVectorManifest:
+    resolved_path = path.expanduser().resolve()
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"vector manifest not found: {resolved_path}")
+    raw_text = resolved_path.read_text(encoding="utf-8")
+    content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Failed to parse vector manifest JSON at {resolved_path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"vector manifest must be a JSON object: {resolved_path}")
+
+    default_embedder = _non_empty_string(payload.get("embedder"))
+    default_dimensions = _optional_dimensions(payload.get("dimensions"))
+    provider = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
+    records_by_embedder: dict[str, dict[str, LoadedVectorRecord]] = {}
+    dimensions_by_embedder: dict[str, int] = {}
+    for raw_record in _manifest_records(payload):
+        record_id = _record_id(raw_record)
+        embedder = _non_empty_string(raw_record.get("embedder")) or default_embedder
+        if embedder is None:
+            raise ValueError(f"vector manifest record '{record_id}' is missing embedder")
+        expected_dimensions = _optional_dimensions(raw_record.get("dimensions")) or default_dimensions
+        vector = _normalize_vector(
+            raw_record.get("vector"),
+            dimensions=expected_dimensions,
+            field_name=f"vector manifest record '{record_id}' for embedder '{embedder}'",
+        )
+        dimensions = len(vector)
+        previous_dimensions = dimensions_by_embedder.get(embedder)
+        if previous_dimensions is not None and previous_dimensions != dimensions:
+            raise ValueError(
+                f"vector manifest dimension mismatch for embedder '{embedder}': "
+                f"expected {previous_dimensions}, got {dimensions}"
+            )
+        dimensions_by_embedder[embedder] = dimensions
+        embedder_records = records_by_embedder.setdefault(embedder, {})
+        if record_id in embedder_records:
+            raise ValueError(
+                f"duplicate vector manifest record id '{record_id}' for embedder '{embedder}'"
+            )
+        text_hash = _non_empty_string(raw_record.get("text_hash"))
+        embedder_records[record_id] = LoadedVectorRecord(
+            record_id=record_id,
+            embedder=embedder,
+            dimensions=dimensions,
+            vector=vector,
+            text_hash=text_hash,
+        )
+    record_count = sum(len(records) for records in records_by_embedder.values())
+    if record_count == 0:
+        raise ValueError(f"vector manifest contains no records: {resolved_path}")
+    return LoadedVectorManifest(
+        path=resolved_path,
+        content_hash=content_hash,
+        schema_version=_non_empty_string(payload.get("schema_version")),
+        kind=_non_empty_string(payload.get("kind")),
+        embedder=default_embedder,
+        provider=dict(provider),
+        dimensions_by_embedder=dimensions_by_embedder,
+        records_by_embedder=records_by_embedder,
+        record_count=record_count,
+    )
+
+
 def _manifest_payload(
     *,
     kind: str,
@@ -251,9 +370,19 @@ def _manifest_records(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     records = manifest.get("records")
     if isinstance(records, list):
         return [record for record in records if isinstance(record, dict)]
+    if isinstance(records, dict):
+        return [
+            {"id": str(record_id), **record}
+            for record_id, record in records.items()
+            if isinstance(record, dict)
+        ]
     queries = manifest.get("queries")
     if isinstance(queries, dict):
-        return [record for record in queries.values() if isinstance(record, dict)]
+        return [
+            {"id": str(record_id), **record}
+            for record_id, record in queries.items()
+            if isinstance(record, dict)
+        ]
     return []
 
 
@@ -276,6 +405,29 @@ def _validate_vector(vector: list[float], *, expected_dimensions: int | None = N
             f"embedding vector dimension mismatch: got {len(normalized)}, expected {expected_dimensions}"
         )
     return len(normalized)
+
+
+def _normalize_vector(
+    vector: Any,
+    *,
+    dimensions: int | None,
+    field_name: str,
+) -> list[float]:
+    if not isinstance(vector, list) or isinstance(vector, str | bytes) or not vector:
+        raise ValueError(f"{field_name} must be a non-empty JSON array")
+    normalized: list[float] = []
+    for index, value in enumerate(vector):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError(f"{field_name} item {index} must be a finite number")
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError(f"{field_name} item {index} must be a finite number")
+        normalized.append(number)
+    if dimensions is not None and len(normalized) != dimensions:
+        raise ValueError(
+            f"{field_name} dimension mismatch: expected {dimensions}, got {len(normalized)}"
+        )
+    return normalized
 
 
 def _iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
@@ -320,3 +472,26 @@ def _hash_text_hashes(records: list[dict[str, Any]]) -> str:
         digest.update(str(record.get("text_hash") or "").encode("utf-8"))
         digest.update(b"\n")
     return digest.hexdigest()
+
+
+def _record_id(record: dict[str, Any]) -> str:
+    for field in ("id", "record_id", "segment_id", "window_id", "entity_id", "local_entity_id", "query_id"):
+        value = record.get(field)
+        if value not in (None, ""):
+            return str(value)
+    raise ValueError("vector manifest record is missing id")
+
+
+def _optional_dimensions(value: Any) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError("vector manifest dimensions must be a positive integer")
+    return value
+
+
+def _non_empty_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None

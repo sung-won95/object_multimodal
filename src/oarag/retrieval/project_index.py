@@ -7,6 +7,7 @@ from typing import Any, Iterable, Iterator
 
 from oarag.core.config import default_paths
 from oarag.core.io import write_json, write_jsonl
+from oarag.embeddings.manifest import LoadedVectorManifest, load_vector_manifest
 from oarag.integrations.meili import (
     DEFAULT_HYBRID_EMBEDDER_NAME,
     HYBRID_EMBEDDER_CUSTOM_SETTINGS_PROFILE,
@@ -322,6 +323,7 @@ def index_project_windows(
     hybrid_embedder_name: str = DEFAULT_HYBRID_EMBEDDER_NAME,
     hybrid_embedder_dimensions: int | None = None,
     hybrid_embedder_live_smoke: bool = False,
+    vector_manifest: Path | None = None,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     build_requested = _window_build_inputs_requested(
@@ -391,7 +393,15 @@ def index_project_windows(
         hybrid_settings,
     )
     vector_specs = _user_provided_vector_specs(settings)
-    vector_summary = _new_document_vector_summary(vector_specs)
+    vector_manifest_index = _load_index_vector_manifest(
+        project_dir=resolved_project_dir,
+        path=vector_manifest,
+    )
+    _validate_vector_manifest_for_specs(vector_specs, vector_manifest_index)
+    vector_summary = _new_document_vector_summary(
+        vector_specs,
+        vector_manifest=vector_manifest_index,
+    )
     settings_snapshot = lecture_window_settings_snapshot(
         settings,
         profile=settings_profile,
@@ -428,6 +438,8 @@ def index_project_windows(
         documents,
         specs=vector_specs,
         summary=vector_summary,
+        vector_manifest=vector_manifest_index,
+        id_fields=("window_id", "target_segment_id", "segment_id", "sample_id"),
     )
     for batch in iter_batches(indexed_documents_iter, batch_size=batch_size):
         client.wait_task(client.add_documents(index_uid, batch))
@@ -439,6 +451,7 @@ def index_project_windows(
                 semantic_source_field_counts[str(source_field)] = (
                     semantic_source_field_counts.get(str(source_field), 0) + 1
                 )
+    _finalize_document_vector_summary(vector_summary)
 
     summary = {
         "index": index_uid,
@@ -483,10 +496,12 @@ def index_project_segments(
     hybrid_embedder_name: str = DEFAULT_HYBRID_EMBEDDER_NAME,
     hybrid_embedder_dimensions: int | None = None,
     hybrid_embedder_live_smoke: bool = False,
+    vector_manifest: Path | None = None,
 ) -> dict[str, Any]:
-    segments_path = segment_artifact_path(project_dir, segments=segments)
+    resolved_project_dir = project_dir.expanduser().resolve()
+    segments_path = segment_artifact_path(resolved_project_dir, segments=segments)
     visual_entities_path = _optional_visual_entity_artifact_path(
-        project_dir=project_dir,
+        project_dir=resolved_project_dir,
         visual_entities=visual_entities,
     )
     visual_entity_context = _visual_entity_context(visual_entities_path)
@@ -502,7 +517,15 @@ def index_project_segments(
         hybrid_settings,
     )
     vector_specs = _user_provided_vector_specs(settings)
-    vector_summary = _new_document_vector_summary(vector_specs)
+    vector_manifest_index = _load_index_vector_manifest(
+        project_dir=resolved_project_dir,
+        path=vector_manifest,
+    )
+    _validate_vector_manifest_for_specs(vector_specs, vector_manifest_index)
+    vector_summary = _new_document_vector_summary(
+        vector_specs,
+        vector_manifest=vector_manifest_index,
+    )
     settings_snapshot = lecture_segment_settings_snapshot(
         settings,
         profile=settings_profile,
@@ -540,6 +563,8 @@ def index_project_segments(
         documents,
         specs=vector_specs,
         summary=vector_summary,
+        vector_manifest=vector_manifest_index,
+        id_fields=("segment_id", "sample_id"),
     )
     for batch in iter_batches(indexed_documents_iter, batch_size=batch_size):
         client.wait_task(client.add_documents(index_uid, batch))
@@ -551,10 +576,11 @@ def index_project_segments(
                 semantic_source_field_counts[str(source_field)] = (
                     semantic_source_field_counts.get(str(source_field), 0) + 1
                 )
+    _finalize_document_vector_summary(vector_summary)
 
     summary = {
         "index": index_uid,
-        "project_dir": str(project_dir),
+        "project_dir": str(resolved_project_dir),
         "segments_path": str(segments_path),
         "visual_entities_path": str(visual_entities_path) if visual_entities_path else None,
         "batch_size": batch_size,
@@ -592,8 +618,13 @@ def index_project_visual_entities(
     hybrid_embedder_name: str = DEFAULT_HYBRID_EMBEDDER_NAME,
     hybrid_embedder_dimensions: int | None = None,
     hybrid_embedder_live_smoke: bool = False,
+    vector_manifest: Path | None = None,
 ) -> dict[str, Any]:
-    visual_entities_path = visual_entity_artifact_path(project_dir, visual_entities=visual_entities)
+    resolved_project_dir = project_dir.expanduser().resolve()
+    visual_entities_path = visual_entity_artifact_path(
+        resolved_project_dir,
+        visual_entities=visual_entities,
+    )
     hybrid_settings, hybrid_snapshot = _resolve_hybrid_embedder_settings(
         profile=hybrid_embedder_profile,
         config=hybrid_embedder_config,
@@ -606,7 +637,15 @@ def index_project_visual_entities(
         hybrid_settings,
     )
     vector_specs = _user_provided_vector_specs(settings)
-    vector_summary = _new_document_vector_summary(vector_specs)
+    vector_manifest_index = _load_index_vector_manifest(
+        project_dir=resolved_project_dir,
+        path=vector_manifest,
+    )
+    _validate_vector_manifest_for_specs(vector_specs, vector_manifest_index)
+    vector_summary = _new_document_vector_summary(
+        vector_specs,
+        vector_manifest=vector_manifest_index,
+    )
     settings_snapshot = visual_entity_settings_snapshot(
         settings,
         profile=settings_profile,
@@ -644,6 +683,8 @@ def index_project_visual_entities(
         documents,
         specs=vector_specs,
         summary=vector_summary,
+        vector_manifest=vector_manifest_index,
+        id_fields=("entity_id", "local_entity_id", "frame_id"),
     )
     for batch in iter_batches(indexed_documents_iter, batch_size=batch_size):
         client.wait_task(client.add_documents(index_uid, batch))
@@ -657,10 +698,11 @@ def index_project_visual_entities(
             source = document.get("source")
             if source not in (None, ""):
                 source_counts[str(source)] = source_counts.get(str(source), 0) + 1
+    _finalize_document_vector_summary(vector_summary)
 
     summary = {
         "index": index_uid,
-        "project_dir": str(project_dir),
+        "project_dir": str(resolved_project_dir),
         "visual_entities_path": str(visual_entities_path),
         "batch_size": batch_size,
         "reset": reset,
@@ -847,13 +889,60 @@ def _user_provided_vector_specs(settings: dict[str, Any]) -> list[dict[str, Any]
     return sorted(specs, key=lambda item: item["name"])
 
 
-def _new_document_vector_summary(specs: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
+def _load_index_vector_manifest(
+    *,
+    project_dir: Path,
+    path: Path | None,
+) -> LoadedVectorManifest | None:
+    if path is None:
+        return None
+    resolved_path = _optional_project_path(project_dir=project_dir, path=path, default=path)
+    return load_vector_manifest(resolved_path)
+
+
+def _validate_vector_manifest_for_specs(
+    specs: list[dict[str, Any]],
+    vector_manifest: LoadedVectorManifest | None,
+) -> None:
+    if vector_manifest is None:
+        return
+    if not specs:
+        raise ValueError("vector_manifest requires a userProvided hybrid embedder")
+    for spec in specs:
+        name = str(spec["name"])
+        expected_dimensions = int(spec["dimensions"])
+        manifest_dimensions = vector_manifest.dimensions_by_embedder.get(name)
+        if manifest_dimensions is None:
+            available = ", ".join(vector_manifest.embedder_names)
+            raise ValueError(
+                f"vector manifest is missing embedder '{name}'. "
+                f"Available embedders: {available}"
+            )
+        if manifest_dimensions != expected_dimensions:
+            raise ValueError(
+                f"vector manifest dimension mismatch for embedder '{name}': "
+                f"manifest has {manifest_dimensions}, settings expect {expected_dimensions}"
+            )
+
+
+def _new_document_vector_summary(
+    specs: list[dict[str, Any]],
+    *,
+    vector_manifest: LoadedVectorManifest | None = None,
+) -> dict[str, Any]:
+    using_manifest = vector_manifest is not None
+    summary = {
         "enabled": bool(specs),
         "source": "userProvided" if specs else None,
-        "generator": LOCAL_HASH_VECTOR_SOURCE if specs else None,
-        "purpose": "local_reproducibility_smoke_fallback" if specs else None,
-        "quality_claim": "none" if specs else None,
+        "generator": None if using_manifest else LOCAL_HASH_VECTOR_SOURCE if specs else None,
+        "purpose": (
+            "real_embedding_manifest"
+            if using_manifest
+            else "local_reproducibility_smoke_fallback"
+            if specs
+            else None
+        ),
+        "quality_claim": "provider_embedding" if using_manifest else "none" if specs else None,
         "embedder_names": [spec["name"] for spec in specs],
         "dimensions_by_embedder": {
             spec["name"]: spec["dimensions"] for spec in specs
@@ -863,6 +952,11 @@ def _new_document_vector_summary(specs: list[dict[str, Any]]) -> dict[str, Any]:
         "generated_vector_count": 0,
         "existing_vector_count": 0,
     }
+    if using_manifest:
+        summary["manifest"] = vector_manifest.public_summary()
+        summary["manifest_vector_count"] = 0
+        summary["missing_vector_count"] = 0
+    return summary
 
 
 def _documents_with_user_provided_vectors(
@@ -870,6 +964,8 @@ def _documents_with_user_provided_vectors(
     *,
     specs: list[dict[str, Any]],
     summary: dict[str, Any],
+    vector_manifest: LoadedVectorManifest | None = None,
+    id_fields: Iterable[str] = (),
 ) -> Iterator[dict[str, Any]]:
     for document in documents:
         summary["documents_seen"] += 1
@@ -877,6 +973,8 @@ def _documents_with_user_provided_vectors(
             document,
             specs=specs,
             summary=summary,
+            vector_manifest=vector_manifest,
+            id_fields=id_fields,
         )
         yield indexed
 
@@ -886,18 +984,40 @@ def _attach_user_provided_document_vectors(
     *,
     specs: list[dict[str, Any]],
     summary: dict[str, Any],
+    vector_manifest: LoadedVectorManifest | None = None,
+    id_fields: Iterable[str] = (),
 ) -> dict[str, Any]:
     if not specs:
+        if vector_manifest is not None:
+            raise ValueError("vector_manifest requires a userProvided hybrid embedder")
         return document
     indexed = dict(document)
     vectors = indexed.get("_vectors")
     vectors = dict(vectors) if isinstance(vectors, dict) else {}
     text = _document_vector_text(indexed)
+    record_ids = _document_vector_record_ids(indexed, id_fields=id_fields)
     document_had_vector = False
     for spec in specs:
         name = spec["name"]
         dimensions = spec["dimensions"]
-        if name in vectors:
+        if vector_manifest is not None:
+            manifest_record = vector_manifest.get(embedder=name, record_ids=record_ids)
+            if manifest_record is None:
+                summary["missing_vector_count"] += 1
+                raise ValueError(
+                    f"vector manifest is missing a vector for embedder '{name}' "
+                    f"and document ids {record_ids or ['(none)']}"
+                )
+            vectors[name] = normalize_query_vector(
+                manifest_record.vector,
+                dimensions=dimensions,
+                field_name=(
+                    f"vector manifest record '{manifest_record.record_id}' "
+                    f"for embedder '{name}'"
+                ),
+            )
+            summary["manifest_vector_count"] += 1
+        elif name in vectors:
             vectors[name] = normalize_query_vector(
                 vectors[name],
                 dimensions=dimensions,
@@ -912,6 +1032,36 @@ def _attach_user_provided_document_vectors(
     if document_had_vector:
         summary["documents_with_vectors"] += 1
     return indexed
+
+
+def _finalize_document_vector_summary(summary: dict[str, Any]) -> None:
+    if "manifest" not in summary:
+        return
+    expected_vector_count = int(summary.get("documents_seen") or 0) * len(
+        summary.get("embedder_names") or []
+    )
+    attached_vector_count = int(summary.get("manifest_vector_count") or 0)
+    summary["expected_vector_count"] = expected_vector_count
+    if attached_vector_count != expected_vector_count:
+        raise ValueError(
+            "vector manifest document/vector count mismatch: "
+            f"expected {expected_vector_count}, attached {attached_vector_count}"
+        )
+
+
+def _document_vector_record_ids(document: dict[str, Any], *, id_fields: Iterable[str]) -> list[str]:
+    record_ids: list[str] = []
+    seen: set[str] = set()
+    for field in id_fields:
+        value = document.get(field)
+        if value in (None, ""):
+            continue
+        text = str(value)
+        if text in seen:
+            continue
+        seen.add(text)
+        record_ids.append(text)
+    return record_ids
 
 
 def _document_vector_text(document: dict[str, Any]) -> str:

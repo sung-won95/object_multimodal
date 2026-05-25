@@ -70,6 +70,11 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                 hybrid_embedder_name=args.hybrid_embedder_name,
                 hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
                 hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke and configure_index,
+                vector_manifest=_project_vector_manifest(
+                    project=project,
+                    explicit_path=args.segment_vector_manifest,
+                    default_relative=args.segment_vector_manifest_relative,
+                ),
             )
             configured_once["segment"] = True
             project_summary["stages"]["segment"] = _public_indexing_summary(index_summary)
@@ -92,6 +97,11 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                 hybrid_embedder_name=args.hybrid_embedder_name,
                 hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
                 hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke and configure_index,
+                vector_manifest=_project_vector_manifest(
+                    project=project,
+                    explicit_path=args.window_vector_manifest,
+                    default_relative=args.window_vector_manifest_relative,
+                ),
             )
             configured_once["window"] = True
             project_summary["stages"]["window"] = {
@@ -112,6 +122,11 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                 hybrid_embedder_name=args.hybrid_embedder_name,
                 hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
                 hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke and configure_index,
+                vector_manifest=_project_vector_manifest(
+                    project=project,
+                    explicit_path=args.visual_vector_manifest,
+                    default_relative=args.visual_vector_manifest_relative,
+                ),
             )
             configured_once["visual"] = True
             project_summary["stages"]["visual"] = _public_indexing_summary(index_summary)
@@ -185,6 +200,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Validate the configured hybrid embedder once per shared index.",
     )
+    parser.add_argument(
+        "--segment-vector-manifest",
+        type=Path,
+        help="Single real embedding vector manifest for all segment documents.",
+    )
+    parser.add_argument(
+        "--window-vector-manifest",
+        type=Path,
+        help="Single real embedding vector manifest for all window documents.",
+    )
+    parser.add_argument(
+        "--visual-vector-manifest",
+        type=Path,
+        help="Single real embedding vector manifest for all visual entity documents.",
+    )
+    parser.add_argument(
+        "--segment-vector-manifest-relative",
+        type=Path,
+        help="Per-project segment vector manifest path relative to each project dir.",
+    )
+    parser.add_argument(
+        "--window-vector-manifest-relative",
+        type=Path,
+        help="Per-project window vector manifest path relative to each project dir.",
+    )
+    parser.add_argument(
+        "--visual-vector-manifest-relative",
+        type=Path,
+        help="Per-project visual vector manifest path relative to each project dir.",
+    )
     return parser.parse_args(argv)
 
 
@@ -222,6 +267,22 @@ def _resolve_input_path(path: Path) -> Path:
     if candidate.is_absolute():
         return candidate.resolve()
     return (Path.cwd() / candidate).resolve()
+
+
+def _project_vector_manifest(
+    *,
+    project: dict[str, Any],
+    explicit_path: Path | None,
+    default_relative: Path | None,
+) -> Path | None:
+    if explicit_path is not None:
+        return _resolve_input_path(explicit_path)
+    if default_relative is None:
+        return None
+    candidate = default_relative.expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (project["project_dir"] / candidate).resolve()
 
 
 def _read_manifest(path: Path) -> dict[str, Any]:
@@ -340,6 +401,10 @@ def _public_vector_summary(vector_summary: dict[str, Any]) -> dict[str, Any]:
         "documents_with_vectors",
         "generated_vector_count",
         "existing_vector_count",
+        "manifest_vector_count",
+        "missing_vector_count",
+        "expected_vector_count",
+        "manifest",
     )
     return {key: vector_summary.get(key) for key in keys}
 
