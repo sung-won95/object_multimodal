@@ -6,6 +6,7 @@ import pytest
 from oarag.cli import (
     build_parser,
     build_vlm_alignment_parser,
+    cmd_build_embeddings,
     cmd_build_project_windows,
     cmd_index_project,
     cmd_index_project_visual_entities,
@@ -209,6 +210,106 @@ def test_cmd_index_project_forwards_hybrid_embedder_options(monkeypatch, capsys)
     assert calls["index_kwargs"]["hybrid_embedder_dimensions"] == 768
     assert calls["index_kwargs"]["hybrid_embedder_live_smoke"] is True
     assert json.loads(capsys.readouterr().out)["hybrid_embedder_live_smoke"] is True
+
+
+def test_build_embeddings_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        [
+            "build-embeddings",
+            "--input",
+            "segments/lecture_segments.jsonl",
+            "--output",
+            "manifests/segment_vectors.jsonl",
+            "--manifest",
+            "manifests/segment_vector_manifest.json",
+            "--model",
+            "text-embedding-3-small",
+            "--dimensions",
+            "1536",
+        ]
+    )
+
+    assert args.input == Path("segments/lecture_segments.jsonl")
+    assert args.output == Path("manifests/segment_vectors.jsonl")
+    assert args.manifest == Path("manifests/segment_vector_manifest.json")
+    assert args.provider == "openai-compatible"
+    assert args.model == "text-embedding-3-small"
+    assert args.dimensions == 1536
+    assert args.embedder == "default"
+    assert args.id_field == "segment_id"
+    assert args.source_fields is None
+    assert args.api_key_env == "OPENAI_API_KEY"
+    assert args.cache_dir is None
+    assert args.batch_size == 64
+
+
+def test_cmd_build_embeddings_forwards_provider_and_pipeline_options(monkeypatch, capsys) -> None:
+    calls = {}
+    fake_provider = object()
+
+    def fake_embedding_provider_from_args(args):
+        calls["provider_args"] = args
+        return fake_provider
+
+    def fake_build_embedding_vectors(**kwargs):
+        calls["pipeline_kwargs"] = kwargs
+        return {
+            "provider": "fake_provider",
+            "model": "fake-model",
+            "privacy": {"api_key": "excluded", "absolute_paths": "excluded"},
+        }
+
+    monkeypatch.setattr("oarag.cli.embedding_provider_from_args", fake_embedding_provider_from_args)
+    monkeypatch.setattr("oarag.cli.build_embedding_vectors", fake_build_embedding_vectors)
+
+    args = build_parser().parse_args(
+        [
+            "build-embeddings",
+            "--input",
+            "/tmp/private/project/segments.jsonl",
+            "--output",
+            "/tmp/private/project/vectors.jsonl",
+            "--manifest",
+            "/tmp/private/project/vector_manifest.json",
+            "--embedder",
+            "lecture_embedder",
+            "--id-field",
+            "window_id",
+            "--source-field",
+            "semantic_text",
+            "--source-field",
+            "visual_entities.text",
+            "--model",
+            "fake-model",
+            "--dimensions",
+            "3",
+            "--cache-dir",
+            "/tmp/private/cache",
+            "--batch-size",
+            "2",
+            "--limit",
+            "5",
+        ]
+    )
+
+    cmd_build_embeddings(args)
+
+    assert calls["provider_args"] is args
+    assert calls["pipeline_kwargs"] == {
+        "input_path": Path("/tmp/private/project/segments.jsonl"),
+        "output_path": Path("/tmp/private/project/vectors.jsonl"),
+        "manifest_path": Path("/tmp/private/project/vector_manifest.json"),
+        "provider": fake_provider,
+        "embedder": "lecture_embedder",
+        "id_field": "window_id",
+        "source_fields": ["semantic_text", "visual_entities.text"],
+        "cache_dir": Path("/tmp/private/cache"),
+        "batch_size": 2,
+        "limit": 5,
+    }
+    output = capsys.readouterr().out
+    assert json.loads(output)["privacy"]["api_key"] == "excluded"
+    assert "/tmp/private" not in output
 
 
 def test_build_project_windows_cli_defaults() -> None:

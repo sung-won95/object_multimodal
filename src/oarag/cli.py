@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from oarag.ingestion.alignment import align_segments_to_frames
+from oarag.embeddings import DEFAULT_EMBEDDING_SOURCE_FIELDS, OpenAICompatibleEmbeddingProvider
+from oarag.embeddings import build_embedding_vectors
 from oarag.evaluation.benchmark import run_benchmark
 from oarag.evaluation.claims import build_paper_claims
 from oarag.evaluation.experiment import run_paper_experiment
@@ -330,6 +333,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_hybrid_embedder_index_options(index_visual_entities)
     index_visual_entities.set_defaults(func=cmd_index_project_visual_entities)
+
+    build_embeddings = subparsers.add_parser(
+        "build-embeddings",
+        help="Build userProvided embedding vectors and a sanitized vector manifest",
+    )
+    build_embeddings.add_argument("--input", required=True, type=Path, help="Input JSONL path")
+    build_embeddings.add_argument("--output", required=True, type=Path, help="Output vector JSONL path")
+    build_embeddings.add_argument("--manifest", required=True, type=Path, help="Output vector manifest JSON path")
+    build_embeddings.add_argument("--embedder", default=DEFAULT_HYBRID_EMBEDDER, help="Meilisearch embedder name")
+    build_embeddings.add_argument("--id-field", default="segment_id", help="Record id field or dotted path")
+    build_embeddings.add_argument(
+        "--source-field",
+        dest="source_fields",
+        action="append",
+        help=(
+            "Source text field or dotted path. Repeat to set priority/order. "
+            f"Defaults to: {', '.join(DEFAULT_EMBEDDING_SOURCE_FIELDS)}"
+        ),
+    )
+    build_embeddings.add_argument(
+        "--provider",
+        choices=["openai-compatible"],
+        default="openai-compatible",
+        help="Embedding provider implementation",
+    )
+    build_embeddings.add_argument("--model", required=True, help="Embedding model name")
+    build_embeddings.add_argument("--dimensions", required=True, type=int, help="Expected vector dimensions")
+    build_embeddings.add_argument(
+        "--base-url",
+        default="https://api.openai.com/v1",
+        help="OpenAI-compatible API base URL. /embeddings is appended when omitted.",
+    )
+    build_embeddings.add_argument(
+        "--api-key-env",
+        default="OPENAI_API_KEY",
+        help="Environment variable that contains the provider API key.",
+    )
+    build_embeddings.add_argument("--cache-dir", type=Path, help="Optional embedding cache directory")
+    build_embeddings.add_argument("--batch-size", type=int, default=64)
+    build_embeddings.add_argument("--limit", type=int, help="Optional input record limit")
+    build_embeddings.add_argument("--timeout-seconds", type=float, default=60.0)
+    build_embeddings.set_defaults(func=cmd_build_embeddings)
 
     ingest = subparsers.add_parser("ingest-video", help="Ingest a local lecture video")
     ingest.add_argument("--video", required=True, type=Path)
@@ -1535,6 +1580,19 @@ def client_from_args(args: argparse.Namespace) -> MeiliClient:
     return MeiliClient(base_url=args.url, api_key=args.api_key)
 
 
+def embedding_provider_from_args(args: argparse.Namespace) -> OpenAICompatibleEmbeddingProvider:
+    if args.provider != "openai-compatible":
+        raise ValueError(f"Unsupported embedding provider: {args.provider}")
+    api_key = os.environ.get(args.api_key_env) if args.api_key_env else None
+    return OpenAICompatibleEmbeddingProvider(
+        model=args.model,
+        dimensions=args.dimensions,
+        base_url=args.base_url,
+        api_key=api_key,
+        timeout_seconds=args.timeout_seconds,
+    )
+
+
 def cmd_health(args: argparse.Namespace) -> None:
     client = client_from_args(args)
     print(json.dumps(client.health(), ensure_ascii=False, indent=2))
@@ -1664,6 +1722,23 @@ def cmd_index_project_visual_entities(args: argparse.Namespace) -> None:
         hybrid_embedder_name=args.hybrid_embedder_name,
         hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
         hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_build_embeddings(args: argparse.Namespace) -> None:
+    provider = embedding_provider_from_args(args)
+    summary = build_embedding_vectors(
+        input_path=args.input,
+        output_path=args.output,
+        manifest_path=args.manifest,
+        provider=provider,
+        embedder=args.embedder,
+        id_field=args.id_field,
+        source_fields=args.source_fields,
+        cache_dir=args.cache_dir,
+        batch_size=args.batch_size,
+        limit=args.limit,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
