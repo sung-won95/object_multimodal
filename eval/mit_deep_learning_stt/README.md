@@ -53,6 +53,40 @@ curl -X PATCH 'http://127.0.0.1:7700/experimental-features/' \
 MIT manifest의 `hybrid_query_vector_dimensions: 384`는 `local_hash_v1` query vector fallback을 사용해 1-suite/all-variant smoke를 재현 가능하게 만든다.
 이 deterministic hash vector는 semantic 품질 claim이 아니라 local reproducibility/smoke 전용 fallback이며, 공개 artifact에는 `purpose: local_reproducibility_smoke_fallback`, `quality_claim: none` metadata만 남기고 raw vector 값은 남기지 않는다.
 
+## Real Embedding Smoke
+
+논문용 실제 embedding run은 `local_hash_v1` fallback이 아니라 명시적인 vector manifest를 생성한 뒤
+segment/window/visual/query 경로가 모두 manifest를 쓰는지 검증해야 한다. 다음 스크립트는 선택한
+MIT suite에 대해 window artifact, vector manifest, shared smoke index, benchmark manifest,
+semantic smoke gate를 한 번에 실행한다.
+
+```bash
+export OARAG_EMBEDDING_API_KEY=...
+export OARAG_EMBEDDING_MODEL=...
+
+python scripts/run_mit_real_embedding_smoke.py \
+  --manifest eval/mit_deep_learning_stt/benchmark_matrix_manifest.json \
+  --suite-id mitdl_lec01 \
+  --output-root reports/mit_deep_learning_eval/real_embedding_smoke/mitdl_lec01 \
+  --provider openai-compatible \
+  --dimensions 1536 \
+  --index-prefix mit_real_embedding \
+  --hybrid-embedder-profile manual_user_provided_v1
+```
+
+`--allow-fixture-provider`는 배관 테스트 전용이다. 이 옵션을 쓰면 `deterministic_fixture`
+provider도 통과하지만 paper-ready claim으로 해석하면 안 된다. 기본 real mode에서는
+`deterministic_fixture`나 `local_hash_v1`가 발견되면 validation이 실패한다.
+
+성공 조건은 다음과 같다.
+
+- document index summary의 `generator`가 `null`
+- `purpose == real_embedding_manifest`
+- `generated_vector_count == 0`
+- `manifest_vector_count == expected_vector_count`
+- hybrid query 결과의 query vector source가 `manifest`
+- `semantic_smoke.json`의 `semantic_live_smoke.ok == true`
+
 Partial smoke를 먼저 돌릴 때는 공개 출력 원칙을 유지한 채 suite 수만 줄인 임시 manifest를 만들 수 있다.
 
 ```bash
