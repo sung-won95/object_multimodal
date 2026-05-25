@@ -225,6 +225,11 @@ def build_parser() -> argparse.ArgumentParser:
     index_project.add_argument("--batch-size", type=int, default=500)
     index_project.add_argument("--reset", action="store_true")
     index_project.add_argument(
+        "--vector-manifest",
+        type=Path,
+        help="Optional real embedding vector manifest. Relative paths resolve from project dir.",
+    )
+    index_project.add_argument(
         "--settings-profile",
         choices=lecture_segment_settings_profile_names(),
         default=LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
@@ -333,6 +338,11 @@ def build_parser() -> argparse.ArgumentParser:
     index_windows.add_argument("--batch-size", type=int, default=500)
     index_windows.add_argument("--reset", action="store_true")
     index_windows.add_argument(
+        "--vector-manifest",
+        type=Path,
+        help="Optional real embedding vector manifest. Relative paths resolve from project dir.",
+    )
+    index_windows.add_argument(
         "--settings-profile",
         choices=lecture_window_settings_profile_names(),
         default=LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
@@ -387,6 +397,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     index_visual_entities.add_argument("--batch-size", type=int, default=500)
     index_visual_entities.add_argument("--reset", action="store_true")
+    index_visual_entities.add_argument(
+        "--vector-manifest",
+        type=Path,
+        help="Optional real embedding vector manifest. Relative paths resolve from project dir.",
+    )
     index_visual_entities.add_argument(
         "--settings-profile",
         choices=visual_entity_settings_profile_names(),
@@ -1695,6 +1710,7 @@ def cmd_index_project(args: argparse.Namespace) -> None:
         hybrid_embedder_name=args.hybrid_embedder_name,
         hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
         hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
+        vector_manifest=args.vector_manifest,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -1743,6 +1759,7 @@ def cmd_index_project_windows(args: argparse.Namespace) -> None:
         hybrid_embedder_name=args.hybrid_embedder_name,
         hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
         hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
+        vector_manifest=args.vector_manifest,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -1763,6 +1780,7 @@ def cmd_index_project_visual_entities(args: argparse.Namespace) -> None:
         hybrid_embedder_name=args.hybrid_embedder_name,
         hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
         hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
+        vector_manifest=args.vector_manifest,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
