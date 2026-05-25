@@ -54,16 +54,11 @@ class LoadedVectorManifest:
         return None
 
     def public_summary(self) -> dict[str, Any]:
-        provider = self.provider
         return {
             "schema_version": self.schema_version,
             "kind": self.kind,
             "source": "manifest",
-            "provider": {
-                "provider": provider.get("provider"),
-                "model": provider.get("model"),
-                "dimensions": provider.get("dimensions"),
-            },
+            "provider": _public_provider_config(self.provider),
             "dimensions_by_embedder": dict(self.dimensions_by_embedder),
             "embedder_names": self.embedder_names,
             "record_count": self.record_count,
@@ -188,11 +183,7 @@ def public_manifest_summary(manifest: dict[str, Any], *, output_path: Path | Non
         "schema_version": manifest.get("schema_version"),
         "kind": manifest.get("kind"),
         "embedder": manifest.get("embedder"),
-        "provider": {
-            "provider": provider.get("provider"),
-            "model": provider.get("model"),
-            "dimensions": provider.get("dimensions"),
-        },
+        "provider": _public_provider_config(provider),
         "dimensions": dimensions,
         "record_count": len(vectors),
         "vector_count": len(vectors),
@@ -202,6 +193,19 @@ def public_manifest_summary(manifest: dict[str, Any], *, output_path: Path | Non
     if output_path is not None:
         summary["output_file"] = output_path.name
     return summary
+
+
+def _public_provider_config(provider: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "provider",
+        "model",
+        "dimensions",
+        "api_base",
+        "local_files_only",
+        "quality_claim",
+        "purpose",
+    )
+    return {key: provider.get(key) for key in keys if key in provider}
 
 
 def load_vector_manifest(path: Path) -> LoadedVectorManifest:

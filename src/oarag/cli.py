@@ -11,8 +11,10 @@ from oarag.embeddings.cache import JsonlEmbeddingCache
 from oarag.embeddings.manifest import build_vector_manifest, load_input_records
 from oarag.embeddings.providers import (
     DEFAULT_EMBEDDING_API_KEY_ENV,
+    DEFAULT_SENTENCE_TRANSFORMERS_MODEL,
     DeterministicFixtureEmbeddingProvider,
     OpenAICompatibleEmbeddingProvider,
+    SentenceTransformersEmbeddingProvider,
 )
 from oarag.evaluation.claims import build_paper_claims
 from oarag.evaluation.experiment import run_paper_experiment
@@ -153,7 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
     embedding_vectors.add_argument("--embedder-name", default="default")
     embedding_vectors.add_argument(
         "--provider",
-        choices=["openai-compatible", "deterministic-fixture"],
+        choices=["openai-compatible", "sentence-transformers", "deterministic-fixture"],
         default="openai-compatible",
     )
     embedding_vectors.add_argument(
@@ -170,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Environment variable containing the embedding API key.",
     )
     embedding_vectors.add_argument("--dimensions", type=int)
+    embedding_vectors.add_argument(
+        "--local-files-only",
+        action="store_true",
+        help="For sentence-transformers, load only locally cached model files.",
+    )
     embedding_vectors.add_argument("--batch-size", type=int, default=64)
     embedding_vectors.add_argument("--cache", type=Path)
     embedding_vectors.add_argument(
@@ -1649,6 +1656,12 @@ def _embedding_provider_from_args(args: argparse.Namespace):
         return DeterministicFixtureEmbeddingProvider(
             model=args.model or "deterministic_fixture_v1",
             dimensions=args.dimensions or 8,
+        )
+    if args.provider == "sentence-transformers":
+        return SentenceTransformersEmbeddingProvider(
+            model=args.model or DEFAULT_SENTENCE_TRANSFORMERS_MODEL,
+            dimensions=args.dimensions,
+            local_files_only=args.local_files_only,
         )
     return OpenAICompatibleEmbeddingProvider.from_env(
         model=args.model,

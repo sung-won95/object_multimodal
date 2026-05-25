@@ -16,6 +16,7 @@ from oarag.embeddings.manifest import (
 from oarag.embeddings.providers import (
     DeterministicFixtureEmbeddingProvider,
     OpenAICompatibleEmbeddingProvider,
+    SentenceTransformersEmbeddingProvider,
 )
 
 
@@ -234,6 +235,46 @@ def test_openai_compatible_provider_redacts_http_error(monkeypatch) -> None:
     assert "<redacted>" in str(exc_info.value)
 
 
+def test_sentence_transformers_provider_loads_cached_model(monkeypatch) -> None:
+    captured = {}
+
+    class FakeEncoded:
+        def tolist(self):
+            return [[0.1, 0.2, 0.3]]
+
+    class FakeModel:
+        def __init__(self, model: str, *, local_files_only: bool) -> None:
+            captured["model"] = model
+            captured["local_files_only"] = local_files_only
+
+        def encode(self, texts, *, normalize_embeddings, convert_to_numpy, show_progress_bar):
+            captured["texts"] = texts
+            captured["normalize_embeddings"] = normalize_embeddings
+            captured["convert_to_numpy"] = convert_to_numpy
+            captured["show_progress_bar"] = show_progress_bar
+            return FakeEncoded()
+
+    sentence_transformers = pytest.importorskip("sentence_transformers")
+    monkeypatch.setattr(sentence_transformers, "SentenceTransformer", FakeModel)
+    provider = SentenceTransformersEmbeddingProvider(
+        model="sentence-transformers/test-model",
+        dimensions=3,
+        local_files_only=True,
+    )
+
+    assert provider.embed_texts(["gradient descent"]) == [[0.1, 0.2, 0.3]]
+    assert captured == {
+        "model": "sentence-transformers/test-model",
+        "local_files_only": True,
+        "texts": ["gradient descent"],
+        "normalize_embeddings": True,
+        "convert_to_numpy": True,
+        "show_progress_bar": False,
+    }
+    assert provider.public_config()["provider"] == "sentence_transformers"
+    assert provider.public_config()["quality_claim"] == "provider_embedding"
+
+
 def test_cli_build_embedding_vectors_fixture(tmp_path: Path, capsys) -> None:
     input_path = tmp_path / "segments.jsonl"
     input_path.write_text(
@@ -267,6 +308,61 @@ def test_cli_build_embedding_vectors_fixture(tmp_path: Path, capsys) -> None:
     assert summary["record_count"] == 1
     assert summary["output_file"] == "vectors.json"
     assert json.loads(output_path.read_text(encoding="utf-8"))["records"][0]["dimensions"] == 5
+
+
+def test_cli_build_embedding_vectors_sentence_transformers(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    input_path = tmp_path / "segments.jsonl"
+    input_path.write_text(
+        json.dumps({"segment_id": "seg_1", "semantic_text": "matrix multiplication"})
+        + "\n",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "vectors.json"
+
+    monkeypatch.setattr(
+        SentenceTransformersEmbeddingProvider,
+        "embed_texts",
+        lambda self, texts: [[0.1, 0.2, 0.3] for _ in texts],
+    )
+
+    args = build_parser().parse_args(
+        [
+            "build-embedding-vectors",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+            "--id-field",
+            "segment_id",
+            "--text-field",
+            "semantic_text",
+            "--provider",
+            "sentence-transformers",
+            "--model",
+            "sentence-transformers/test-model",
+            "--dimensions",
+            "3",
+            "--local-files-only",
+        ]
+    )
+    args.func(args)
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["provider"] == {
+        "provider": "sentence_transformers",
+        "model": "sentence-transformers/test-model",
+        "dimensions": 3,
+        "local_files_only": True,
+        "quality_claim": "provider_embedding",
+    }
+    assert summary["record_count"] == 1
+    manifest = json.loads(output_path.read_text(encoding="utf-8"))
+    assert manifest["provider"]["provider"] == "sentence_transformers"
+    assert manifest["records"][0]["dimensions"] == 3
 
 
 class _BytesBody:

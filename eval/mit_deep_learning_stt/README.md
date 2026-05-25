@@ -61,6 +61,21 @@ MIT suite에 대해 window artifact, vector manifest, shared smoke index, benchm
 semantic smoke gate를 한 번에 실행한다.
 
 ```bash
+python scripts/run_mit_real_embedding_smoke.py \
+  --manifest eval/mit_deep_learning_stt/benchmark_matrix_manifest.json \
+  --suite-id mitdl_lec01 \
+  --output-root reports/mit_deep_learning_eval/real_embedding_smoke/mitdl_lec01_local_st \
+  --provider sentence-transformers \
+  --model sentence-transformers/all-MiniLM-L6-v2 \
+  --dimensions 384 \
+  --local-files-only \
+  --index-prefix mit_real_embedding_local_st \
+  --hybrid-embedder-profile manual_user_provided_v1
+```
+
+외부 API credential이 있는 경우에는 OpenAI-compatible provider를 쓸 수 있다.
+
+```bash
 export OARAG_EMBEDDING_API_KEY=...
 export OARAG_EMBEDDING_MODEL=...
 
@@ -74,9 +89,12 @@ python scripts/run_mit_real_embedding_smoke.py \
   --hybrid-embedder-profile manual_user_provided_v1
 ```
 
-`--allow-fixture-provider`는 배관 테스트 전용이다. 이 옵션을 쓰면 `deterministic_fixture`
-provider도 통과하지만 paper-ready claim으로 해석하면 안 된다. 기본 real mode에서는
-`deterministic_fixture`나 `local_hash_v1`가 발견되면 validation이 실패한다.
+`sentence-transformers` provider는 로컬 neural embedding 모델을 사용한다. `--local-files-only`를
+주면 Hugging Face cache에 있는 모델만 로드하므로 네트워크 없이 paper-ready smoke를 재현할 수 있다.
+새 환경에서는 `object-aligned-rag[embeddings]` extra로 optional dependency를 설치한다.
+`--allow-fixture-provider`는 배관 테스트 전용이다. 이 옵션을 쓰면 `deterministic_fixture` provider도
+통과하지만 paper-ready claim으로 해석하면 안 된다. 기본 real mode에서는 `deterministic_fixture`나
+`local_hash_v1`가 발견되면 validation이 실패한다.
 
 성공 조건은 다음과 같다.
 

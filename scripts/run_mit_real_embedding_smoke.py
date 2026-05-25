@@ -19,8 +19,10 @@ from oarag.embeddings.cache import JsonlEmbeddingCache  # noqa: E402
 from oarag.embeddings.manifest import build_vector_manifest, load_input_records  # noqa: E402
 from oarag.embeddings.providers import (  # noqa: E402
     DEFAULT_EMBEDDING_API_KEY_ENV,
+    DEFAULT_SENTENCE_TRANSFORMERS_MODEL,
     DeterministicFixtureEmbeddingProvider,
     OpenAICompatibleEmbeddingProvider,
+    SentenceTransformersEmbeddingProvider,
 )
 from oarag.evaluation.benchmark import run_benchmark  # noqa: E402
 from oarag.integrations.meili import DEFAULT_HYBRID_EMBEDDER_NAME, MeiliClient  # noqa: E402
@@ -280,13 +282,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-key", default=DEFAULT_MEILI_API_KEY)
     parser.add_argument(
         "--provider",
-        choices=["openai-compatible", "deterministic-fixture"],
+        choices=["openai-compatible", "sentence-transformers", "deterministic-fixture"],
         default="openai-compatible",
     )
     parser.add_argument("--model", help="Embedding model. Required for openai-compatible unless env is set.")
     parser.add_argument("--api-base", help="OpenAI-compatible API base URL.")
     parser.add_argument("--api-key-env", default=DEFAULT_EMBEDDING_API_KEY_ENV)
     parser.add_argument("--dimensions", type=int, required=True)
+    parser.add_argument(
+        "--local-files-only",
+        action="store_true",
+        help="For sentence-transformers, load only locally cached model files.",
+    )
     parser.add_argument("--embedder-name", default=DEFAULT_HYBRID_EMBEDDER_NAME)
     parser.add_argument("--embedding-batch-size", type=int, default=64)
     parser.add_argument("--index-batch-size", type=int, default=500)
@@ -380,6 +387,12 @@ def _provider_from_args(args: argparse.Namespace):
         return DeterministicFixtureEmbeddingProvider(
             model=args.model or "deterministic_fixture_v1",
             dimensions=args.dimensions,
+        )
+    if args.provider == "sentence-transformers":
+        return SentenceTransformersEmbeddingProvider(
+            model=args.model or DEFAULT_SENTENCE_TRANSFORMERS_MODEL,
+            dimensions=args.dimensions,
+            local_files_only=args.local_files_only,
         )
     return OpenAICompatibleEmbeddingProvider.from_env(
         model=args.model,
@@ -527,6 +540,7 @@ def _public_provider_summary(provider: dict[str, Any]) -> dict[str, Any]:
         "model": provider.get("model"),
         "dimensions": provider.get("dimensions"),
         "api_base": provider.get("api_base"),
+        "local_files_only": provider.get("local_files_only"),
     }
 
 
