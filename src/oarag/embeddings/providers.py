@@ -18,6 +18,7 @@ DEFAULT_EMBEDDING_API_KEY_ENV = "OARAG_EMBEDDING_API_KEY"
 FALLBACK_EMBEDDING_API_KEY_ENV = "OPENAI_API_KEY"
 ENV_EMBEDDING_API_BASE = "OARAG_EMBEDDING_API_BASE"
 ENV_EMBEDDING_MODEL = "OARAG_EMBEDDING_MODEL"
+DEFAULT_SENTENCE_TRANSFORMERS_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 class EmbeddingProvider(Protocol):
@@ -151,6 +152,63 @@ class DeterministicFixtureEmbeddingProvider:
             "quality_claim": "none",
             "purpose": "test_fixture",
         }
+
+
+@dataclass
+class SentenceTransformersEmbeddingProvider:
+    model: str = DEFAULT_SENTENCE_TRANSFORMERS_MODEL
+    dimensions: int | None = None
+    local_files_only: bool = False
+    normalize_embeddings: bool = True
+    provider_id: str = "sentence_transformers"
+
+    def __post_init__(self) -> None:
+        self._model = None
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        model = self._load_model()
+        encoded = model.encode(
+            texts,
+            normalize_embeddings=self.normalize_embeddings,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        vectors = encoded.tolist()
+        return [
+            normalize_query_vector(
+                vector,
+                dimensions=self.dimensions,
+                field_name=f"sentence-transformers embedding {index}",
+            )
+            for index, vector in enumerate(vectors)
+        ]
+
+    def public_config(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider_id,
+            "model": self.model,
+            "dimensions": self.dimensions,
+            "local_files_only": self.local_files_only,
+            "quality_claim": "provider_embedding",
+        }
+
+    def _load_model(self):
+        if self._model is not None:
+            return self._model
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise RuntimeError(
+                "sentence-transformers provider requires the optional "
+                "`sentence_transformers` package"
+            ) from exc
+        self._model = SentenceTransformer(
+            self.model,
+            local_files_only=self.local_files_only,
+        )
+        return self._model
 
 
 def cache_key_for_text(

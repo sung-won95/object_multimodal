@@ -8,11 +8,13 @@ from oarag.embeddings.manifest import (
 from oarag.embeddings.providers import (
     DeterministicFixtureEmbeddingProvider,
     OpenAICompatibleEmbeddingProvider,
+    SentenceTransformersEmbeddingProvider,
 )
 
 __all__ = [
     "DeterministicFixtureEmbeddingProvider",
     "OpenAICompatibleEmbeddingProvider",
+    "SentenceTransformersEmbeddingProvider",
     "VECTOR_MANIFEST_SCHEMA_VERSION",
     "build_vector_manifest",
     "load_input_records",

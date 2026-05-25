@@ -59,6 +59,40 @@ def test_validate_run_accepts_real_provider_manifest_path(tmp_path: Path) -> Non
     assert validation["query_vector_sources"] == ["manifest"]
 
 
+def test_validate_run_accepts_sentence_transformers_provider(tmp_path: Path) -> None:
+    module = _load_script_module()
+    metrics_path, query_results_path, semantic_smoke_path = _write_validation_artifacts(tmp_path)
+
+    validation = module.validate_run(
+        indexed_projects=[_indexed_project(provider_id="sentence_transformers")],
+        metrics_path=metrics_path,
+        query_results_path=query_results_path,
+        semantic_smoke_path=semantic_smoke_path,
+        require_real_provider=True,
+    )
+
+    assert validation["ok"] is True
+    assert validation["provider_ids"] == ["sentence_transformers"]
+
+
+def test_provider_from_args_supports_sentence_transformers() -> None:
+    module = _load_script_module()
+
+    provider = module._provider_from_args(
+        SimpleNamespace(
+            provider="sentence-transformers",
+            model="sentence-transformers/test-model",
+            dimensions=384,
+            local_files_only=True,
+        )
+    )
+
+    assert provider.provider_id == "sentence_transformers"
+    assert provider.model == "sentence-transformers/test-model"
+    assert provider.dimensions == 384
+    assert provider.local_files_only is True
+
+
 def test_main_fixture_mode_orchestrates_without_public_private_paths(
     tmp_path: Path,
     monkeypatch,
