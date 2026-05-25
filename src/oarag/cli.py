@@ -7,6 +7,13 @@ from pathlib import Path
 
 from oarag.ingestion.alignment import align_segments_to_frames
 from oarag.evaluation.benchmark import run_benchmark
+from oarag.embeddings.cache import JsonlEmbeddingCache
+from oarag.embeddings.manifest import build_vector_manifest, load_input_records
+from oarag.embeddings.providers import (
+    DEFAULT_EMBEDDING_API_KEY_ENV,
+    DeterministicFixtureEmbeddingProvider,
+    OpenAICompatibleEmbeddingProvider,
+)
 from oarag.evaluation.claims import build_paper_claims
 from oarag.evaluation.experiment import run_paper_experiment
 from oarag.evaluation.paper_bundle import run_paper_bundle
@@ -117,6 +124,64 @@ def build_parser() -> argparse.ArgumentParser:
 
     neo4j_health = subparsers.add_parser("health-neo4j", help="Check Neo4j runtime health")
     neo4j_health.set_defaults(func=cmd_health_neo4j)
+
+    embedding_vectors = subparsers.add_parser(
+        "build-embedding-vectors",
+        help="Build a private vector manifest with a real embedding provider.",
+    )
+    embedding_vectors.add_argument("--input", required=True, type=Path)
+    embedding_vectors.add_argument(
+        "--input-format",
+        choices=["auto", "jsonl", "json", "csv"],
+        default="auto",
+    )
+    embedding_vectors.add_argument("--output", required=True, type=Path)
+    embedding_vectors.add_argument(
+        "--kind",
+        choices=["document", "query"],
+        default="document",
+        help="Manifest shape to write. query is compatible with hybrid query vectors.",
+    )
+    embedding_vectors.add_argument("--id-field", required=True)
+    embedding_vectors.add_argument(
+        "--text-field",
+        action="append",
+        required=True,
+        dest="text_fields",
+        help="Text field to embed. Repeat to concatenate multiple fields.",
+    )
+    embedding_vectors.add_argument("--embedder-name", default="default")
+    embedding_vectors.add_argument(
+        "--provider",
+        choices=["openai-compatible", "deterministic-fixture"],
+        default="openai-compatible",
+    )
+    embedding_vectors.add_argument(
+        "--model",
+        help="Embedding model. Required for openai-compatible unless OARAG_EMBEDDING_MODEL is set.",
+    )
+    embedding_vectors.add_argument(
+        "--api-base",
+        help="OpenAI-compatible API base URL.",
+    )
+    embedding_vectors.add_argument(
+        "--api-key-env",
+        default=DEFAULT_EMBEDDING_API_KEY_ENV,
+        help="Environment variable containing the embedding API key.",
+    )
+    embedding_vectors.add_argument("--dimensions", type=int)
+    embedding_vectors.add_argument("--batch-size", type=int, default=64)
+    embedding_vectors.add_argument("--cache", type=Path)
+    embedding_vectors.add_argument(
+        "--allow-empty-text",
+        action="store_true",
+        help="Embed empty text records instead of failing.",
+    )
+    embedding_vectors.add_argument(
+        "--source-label",
+        help="Private-safe label for the input source, for example mitdl_segments.",
+    )
+    embedding_vectors.set_defaults(func=cmd_build_embedding_vectors)
 
     graph_ingest = subparsers.add_parser(
         "graph-ingest",
@@ -1542,6 +1607,40 @@ def cmd_health(args: argparse.Namespace) -> None:
 
 def cmd_health_neo4j(args: argparse.Namespace) -> None:
     print(json.dumps(check_neo4j_health(), ensure_ascii=False, indent=2))
+
+
+def cmd_build_embedding_vectors(args: argparse.Namespace) -> None:
+    provider = _embedding_provider_from_args(args)
+    cache = JsonlEmbeddingCache(args.cache)
+    records = load_input_records(args.input, input_format=args.input_format)
+    summary = build_vector_manifest(
+        records=records,
+        provider=provider,
+        output_path=args.output,
+        id_field=args.id_field,
+        text_fields=args.text_fields,
+        kind=args.kind,
+        embedder=args.embedder_name,
+        batch_size=args.batch_size,
+        cache=cache,
+        fail_on_empty_text=not args.allow_empty_text,
+        source_label=args.source_label,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def _embedding_provider_from_args(args: argparse.Namespace):
+    if args.provider == "deterministic-fixture":
+        return DeterministicFixtureEmbeddingProvider(
+            model=args.model or "deterministic_fixture_v1",
+            dimensions=args.dimensions or 8,
+        )
+    return OpenAICompatibleEmbeddingProvider.from_env(
+        model=args.model,
+        api_base=args.api_base,
+        api_key_env=args.api_key_env,
+        dimensions=args.dimensions,
+    )
 
 
 def cmd_graph_ingest(args: argparse.Namespace) -> None:
