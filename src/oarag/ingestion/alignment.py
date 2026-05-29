@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from oarag.core.io import write_json, write_jsonl
+from oarag.ingestion.frame_selection import summarize_frame_temporal_coverage
 
 
 def align_segments_to_frames(
@@ -56,6 +57,7 @@ def align_segments_to_frames(
 
     write_jsonl(resolved_output_path, aligned_rows)
 
+    coverage = _alignment_frame_coverage(frames=frames, segments=segments)
     summary = {
         "margin_seconds": margin,
         "segments_total": len(segments),
@@ -77,6 +79,16 @@ def align_segments_to_frames(
             frames=frames,
             segments=segments,
         ),
+        "available_frame_max_gap_sec": coverage["max_temporal_gap_sec"],
+        "coverage": {
+            "temporal_coverage_ratio": coverage["temporal_coverage_ratio"],
+            "temporal_gap": coverage["temporal_gap"],
+            "max_temporal_gap_sec": coverage["max_temporal_gap_sec"],
+            "frame_free_segment_ratio": coverage["frame_free_segment_ratio"],
+            "segment_coverage": coverage["segment_coverage"],
+            "warnings": coverage["warnings"],
+        },
+        "warnings": coverage["warnings"],
     }
     _update_project_manifest(
         manifest_path=resolved_manifest_path,
@@ -176,6 +188,39 @@ def _frame_temporal_coverage_ratio(
         return None
     frame_span = max(timestamps) - min(timestamps)
     return round(min(1.0, frame_span / segment_span), 4)
+
+
+def _alignment_frame_coverage(
+    *,
+    frames: list[dict[str, Any]],
+    segments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    timeline = _segment_timeline_window(segments)
+    if timeline is None:
+        duration_sec = None
+        timeline_start_sec = 0.0
+    else:
+        timeline_start_sec, timeline_end_sec = timeline
+        duration_sec = max(0.0, timeline_end_sec - timeline_start_sec)
+
+    return summarize_frame_temporal_coverage(
+        frames=frames,
+        duration_sec=duration_sec,
+        frame_rate=1.0,
+        segments=segments,
+        timeline_start_sec=timeline_start_sec,
+    )
+
+
+def _segment_timeline_window(segments: list[dict[str, Any]]) -> tuple[float, float] | None:
+    windows = [
+        window
+        for window in (_segment_window(segment, margin_seconds=0.0) for segment in segments)
+        if window is not None
+    ]
+    if not windows:
+        return None
+    return min(window[0] for window in windows), max(window[1] for window in windows)
 
 
 def _update_project_manifest(

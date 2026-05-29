@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from oarag.ingestion.frame_selection import (
+    DEFAULT_MAX_FRAME_GAP_WARNING_SECONDS,
     FRAME_SELECTION_STRATEGIES,
     FrameSelectionConfig,
+    normalize_frame_selection_strategy,
     select_representative_frames,
     summarize_frame_temporal_coverage,
 )
@@ -41,6 +43,7 @@ class VideoIngestConfig:
     srt_path: Path | None = None
     frame_rate: float = 1.0
     max_frames: int | None = 120
+    max_frame_gap_seconds: float | None = None
     frame_sampling: str = "uniform"
     frame_selection: str = "none"
     skip_frames: bool = False
@@ -58,6 +61,7 @@ class BatchIngestConfig:
     output_root: Path
     frame_rate: float = 1.0
     max_frames: int | None = 120
+    max_frame_gap_seconds: float | None = None
     frame_sampling: str = "uniform"
     frame_selection: str = "none"
     skip_frames: bool = False
@@ -81,7 +85,7 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
         raise ValueError(f"transcript_source must be one of {sorted(TRANSCRIPT_SOURCES)}")
     if config.frame_sampling not in FRAME_SAMPLING_STRATEGIES:
         raise ValueError(f"frame_sampling must be one of {sorted(FRAME_SAMPLING_STRATEGIES)}")
-    if config.frame_selection not in FRAME_SELECTION_STRATEGIES:
+    if normalize_frame_selection_strategy(config.frame_selection) not in FRAME_SELECTION_STRATEGIES:
         raise ValueError(f"frame_selection must be one of {sorted(FRAME_SELECTION_STRATEGIES)}")
 
     srt_path = resolve_srt(video_path, config.srt_path)
@@ -111,6 +115,7 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
     frame_sampling_summary = _empty_frame_sampling_summary(
         frame_rate=config.frame_rate,
         max_frames=config.max_frames,
+        max_frame_gap_seconds=config.max_frame_gap_seconds,
         frame_sampling=config.frame_sampling,
         duration_sec=probe.get("duration_sec"),
         skipped=config.skip_frames,
@@ -128,6 +133,7 @@ def ingest_video(config: VideoIngestConfig) -> dict[str, Any]:
             frames_dir=frames_dir,
             frame_rate=config.frame_rate,
             max_frames=config.max_frames,
+            max_frame_gap_seconds=config.max_frame_gap_seconds,
             duration_sec=probe.get("duration_sec"),
             frame_sampling=config.frame_sampling,
             frame_selection=config.frame_selection,
@@ -308,6 +314,7 @@ def sample_frames(
     max_frames: int | None,
     *,
     duration_sec: float | None = None,
+    max_frame_gap_seconds: float | None = None,
     frame_sampling: str = "uniform",
     frame_selection: str = "none",
     segments: list[dict[str, Any]] | None = None,
@@ -316,7 +323,7 @@ def sample_frames(
         raise ValueError("frame_rate must be greater than 0")
     if frame_sampling not in FRAME_SAMPLING_STRATEGIES:
         raise ValueError(f"frame_sampling must be one of {sorted(FRAME_SAMPLING_STRATEGIES)}")
-    if frame_selection not in FRAME_SELECTION_STRATEGIES:
+    if normalize_frame_selection_strategy(frame_selection) not in FRAME_SELECTION_STRATEGIES:
         raise ValueError(f"frame_selection must be one of {sorted(FRAME_SELECTION_STRATEGIES)}")
 
     frames_dir.mkdir(parents=True, exist_ok=True)
@@ -328,6 +335,7 @@ def sample_frames(
         frame_rate=frame_rate,
         max_frames=max_frames,
         frame_sampling=frame_sampling,
+        max_frame_gap_seconds=max_frame_gap_seconds,
         segments=segments,
     )
 
@@ -427,6 +435,7 @@ def sample_frames(
             frame_rate=frame_rate,
             max_frames=max_frames,
             frame_sampling=frame_sampling,
+            max_frame_gap_seconds=max_frame_gap_seconds,
             segments=segments,
         ),
         "selection_summary": selection_summary,
@@ -439,6 +448,7 @@ def select_frame_timestamps(
     frame_rate: float,
     max_frames: int | None,
     frame_sampling: str,
+    max_frame_gap_seconds: float | None = None,
     segments: list[dict[str, Any]] | None = None,
 ) -> list[float] | None:
     if max_frames is None:
@@ -447,6 +457,8 @@ def select_frame_timestamps(
         return None
     if frame_rate <= 0:
         raise ValueError("frame_rate must be greater than 0")
+    if max_frame_gap_seconds is not None and max_frame_gap_seconds <= 0:
+        raise ValueError("max_frame_gap_seconds must be greater than 0")
     if duration_sec is None or duration_sec <= 0:
         return [round(index / frame_rate, 3) for index in range(max_frames)]
 
@@ -474,9 +486,31 @@ def select_frame_timestamps(
         duration_sec=duration_sec,
     )
     if not segment_timestamps:
+        gap_timestamps = _max_gap_policy_timestamps(
+            duration_sec=duration_sec,
+            max_frame_gap_seconds=max_frame_gap_seconds,
+        )
+        if gap_timestamps and len(gap_timestamps) <= max_frames:
+            selected = _fill_unique_timestamps(
+                selected=gap_timestamps,
+                candidates=uniform_timestamps,
+                limit=max_frames,
+            )
+            return selected[:max_frames]
         return _dedupe_sorted_timestamps(uniform_timestamps)
 
-    selected = _spread_timestamps(segment_timestamps, min(max_frames, len(segment_timestamps)))
+    gap_timestamps = _max_gap_policy_timestamps(
+        duration_sec=duration_sec,
+        max_frame_gap_seconds=max_frame_gap_seconds,
+    )
+    if gap_timestamps and len(gap_timestamps) <= max_frames:
+        selected = _fill_unique_timestamps(
+            selected=gap_timestamps,
+            candidates=segment_timestamps,
+            limit=max_frames,
+        )
+    else:
+        selected = _spread_timestamps(segment_timestamps, min(max_frames, len(segment_timestamps)))
     selected = _fill_unique_timestamps(
         selected=selected,
         candidates=uniform_timestamps,
@@ -505,6 +539,7 @@ def summarize_frame_sampling(
     frame_rate: float,
     max_frames: int | None,
     frame_sampling: str,
+    max_frame_gap_seconds: float | None = None,
     segments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     candidate_count = (
@@ -516,11 +551,17 @@ def summarize_frame_sampling(
         duration_sec=duration_sec,
         frame_rate=frame_rate,
         segments=segments or [],
+        max_temporal_gap_sec=(
+            max_frame_gap_seconds
+            if max_frame_gap_seconds is not None
+            else DEFAULT_MAX_FRAME_GAP_WARNING_SECONDS
+        ),
     )
     return {
         "strategy": frame_sampling,
         "frame_rate": frame_rate,
         "max_frames": cap,
+        "max_frame_gap_seconds": max_frame_gap_seconds,
         "duration_sec": duration_sec,
         "candidate_frame_count": candidate_count,
         "selected_frame_count": len(frames),
@@ -530,12 +571,27 @@ def summarize_frame_sampling(
         "covered_until_sec": coverage["covered_until_sec"],
         "timestamp_span_sec": coverage["timestamp_span_sec"],
         "temporal_coverage_ratio": coverage["temporal_coverage_ratio"],
+        "temporal_gap": coverage["temporal_gap"],
+        "max_temporal_gap_sec": coverage["max_temporal_gap_sec"],
         "frame_free_segment_ratio": coverage["frame_free_segment_ratio"],
         "segment_coverage": coverage["segment_coverage"],
         "coverage": {
             "temporal_coverage_ratio": coverage["temporal_coverage_ratio"],
+            "temporal_gap": coverage["temporal_gap"],
+            "max_temporal_gap_sec": coverage["max_temporal_gap_sec"],
             "frame_free_segment_ratio": coverage["frame_free_segment_ratio"],
             "warnings": coverage["warnings"],
+        },
+        "policy": {
+            "sampling_strategy": frame_sampling,
+            "frame_rate": frame_rate,
+            "max_frames": cap,
+            "max_frame_gap_seconds": max_frame_gap_seconds,
+            "gap_warning_seconds": (
+                max_frame_gap_seconds
+                if max_frame_gap_seconds is not None
+                else DEFAULT_MAX_FRAME_GAP_WARNING_SECONDS
+            ),
         },
         "warnings": coverage["warnings"],
         "skipped": False,
@@ -546,6 +602,7 @@ def _empty_frame_sampling_summary(
     *,
     frame_rate: float,
     max_frames: int | None,
+    max_frame_gap_seconds: float | None,
     frame_sampling: str,
     duration_sec: float | None,
     skipped: bool,
@@ -555,6 +612,7 @@ def _empty_frame_sampling_summary(
         duration_sec=duration_sec,
         frame_rate=frame_rate,
         max_frames=max_frames,
+        max_frame_gap_seconds=max_frame_gap_seconds,
         frame_sampling=frame_sampling,
     )
     summary["skipped"] = skipped
@@ -578,6 +636,25 @@ def _segment_representative_timestamps(
         if duration_sec is not None and duration_sec > 0:
             timestamp = min(max(0.0, timestamp), max(0.0, duration_sec - 0.001))
         timestamps.append(round(timestamp, 3))
+    return _dedupe_sorted_timestamps(timestamps)
+
+
+def _max_gap_policy_timestamps(
+    *,
+    duration_sec: float,
+    max_frame_gap_seconds: float | None,
+) -> list[float]:
+    if max_frame_gap_seconds is None:
+        return []
+    if max_frame_gap_seconds <= 0:
+        raise ValueError("max_frame_gap_seconds must be greater than 0")
+    last_timestamp = max(0.0, duration_sec - 0.001)
+    timestamps: list[float] = []
+    timestamp = 0.0
+    while timestamp < last_timestamp:
+        timestamps.append(round(timestamp, 3))
+        timestamp += max_frame_gap_seconds
+    timestamps.append(round(last_timestamp, 3))
     return _dedupe_sorted_timestamps(timestamps)
 
 
@@ -763,6 +840,7 @@ def batch_ingest_videos(
                     output_root=resolved_output_root,
                     frame_rate=config.frame_rate,
                     max_frames=config.max_frames,
+                    max_frame_gap_seconds=config.max_frame_gap_seconds,
                     frame_sampling=config.frame_sampling,
                     frame_selection=config.frame_selection,
                     skip_frames=config.skip_frames,
@@ -779,6 +857,20 @@ def batch_ingest_videos(
             result["transcript_source"] = manifest.get("transcript_source")
             result["segments"] = _safe_nested_int(manifest, "counts", "lecture_segments")
             result["frames"] = _safe_nested_int(manifest, "counts", "frames")
+            result["frame_temporal_coverage_ratio"] = _safe_nested_float(
+                manifest, "frame_sampling", "temporal_coverage_ratio"
+            )
+            result["frame_free_segment_ratio"] = _safe_nested_float(
+                manifest, "frame_sampling", "frame_free_segment_ratio"
+            )
+            result["frame_max_temporal_gap_sec"] = _safe_nested_float(
+                manifest, "frame_sampling", "max_temporal_gap_sec"
+            )
+            frame_warnings = _safe_frame_warnings(manifest)
+            result["frame_coverage_warning_count"] = len(frame_warnings)
+            result["frame_coverage_warning_codes"] = ",".join(
+                str(warning.get("code")) for warning in frame_warnings if warning.get("code")
+            )
         except Exception as exc:
             counts["failed"] += 1
             result["status"] = "failed"
@@ -825,6 +917,11 @@ def write_batch_summary_csv(path: Path, summary: dict[str, Any]) -> None:
         "transcript_source",
         "segments",
         "frames",
+        "frame_temporal_coverage_ratio",
+        "frame_free_segment_ratio",
+        "frame_max_temporal_gap_sec",
+        "frame_coverage_warning_count",
+        "frame_coverage_warning_codes",
         "error",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -843,6 +940,27 @@ def _safe_nested_int(payload: dict[str, Any], key: str, nested_key: str) -> int 
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _safe_nested_float(payload: dict[str, Any], key: str, nested_key: str) -> float | None:
+    raw = payload.get(key)
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get(nested_key)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_frame_warnings(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    frame_sampling = payload.get("frame_sampling")
+    if not isinstance(frame_sampling, dict):
+        return []
+    warnings = frame_sampling.get("warnings")
+    if not isinstance(warnings, list):
+        return []
+    return [warning for warning in warnings if isinstance(warning, dict)]
 
 
 def _optional_float(value: Any) -> float | None:

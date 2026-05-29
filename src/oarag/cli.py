@@ -437,6 +437,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Frame cap for smoke tests. Use 0 for no cap.",
     )
     ingest.add_argument(
+        "--max-frame-gap-seconds",
+        type=float,
+        help="Optional policy target for maximum seconds between sampled evidence frames.",
+    )
+    ingest.add_argument(
         "--frame-sampling",
         choices=["uniform", "prefix"],
         default="uniform",
@@ -444,9 +449,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ingest.add_argument(
         "--frame-selection",
-        choices=["none", "representative"],
+        choices=["none", "representative", "scene-change"],
         default="none",
-        help="Optional post-sampling selector that removes near-duplicate or low-information frames.",
+        help="Optional post-sampling selector for representative or scene-change frames.",
     )
     ingest.add_argument("--skip-frames", action="store_true")
     ingest.add_argument(
@@ -506,6 +511,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Frame cap for smoke tests. Use 0 for no cap.",
     )
     batch_ingest.add_argument(
+        "--max-frame-gap-seconds",
+        type=float,
+        help="Optional policy target for maximum seconds between sampled evidence frames.",
+    )
+    batch_ingest.add_argument(
         "--frame-sampling",
         choices=["uniform", "prefix"],
         default="uniform",
@@ -513,9 +523,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     batch_ingest.add_argument(
         "--frame-selection",
-        choices=["none", "representative"],
+        choices=["none", "representative", "scene-change"],
         default="none",
-        help="Optional post-sampling selector that removes near-duplicate or low-information frames.",
+        help="Optional post-sampling selector for representative or scene-change frames.",
     )
     batch_ingest.add_argument("--skip-frames", action="store_true")
     batch_ingest.add_argument(
@@ -1813,6 +1823,7 @@ def cmd_ingest_video(args: argparse.Namespace) -> None:
             srt_path=args.srt,
             frame_rate=args.frame_rate,
             max_frames=max_frames,
+            max_frame_gap_seconds=args.max_frame_gap_seconds,
             frame_sampling=args.frame_sampling,
             frame_selection=args.frame_selection,
             skip_frames=args.skip_frames,
@@ -1838,6 +1849,7 @@ def cmd_batch_ingest(args: argparse.Namespace) -> None:
             output_root=output_root,
             frame_rate=args.frame_rate,
             max_frames=max_frames,
+            max_frame_gap_seconds=args.max_frame_gap_seconds,
             frame_sampling=args.frame_sampling,
             frame_selection=args.frame_selection,
             skip_frames=args.skip_frames,
