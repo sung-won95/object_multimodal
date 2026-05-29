@@ -26,6 +26,11 @@ from oarag.retrieval.evidence import (
     select_window_segments,
 )
 from oarag.integrations.meili import MeiliClient, normalize_query_vector
+from oarag.embeddings.manifest import (
+    NO_SEMANTIC_QUALITY_CLAIM,
+    PROVIDER_EMBEDDING_QUALITY_CLAIM,
+    embedding_backend_contract,
+)
 from oarag.retrieval.project_index import segment_artifact_path
 from oarag.retrieval.rerank import DEFAULT_RERANK_BACKEND, rerank_bundles, rerank_metadata
 from oarag.retrieval.vectors import LOCAL_HASH_VECTOR_SOURCE, deterministic_text_vector
@@ -40,6 +45,14 @@ SEMANTIC_RETRIEVAL_MODE = "semantic"
 DEFAULT_HYBRID_EMBEDDER = "default"
 DEFAULT_HYBRID_SEMANTIC_RATIO = 1.0
 DEFAULT_QUERY_VECTOR_MANIFEST_RELATIVE_PATH = Path("manifests") / "query_vectors.json"
+LOCAL_HASH_QUERY_VECTOR_WARNING = (
+    "local_hash_v1 query vectors are deterministic smoke-test fallback only; "
+    "do not report semantic embedding quality without provider-backed query vectors."
+)
+UNDECLARED_SEMANTIC_BACKEND_WARNING = (
+    "Hybrid semantic retrieval has no provider-backed query embedding metadata in "
+    "this response; semantic quality claims are disabled for this query result."
+)
 SOURCE_PRIORITY = {
     SEGMENT_HIT_SOURCE: 0,
     WINDOW_HIT_SOURCE: 0,
@@ -183,7 +196,10 @@ def query_project(
     bundles: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
     summary_lines: list[str] = []
-    warnings: list[str] = []
+    warnings: list[str] = _hybrid_embedding_warnings(
+        hybrid_retrieval=hybrid_retrieval,
+        query_vector_spec=hybrid_query_vector_spec,
+    )
     bundled_entity_total = 0
     bundled_link_total = 0
 
@@ -1167,7 +1183,16 @@ def _resolve_hybrid_query_vector(
     }
     if vector_source == LOCAL_HASH_VECTOR_SOURCE:
         metadata["purpose"] = "local_reproducibility_smoke_fallback"
-        metadata["quality_claim"] = "none"
+        metadata["quality_claim"] = NO_SEMANTIC_QUALITY_CLAIM
+    elif vector_source == "manifest":
+        backend_contract = manifest_spec.get("backend_contract")
+        if isinstance(backend_contract, dict):
+            metadata["backend_contract"] = backend_contract
+            metadata["provider"] = backend_contract.get("provider")
+            metadata["source_model"] = backend_contract.get("source_model")
+            metadata["quality_claim"] = backend_contract.get("quality_claim")
+    else:
+        metadata["quality_claim"] = "unverified"
     if vector_name is not None:
         metadata["name"] = vector_name
     return {
@@ -1215,12 +1240,42 @@ def _load_query_vector_manifest(path: Path, *, vector_name: str | None) -> dict[
         entry=entry,
         embedder=embedder,
     )
+    provider = loaded.get("provider") if isinstance(loaded.get("provider"), dict) else {}
     return {
         "name": selected_name,
         "embedder": embedder,
         "dimensions": dimensions,
         "vector": vector,
+        "backend_contract": embedding_backend_contract(
+            source="query_vector_manifest",
+            provider=provider,
+            embedder_names=[embedder],
+            dimensions_by_embedder={embedder: dimensions},
+            vector_count=len(queries),
+        ),
     }
+
+
+def _hybrid_embedding_warnings(
+    *,
+    hybrid_retrieval: bool,
+    query_vector_spec: dict[str, Any] | None,
+) -> list[str]:
+    if not hybrid_retrieval:
+        return []
+    metadata = (
+        query_vector_spec.get("metadata")
+        if isinstance(query_vector_spec, dict)
+        and isinstance(query_vector_spec.get("metadata"), dict)
+        else None
+    )
+    if metadata is None:
+        return [UNDECLARED_SEMANTIC_BACKEND_WARNING]
+    if metadata.get("source") == LOCAL_HASH_VECTOR_SOURCE:
+        return [LOCAL_HASH_QUERY_VECTOR_WARNING]
+    if metadata.get("quality_claim") != PROVIDER_EMBEDDING_QUALITY_CLAIM:
+        return [UNDECLARED_SEMANTIC_BACKEND_WARNING]
+    return []
 
 
 def _select_query_vector_name(queries: dict[str, Any], *, vector_name: str | None) -> str:

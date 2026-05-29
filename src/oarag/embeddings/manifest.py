@@ -18,6 +18,8 @@ from oarag.retrieval.vectors import text_from_document_fields
 VECTOR_MANIFEST_SCHEMA_VERSION = "oarag-vector-manifest-v1"
 QUERY_VECTOR_MANIFEST_SCHEMA_VERSION = "oarag-query-vectors-v1"
 SUPPORTED_MANIFEST_KINDS = ("document", "query")
+PROVIDER_EMBEDDING_QUALITY_CLAIM = "provider_embedding"
+NO_SEMANTIC_QUALITY_CLAIM = "none"
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,13 @@ class LoadedVectorManifest:
             "kind": self.kind,
             "source": "manifest",
             "provider": _public_provider_config(self.provider),
+            "backend_contract": embedding_backend_contract(
+                source="manifest",
+                provider=self.provider,
+                embedder_names=self.embedder_names,
+                dimensions_by_embedder=self.dimensions_by_embedder,
+                vector_count=self.record_count,
+            ),
             "dimensions_by_embedder": dict(self.dimensions_by_embedder),
             "embedder_names": self.embedder_names,
             "record_count": self.record_count,
@@ -179,11 +188,25 @@ def public_manifest_summary(manifest: dict[str, Any], *, output_path: Path | Non
     vectors = _manifest_records(manifest)
     provider = manifest.get("provider") if isinstance(manifest.get("provider"), dict) else {}
     dimensions = manifest.get("dimensions")
+    backend_contract = manifest.get("backend_contract")
+    if not isinstance(backend_contract, dict):
+        backend_contract = embedding_backend_contract(
+            source="manifest",
+            provider=provider,
+            embedder_names=[str(manifest.get("embedder") or "default")],
+            dimensions_by_embedder={
+                str(manifest.get("embedder") or "default"): dimensions
+            }
+            if isinstance(dimensions, int)
+            else {},
+            vector_count=len(vectors),
+        )
     summary = {
         "schema_version": manifest.get("schema_version"),
         "kind": manifest.get("kind"),
         "embedder": manifest.get("embedder"),
         "provider": _public_provider_config(provider),
+        "backend_contract": backend_contract,
         "dimensions": dimensions,
         "record_count": len(vectors),
         "vector_count": len(vectors),
@@ -206,6 +229,46 @@ def _public_provider_config(provider: dict[str, Any]) -> dict[str, Any]:
         "purpose",
     )
     return {key: provider.get(key) for key in keys if key in provider}
+
+
+def provider_quality_claim(provider: dict[str, Any]) -> str:
+    explicit = _non_empty_string(provider.get("quality_claim"))
+    if explicit is not None:
+        return explicit
+    provider_id = _non_empty_string(provider.get("provider"))
+    if provider_id and provider_id != "deterministic_fixture":
+        return PROVIDER_EMBEDDING_QUALITY_CLAIM
+    return NO_SEMANTIC_QUALITY_CLAIM
+
+
+def embedding_backend_contract(
+    *,
+    source: str,
+    provider: dict[str, Any] | None,
+    embedder_names: Iterable[str],
+    dimensions_by_embedder: dict[str, int | None],
+    vector_count: int | None = None,
+) -> dict[str, Any]:
+    provider_config = _public_provider_config(provider if isinstance(provider, dict) else {})
+    source_model = _non_empty_string(provider_config.get("model"))
+    contract: dict[str, Any] = {
+        "source": source,
+        "provider": provider_config.get("provider"),
+        "model": source_model,
+        "source_model": source_model,
+        "quality_claim": provider_quality_claim(provider_config),
+        "embedder_names": sorted(
+            str(name) for name in embedder_names if name not in (None, "")
+        ),
+        "dimensions_by_embedder": {
+            str(name): dimensions
+            for name, dimensions in sorted(dimensions_by_embedder.items())
+            if isinstance(dimensions, int)
+        },
+    }
+    if vector_count is not None:
+        contract["vector_count"] = vector_count
+    return contract
 
 
 def load_vector_manifest(path: Path) -> LoadedVectorManifest:
@@ -287,12 +350,20 @@ def _manifest_payload(
 ) -> dict[str, Any]:
     dimensions = _single_dimensions(vector_records)
     provider_config = provider.public_config()
+    quality_claim = provider_quality_claim(provider_config)
     base = {
         "schema_version": VECTOR_MANIFEST_SCHEMA_VERSION,
         "kind": kind,
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "embedder": embedder,
         "provider": provider_config,
+        "backend_contract": embedding_backend_contract(
+            source="provider_manifest",
+            provider=provider_config,
+            embedder_names=[embedder],
+            dimensions_by_embedder={embedder: dimensions},
+            vector_count=len(vector_records),
+        ),
         "dimensions": dimensions,
         "source": {
             "label": source_label,
@@ -305,6 +376,8 @@ def _manifest_payload(
                 "dimensions": dimensions,
                 "provider": provider_config.get("provider"),
                 "model": provider_config.get("model"),
+                "source_model": provider_config.get("model"),
+                "quality_claim": quality_claim,
             }
         },
         "counts": {

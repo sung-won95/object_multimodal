@@ -7,7 +7,12 @@ from typing import Any, Iterable, Iterator
 
 from oarag.core.config import default_paths
 from oarag.core.io import write_json, write_jsonl
-from oarag.embeddings.manifest import LoadedVectorManifest, load_vector_manifest
+from oarag.embeddings.manifest import (
+    NO_SEMANTIC_QUALITY_CLAIM,
+    PROVIDER_EMBEDDING_QUALITY_CLAIM,
+    LoadedVectorManifest,
+    load_vector_manifest,
+)
 from oarag.integrations.meili import (
     DEFAULT_HYBRID_EMBEDDER_NAME,
     HYBRID_EMBEDDER_CUSTOM_SETTINGS_PROFILE,
@@ -44,6 +49,14 @@ from oarag.retrieval.vectors import (
 
 
 LECTURE_WINDOW_ARTIFACT_RELATIVE_PATH = Path("segments") / "lecture_windows.jsonl"
+LOCAL_HASH_DOCUMENT_VECTOR_WARNING = (
+    "local_hash_v1 document vectors are deterministic smoke-test fallback only; "
+    "do not report semantic embedding quality without a provider-backed vector manifest."
+)
+UNVERIFIED_DOCUMENT_VECTOR_WARNING = (
+    "Document vectors do not carry provider-backed embedding metadata; semantic "
+    "quality claims are disabled for this index summary."
+)
 
 
 def project_dir_from_args(*, project_id: str | None, project_dir: Path | None) -> Path:
@@ -472,6 +485,7 @@ def index_project_windows(
         "settings_snapshot": settings_snapshot,
         "document_vectors": vector_summary,
     }
+    _attach_embedding_backend_report(summary, vector_summary)
     _attach_hybrid_embedder_summary(
         summary,
         hybrid_snapshot=hybrid_snapshot,
@@ -595,6 +609,7 @@ def index_project_segments(
         "settings_snapshot": settings_snapshot,
         "document_vectors": vector_summary,
     }
+    _attach_embedding_backend_report(summary, vector_summary)
     _attach_hybrid_embedder_summary(
         summary,
         hybrid_snapshot=hybrid_snapshot,
@@ -716,6 +731,7 @@ def index_project_visual_entities(
         "settings_snapshot": settings_snapshot,
         "document_vectors": vector_summary,
     }
+    _attach_embedding_backend_report(summary, vector_summary)
     _attach_hybrid_embedder_summary(
         summary,
         hybrid_snapshot=hybrid_snapshot,
@@ -931,6 +947,14 @@ def _new_document_vector_summary(
     vector_manifest: LoadedVectorManifest | None = None,
 ) -> dict[str, Any]:
     using_manifest = vector_manifest is not None
+    manifest_summary = vector_manifest.public_summary() if using_manifest else None
+    quality_claim = (
+        _backend_quality_claim(manifest_summary)
+        if manifest_summary is not None
+        else NO_SEMANTIC_QUALITY_CLAIM
+        if specs
+        else None
+    )
     summary = {
         "enabled": bool(specs),
         "source": "userProvided" if specs else None,
@@ -942,7 +966,7 @@ def _new_document_vector_summary(
             if specs
             else None
         ),
-        "quality_claim": "provider_embedding" if using_manifest else "none" if specs else None,
+        "quality_claim": quality_claim,
         "embedder_names": [spec["name"] for spec in specs],
         "dimensions_by_embedder": {
             spec["name"]: spec["dimensions"] for spec in specs
@@ -952,11 +976,75 @@ def _new_document_vector_summary(
         "generated_vector_count": 0,
         "existing_vector_count": 0,
     }
-    if using_manifest:
-        summary["manifest"] = vector_manifest.public_summary()
+    if manifest_summary is not None:
+        summary["manifest"] = manifest_summary
         summary["manifest_vector_count"] = 0
         summary["missing_vector_count"] = 0
     return summary
+
+
+def _attach_embedding_backend_report(
+    summary: dict[str, Any],
+    vector_summary: dict[str, Any],
+) -> None:
+    report = _embedding_backend_report(vector_summary)
+    summary["embedding_backend"] = report
+    warnings = report.get("warnings") if isinstance(report.get("warnings"), list) else []
+    if warnings:
+        summary.setdefault("warnings", []).extend(warnings)
+
+
+def _embedding_backend_report(vector_summary: dict[str, Any]) -> dict[str, Any]:
+    if not vector_summary.get("enabled"):
+        return {
+            "configured": False,
+            "quality_claim": None,
+            "backend_contract": None,
+            "warnings": [],
+        }
+    backend_contract = _document_vector_backend_contract(vector_summary)
+    quality_claim = str(vector_summary.get("quality_claim") or NO_SEMANTIC_QUALITY_CLAIM)
+    warnings: list[str] = []
+    if vector_summary.get("generator") == LOCAL_HASH_VECTOR_SOURCE:
+        warnings.append(LOCAL_HASH_DOCUMENT_VECTOR_WARNING)
+    elif quality_claim != PROVIDER_EMBEDDING_QUALITY_CLAIM:
+        warnings.append(UNVERIFIED_DOCUMENT_VECTOR_WARNING)
+    return {
+        "configured": True,
+        "vector_source": vector_summary.get("generator") or vector_summary.get("source"),
+        "quality_claim": quality_claim,
+        "backend_contract": backend_contract,
+        "warnings": warnings,
+    }
+
+
+def _document_vector_backend_contract(vector_summary: dict[str, Any]) -> dict[str, Any]:
+    manifest = vector_summary.get("manifest")
+    if isinstance(manifest, dict) and isinstance(manifest.get("backend_contract"), dict):
+        return dict(manifest["backend_contract"])
+    return {
+        "source": LOCAL_HASH_VECTOR_SOURCE,
+        "provider": None,
+        "model": LOCAL_HASH_VECTOR_SOURCE,
+        "source_model": LOCAL_HASH_VECTOR_SOURCE,
+        "quality_claim": NO_SEMANTIC_QUALITY_CLAIM,
+        "embedder_names": list(vector_summary.get("embedder_names") or []),
+        "dimensions_by_embedder": dict(vector_summary.get("dimensions_by_embedder") or {}),
+    }
+
+
+def _backend_quality_claim(summary: dict[str, Any] | None) -> str:
+    if not isinstance(summary, dict):
+        return NO_SEMANTIC_QUALITY_CLAIM
+    contract = summary.get("backend_contract")
+    if isinstance(contract, dict) and contract.get("quality_claim"):
+        return str(contract["quality_claim"])
+    provider = summary.get("provider") if isinstance(summary.get("provider"), dict) else {}
+    if provider.get("quality_claim"):
+        return str(provider["quality_claim"])
+    if provider.get("provider") and provider.get("provider") != "deterministic_fixture":
+        return PROVIDER_EMBEDDING_QUALITY_CLAIM
+    return NO_SEMANTIC_QUALITY_CLAIM
 
 
 def _documents_with_user_provided_vectors(
