@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 
-FRAME_SELECTION_STRATEGIES = {"none", "representative"}
+FRAME_SELECTION_STRATEGIES = {"none", "representative", "scene-change"}
 DEFAULT_DUPLICATE_DISTANCE_THRESHOLD = 0.025
 DEFAULT_MIN_CONTRAST = 0.015
 DEFAULT_MIN_DETAIL_SCORE = 0.003
+DEFAULT_SCENE_CHANGE_DISTANCE_THRESHOLD = 0.08
 DEFAULT_MIN_TEMPORAL_COVERAGE_RATIO = 0.8
 DEFAULT_MAX_FRAME_FREE_SEGMENT_RATIO = 0.2
+DEFAULT_MAX_FRAME_GAP_WARNING_SECONDS = 60.0
 ANALYSIS_SIZE = 32
 
 
@@ -22,6 +24,7 @@ class FrameSelectionConfig:
     duplicate_distance_threshold: float = DEFAULT_DUPLICATE_DISTANCE_THRESHOLD
     min_contrast: float = DEFAULT_MIN_CONTRAST
     min_detail_score: float = DEFAULT_MIN_DETAIL_SCORE
+    scene_change_distance_threshold: float = DEFAULT_SCENE_CHANGE_DISTANCE_THRESHOLD
 
 
 @dataclass(frozen=True)
@@ -45,18 +48,25 @@ class FrameSignal:
 FrameAnalyzer = Callable[[dict[str, Any]], FrameSignal]
 
 
+def normalize_frame_selection_strategy(strategy: str) -> str:
+    return strategy.strip().lower().replace("_", "-")
+
+
 def summarize_frame_temporal_coverage(
     *,
     frames: list[dict[str, Any]],
     duration_sec: float | None,
     frame_rate: float,
     segments: list[dict[str, Any]] | None = None,
+    timeline_start_sec: float = 0.0,
     min_temporal_coverage_ratio: float = DEFAULT_MIN_TEMPORAL_COVERAGE_RATIO,
     max_frame_free_segment_ratio: float = DEFAULT_MAX_FRAME_FREE_SEGMENT_RATIO,
+    max_temporal_gap_sec: float | None = DEFAULT_MAX_FRAME_GAP_WARNING_SECONDS,
 ) -> dict[str, Any]:
     if frame_rate <= 0:
         raise ValueError("frame_rate must be greater than 0")
 
+    timeline_start = max(0.0, timeline_start_sec)
     timestamps = [
         timestamp
         for timestamp in (_optional_float(frame.get("timestamp")) for frame in frames)
@@ -73,9 +83,19 @@ def summarize_frame_temporal_coverage(
     covered_until = None
     coverage_ratio = None
     if duration_sec is not None and duration_sec > 0 and last_timestamp is not None:
-        covered_until = round(min(duration_sec, last_timestamp + (1 / frame_rate)), 3)
+        timeline_end = timeline_start + duration_sec
+        covered_until = round(
+            max(0.0, min(timeline_end, last_timestamp + (1 / frame_rate)) - timeline_start),
+            3,
+        )
         coverage_ratio = round(min(1.0, covered_until / duration_sec), 4)
 
+    temporal_gap = _temporal_gap_summary(
+        timestamps=timestamps,
+        duration_sec=duration_sec,
+        timeline_start_sec=timeline_start,
+        max_temporal_gap_sec=max_temporal_gap_sec,
+    )
     segment_coverage = summarize_segment_frame_coverage(
         frames=frames,
         segments=segments or [],
@@ -84,6 +104,7 @@ def summarize_frame_temporal_coverage(
     warnings = _coverage_warnings(
         temporal_coverage_ratio=coverage_ratio,
         frame_free_segment_ratio=frame_free_segment_ratio,
+        temporal_gap=temporal_gap,
         min_temporal_coverage_ratio=min_temporal_coverage_ratio,
         max_frame_free_segment_ratio=max_frame_free_segment_ratio,
     )
@@ -93,6 +114,8 @@ def summarize_frame_temporal_coverage(
         "covered_until_sec": covered_until,
         "timestamp_span_sec": timestamp_span,
         "temporal_coverage_ratio": coverage_ratio,
+        "temporal_gap": temporal_gap,
+        "max_temporal_gap_sec": temporal_gap["max_gap_sec"],
         "segment_coverage": segment_coverage,
         "frame_free_segment_ratio": frame_free_segment_ratio,
         "warnings": warnings,
@@ -137,7 +160,7 @@ def select_representative_frames(
     analyzer: FrameAnalyzer | None = None,
 ) -> dict[str, Any]:
     resolved_config = config or FrameSelectionConfig()
-    strategy = resolved_config.strategy.strip().lower()
+    strategy = normalize_frame_selection_strategy(resolved_config.strategy)
     if strategy not in FRAME_SELECTION_STRATEGIES:
         raise ValueError(f"frame_selection must be one of {sorted(FRAME_SELECTION_STRATEGIES)}")
 
@@ -150,7 +173,7 @@ def select_representative_frames(
                 status="disabled",
                 candidate_count=len(frames),
                 selected_count=len(frames),
-                drop_reasons=_empty_drop_reasons(),
+                drop_reasons=_empty_drop_reasons(strategy),
                 signals=[],
                 config=resolved_config,
             ),
@@ -165,7 +188,7 @@ def select_representative_frames(
                 status="selected",
                 candidate_count=0,
                 selected_count=0,
-                drop_reasons=_empty_drop_reasons(),
+                drop_reasons=_empty_drop_reasons(strategy),
                 signals=[],
                 config=resolved_config,
             ),
@@ -183,7 +206,7 @@ def select_representative_frames(
                 status="analysis_failed",
                 candidate_count=len(frames),
                 selected_count=len(frames),
-                drop_reasons=_empty_drop_reasons(),
+                drop_reasons=_empty_drop_reasons(strategy),
                 signals=[],
                 config=resolved_config,
                 error=str(exc),
@@ -194,13 +217,18 @@ def select_representative_frames(
     selected_signals: list[FrameSignal] = []
     dropped_paths: list[str] = []
     dropped_reasons_by_index: dict[int, str] = {}
-    drop_reasons = _empty_drop_reasons()
+    drop_reasons = _empty_drop_reasons(strategy)
 
     for index, (frame, signal) in enumerate(zip(frames, signals, strict=True)):
         nearest_distance = _nearest_distance(signal, selected_signals)
+        previous_selected_distance = (
+            None if not selected_signals else frame_distance(selected_signals[-1], signal)
+        )
         reason = _drop_reason(
+            strategy=strategy,
             signal=signal,
             nearest_selected_distance=nearest_distance,
+            previous_selected_distance=previous_selected_distance,
             config=resolved_config,
         )
         if reason is not None:
@@ -215,8 +243,11 @@ def select_representative_frames(
             _with_selection_metadata(
                 frame=frame,
                 signal=signal,
+                strategy=strategy,
                 rank=len(selected_frames) + 1,
                 nearest_selected_distance=nearest_distance,
+                previous_selected_distance=previous_selected_distance,
+                scene_change_distance_threshold=resolved_config.scene_change_distance_threshold,
             )
         )
         selected_signals.append(signal)
@@ -237,8 +268,11 @@ def select_representative_frames(
             _with_selection_metadata(
                 frame=frames[fallback_index],
                 signal=signals[fallback_index],
+                strategy=strategy,
                 rank=1,
                 nearest_selected_distance=None,
+                previous_selected_distance=None,
+                scene_change_distance_threshold=resolved_config.scene_change_distance_threshold,
                 fallback_kept=True,
             )
         ]
@@ -351,12 +385,21 @@ def frame_distance(left: FrameSignal, right: FrameSignal) -> float:
 
 def _drop_reason(
     *,
+    strategy: str,
     signal: FrameSignal,
     nearest_selected_distance: float | None,
+    previous_selected_distance: float | None,
     config: FrameSelectionConfig,
 ) -> str | None:
     if signal.contrast < config.min_contrast and signal.detail_score < config.min_detail_score:
         return "low_information"
+    if strategy == "scene-change":
+        if (
+            previous_selected_distance is not None
+            and previous_selected_distance < config.scene_change_distance_threshold
+        ):
+            return "below_scene_change_threshold"
+        return None
     if (
         nearest_selected_distance is not None
         and nearest_selected_distance < config.duplicate_distance_threshold
@@ -386,16 +429,24 @@ def _with_selection_metadata(
     *,
     frame: dict[str, Any],
     signal: FrameSignal,
+    strategy: str,
     rank: int,
     nearest_selected_distance: float | None,
+    previous_selected_distance: float | None,
+    scene_change_distance_threshold: float,
     fallback_kept: bool = False,
 ) -> dict[str, Any]:
     payload = dict(frame)
     payload["selection"] = {
-        "strategy": "representative",
+        "strategy": strategy,
         "rank": rank,
         "fallback_kept": fallback_kept,
         "nearest_selected_distance": _round_optional(nearest_selected_distance),
+        "scene_change_distance": _round_optional(previous_selected_distance),
+        "is_scene_change": (
+            previous_selected_distance is None
+            or previous_selected_distance >= scene_change_distance_threshold
+        ),
         **signal.to_manifest(),
     }
     return payload
@@ -427,8 +478,10 @@ def _selection_summary(
             "duplicate_distance": config.duplicate_distance_threshold,
             "min_contrast": config.min_contrast,
             "min_detail_score": config.min_detail_score,
+            "scene_change_distance": config.scene_change_distance_threshold,
         },
         "quality_signals": _quality_summary(signals),
+        "scene_change_signals": _scene_change_summary(signals, config),
         "tradeoff": {
             "frame_reduction_ratio": reduction_ratio,
             "estimated_ocr_cost_reduction_ratio": reduction_ratio,
@@ -465,11 +518,34 @@ def _recall_risk(reduction_ratio: float, *, fallback_kept: bool) -> str:
     return "none"
 
 
-def _empty_drop_reasons() -> dict[str, int]:
+def _scene_change_summary(
+    signals: list[FrameSignal],
+    config: FrameSelectionConfig,
+) -> dict[str, Any]:
+    distances = [
+        frame_distance(previous, current)
+        for previous, current in zip(signals, signals[1:], strict=False)
+    ]
+    threshold = config.scene_change_distance_threshold
     return {
+        "distance_threshold": threshold,
+        "candidate_transition_count": len(distances),
+        "scene_change_candidate_count": sum(1 for distance in distances if distance >= threshold),
+        "distance_mean": (
+            round(sum(distances) / len(distances), 4) if distances else None
+        ),
+        "distance_max": round(max(distances), 4) if distances else None,
+    }
+
+
+def _empty_drop_reasons(strategy: str) -> dict[str, int]:
+    reasons = {
         "near_duplicate": 0,
         "low_information": 0,
     }
+    if strategy == "scene-change":
+        reasons["below_scene_change_threshold"] = 0
+    return reasons
 
 
 def _round_optional(value: float | None) -> float | None:
@@ -480,6 +556,7 @@ def _coverage_warnings(
     *,
     temporal_coverage_ratio: float | None,
     frame_free_segment_ratio: float | None,
+    temporal_gap: dict[str, Any],
     min_temporal_coverage_ratio: float,
     max_frame_free_segment_ratio: float,
 ) -> list[dict[str, Any]]:
@@ -512,7 +589,83 @@ def _coverage_warnings(
                 "message": "Frame sampling leaves too many transcript segments without nearby frames.",
             }
         )
+    max_allowed_gap = temporal_gap.get("max_allowed_gap_sec")
+    gap_violation_count = temporal_gap.get("gap_violation_count")
+    max_gap = temporal_gap.get("max_gap_sec")
+    if max_allowed_gap is not None and gap_violation_count:
+        warnings.append(
+            {
+                "code": "temporal_gap_exceeded",
+                "severity": "warning",
+                "metric": "max_temporal_gap_sec",
+                "value": max_gap,
+                "threshold": max_allowed_gap,
+                "message": "Frame sampling leaves temporal gaps larger than the configured policy.",
+            }
+        )
     return warnings
+
+
+def _temporal_gap_summary(
+    *,
+    timestamps: list[float],
+    duration_sec: float | None,
+    timeline_start_sec: float,
+    max_temporal_gap_sec: float | None,
+) -> dict[str, Any]:
+    max_allowed_gap = _positive_or_none(max_temporal_gap_sec)
+    unique_timestamps = sorted(dict.fromkeys(round(timestamp, 3) for timestamp in timestamps))
+    if duration_sec is not None and duration_sec > 0:
+        timeline_end = timeline_start_sec + duration_sec
+        in_window = [
+            timestamp
+            for timestamp in unique_timestamps
+            if timeline_start_sec <= timestamp <= timeline_end
+        ]
+        points = [round(timeline_start_sec, 3), *in_window, round(timeline_end, 3)]
+    else:
+        points = unique_timestamps
+
+    gaps = [
+        {
+            "start_sec": round(left, 3),
+            "end_sec": round(right, 3),
+            "duration_sec": round(right - left, 3),
+        }
+        for left, right in zip(points, points[1:], strict=False)
+        if right >= left
+    ]
+    largest_gap = max(gaps, key=lambda gap: gap["duration_sec"]) if gaps else None
+    violation_count = (
+        sum(1 for gap in gaps if gap["duration_sec"] > max_allowed_gap)
+        if max_allowed_gap is not None
+        else None
+    )
+    return {
+        "timeline_start_sec": round(timeline_start_sec, 3),
+        "duration_sec": round(duration_sec, 3)
+        if duration_sec is not None and duration_sec > 0
+        else None,
+        "frame_count_with_timestamps": len(unique_timestamps),
+        "gap_count": len(gaps),
+        "max_gap_sec": largest_gap["duration_sec"] if largest_gap else None,
+        "mean_gap_sec": (
+            round(sum(gap["duration_sec"] for gap in gaps) / len(gaps), 3) if gaps else None
+        ),
+        "largest_gap": largest_gap,
+        "max_allowed_gap_sec": max_allowed_gap,
+        "gap_violation_count": violation_count,
+    }
+
+
+def _positive_or_none(value: float | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return None
+    return resolved if resolved > 0 else None
 
 
 def _segment_window(segment: dict[str, Any]) -> tuple[float, float] | None:

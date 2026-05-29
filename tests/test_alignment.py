@@ -42,7 +42,7 @@ def test_align_segments_to_frames_with_overlap_and_margin(tmp_path: Path) -> Non
     assert aligned_rows[0]["frame_refs"] == ["f1", "f2", "f3", "f4"]
     assert aligned_rows[1]["frame_refs"] == ["f5"]
 
-    assert summary["counts"] == {
+    expected_counts = {
         "margin_seconds": 0.5,
         "segments_total": 2,
         "segments_with_frames": 2,
@@ -55,6 +55,10 @@ def test_align_segments_to_frames_with_overlap_and_margin(tmp_path: Path) -> Non
         "available_frame_time_span_sec": 20.69,
         "available_frame_temporal_coverage_ratio": 0.9852,
     }
+    for key, value in expected_counts.items():
+        assert summary["counts"][key] == value
+    assert summary["counts"]["available_frame_max_gap_sec"] == 18.29
+    assert summary["counts"]["warnings"] == []
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["artifacts"]["lecture_segments_aligned"].endswith(
@@ -107,6 +111,9 @@ def test_align_segments_to_frames_with_no_frames(tmp_path: Path) -> None:
     assert summary["counts"]["segments_without_frames"] == 1
     assert summary["counts"]["frame_free_segment_ratio"] == 1.0
     assert summary["counts"]["frame_refs_total"] == 0
+    assert [warning["code"] for warning in summary["counts"]["warnings"]] == [
+        "high_frame_free_segment_ratio"
+    ]
 
 
 def test_align_segments_to_frames_reports_late_frame_backed_segment(tmp_path: Path) -> None:
@@ -135,6 +142,10 @@ def test_align_segments_to_frames_reports_late_frame_backed_segment(tmp_path: Pa
     assert summary["counts"]["segments_with_frames"] == 2
     assert summary["counts"]["frame_free_segment_ratio"] == 0.0
     assert summary["counts"]["available_frame_temporal_coverage_ratio"] == 0.9888
+    assert summary["counts"]["available_frame_max_gap_sec"] == 880.0
+    assert [warning["code"] for warning in summary["counts"]["warnings"]] == [
+        "temporal_gap_exceeded"
+    ]
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

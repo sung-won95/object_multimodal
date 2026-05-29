@@ -89,6 +89,18 @@ def test_uniform_frame_sampling_refills_after_segment_uniform_dedupe() -> None:
     assert timestamps == [0.0, 100.0, 199.0, 299.0]
 
 
+def test_uniform_frame_sampling_can_prioritize_temporal_gap_policy() -> None:
+    timestamps = select_frame_timestamps(
+        duration_sec=300.0,
+        frame_rate=1.0,
+        max_frames=6,
+        frame_sampling="uniform",
+        max_frame_gap_seconds=60.0,
+    )
+
+    assert timestamps == [0.0, 60.0, 120.0, 180.0, 240.0, 299.999]
+
+
 def test_prefix_frame_sampling_keeps_existing_front_loaded_behavior() -> None:
     timestamps = select_frame_timestamps(
         duration_sec=300.0,
@@ -118,6 +130,10 @@ def test_frame_sampling_summary_reports_temporal_coverage() -> None:
     assert summary["covered_until_sec"] == 300.0
     assert summary["timestamp_span_sec"] == 299.0
     assert summary["temporal_coverage_ratio"] == 1.0
+    assert summary["temporal_gap"]["max_gap_sec"] == 299.0
+    assert [warning["code"] for warning in summary["warnings"]] == [
+        "temporal_gap_exceeded"
+    ]
     assert summary["segment_coverage"] == {
         "segment_count": 0,
         "segments_with_frames": 0,
@@ -144,6 +160,7 @@ def test_frame_sampling_summary_reports_late_segment_frame_coverage() -> None:
     )
 
     assert summary["temporal_coverage_ratio"] == 0.9844
+    assert summary["max_temporal_gap_sec"] == 880.0
     assert summary["segment_coverage"] == {
         "segment_count": 2,
         "segments_with_frames": 2,

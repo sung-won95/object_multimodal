@@ -40,6 +40,37 @@ def test_representative_frame_selection_drops_blank_and_duplicate_frames() -> No
     assert result["frames"][0]["selection"]["detail_score"] > 0
 
 
+def test_scene_change_frame_selection_keeps_visual_transitions() -> None:
+    frames = [
+        _frame("title_slide"),
+        _frame("title_slide_hold"),
+        _frame("diagram_slide"),
+    ]
+    checker = bytes([0, 255, 0, 255] * 4)
+    pixels_by_id = {
+        "title_slide": checker,
+        "title_slide_hold": checker,
+        "diagram_slide": bytes([255, 0, 255, 0] * 4),
+    }
+
+    result = select_representative_frames(
+        frames,
+        config=FrameSelectionConfig(
+            strategy="scene-change",
+            scene_change_distance_threshold=0.5,
+        ),
+        analyzer=_pixel_analyzer(pixels_by_id),
+    )
+
+    assert [frame["frame_id"] for frame in result["frames"]] == [
+        "title_slide",
+        "diagram_slide",
+    ]
+    assert result["summary"]["drop_reasons"]["below_scene_change_threshold"] == 1
+    assert result["summary"]["scene_change_signals"]["scene_change_candidate_count"] == 1
+    assert result["frames"][1]["selection"]["is_scene_change"] is True
+
+
 def test_representative_frame_selection_keeps_best_fallback_when_all_frames_drop() -> None:
     frames = [_frame("black"), _frame("gray")]
     pixels_by_id = {
@@ -102,9 +133,11 @@ def test_frame_temporal_coverage_warns_when_cap_leaves_late_segments_empty() -> 
 
     assert summary["temporal_coverage_ratio"] == 0.03
     assert summary["frame_free_segment_ratio"] == 0.5
+    assert summary["temporal_gap"]["max_gap_sec"] == 98.0
     assert [warning["code"] for warning in summary["warnings"]] == [
         "low_temporal_coverage",
         "high_frame_free_segment_ratio",
+        "temporal_gap_exceeded",
     ]
 
 
