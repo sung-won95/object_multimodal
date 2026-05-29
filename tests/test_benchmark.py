@@ -638,7 +638,9 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert any(search[2] == "semantic" for search in client.searches)
     semantic_smoke = json.loads(run.semantic_smoke_path.read_text(encoding="utf-8"))
     assert semantic_smoke["schema_version"] == "semantic-live-smoke-aggregate-v1"
-    assert semantic_smoke["semantic_live_smoke"]["passed"] is True
+    assert semantic_smoke["semantic_live_smoke"]["passed"] is False
+    assert semantic_smoke["semantic_live_smoke"]["quality_claim"] == "none"
+    assert any("provider-backed embedding metadata" in warning for warning in semantic_smoke["warnings"])
     assert semantic_smoke["privacy"]["raw_vectors"] == "excluded"
 
     rows = [
@@ -807,10 +809,16 @@ def test_retrieval_answer_matrix_generates_sanitized_local_hash_query_vectors(
             "dimensions": 3,
             "name_present": False,
             "manifest_ref": None,
+            "provider": None,
+            "source_model": None,
+            "quality_claim": "none",
+            "backend_contract": None,
             "purpose": "local_reproducibility_smoke_fallback",
         }
     semantic_smoke = json.loads(run.semantic_smoke_path.read_text(encoding="utf-8"))
-    assert semantic_smoke["semantic_live_smoke"]["passed"] is True
+    assert semantic_smoke["semantic_live_smoke"]["passed"] is False
+    assert semantic_smoke["counts"]["local_hash_query_vector_count"] == 2
+    assert any("local_hash_v1 vectors" in warning for warning in semantic_smoke["warnings"])
     public_text = "\n".join(
         [
             run.query_results_path.read_text(encoding="utf-8"),

@@ -485,6 +485,9 @@ def test_index_project_segments_applies_hybrid_embedder_profile_and_live_smoke(
         "generated_vector_count": 1,
         "existing_vector_count": 0,
     }
+    assert summary["embedding_backend"]["quality_claim"] == "none"
+    assert summary["embedding_backend"]["backend_contract"]["source"] == "local_hash_v1"
+    assert any("local_hash_v1 document vectors" in warning for warning in summary["warnings"])
     assert summary["settings_snapshot"]["settings"]["embedders"] == settings_call[2]["embedders"]
     add_call = next(call for call in client.calls if call[0] == "add_documents")
     vector = add_call[2][0]["_vectors"]["lecture_embedder"]
@@ -568,6 +571,12 @@ def test_index_project_segments_uses_real_vector_manifest_fail_closed(
         "model": "text-embedding-test",
         "dimensions": 3,
     }
+    assert summary["embedding_backend"]["quality_claim"] == "provider_embedding"
+    assert summary["embedding_backend"]["backend_contract"]["source_model"] == (
+        "text-embedding-test"
+    )
+    assert summary["embedding_backend"]["warnings"] == []
+    assert "warnings" not in summary
 
 
 def test_index_project_segments_vector_manifest_missing_record_fails(
@@ -991,6 +1000,8 @@ def test_index_project_visual_entities_applies_hybrid_embedder_profile(
         "generated_vector_count": 1,
         "existing_vector_count": 0,
     }
+    assert summary["embedding_backend"]["quality_claim"] == "none"
+    assert any("local_hash_v1 document vectors" in warning for warning in summary["warnings"])
 
 
 def test_index_project_visual_entities_can_append_without_reconfiguring_shared_index(

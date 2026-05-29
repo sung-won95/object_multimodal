@@ -18,6 +18,11 @@ from oarag.evaluation.eval import (
     summarize,
 )
 from oarag.core.io import write_json, write_jsonl
+from oarag.embeddings.manifest import (
+    NO_SEMANTIC_QUALITY_CLAIM,
+    PROVIDER_EMBEDDING_QUALITY_CLAIM,
+    embedding_backend_contract,
+)
 from oarag.retrieval.evidence import (
     frame_id,
     read_jsonl,
@@ -33,6 +38,7 @@ from oarag.retrieval.project_query import (
     WINDOW_HIT_SOURCE,
     query_project,
 )
+from oarag.retrieval.vectors import LOCAL_HASH_VECTOR_SOURCE
 from oarag.core.schemas import EduVidQARecord, SearchCandidate
 
 
@@ -46,6 +52,14 @@ DEFAULT_ABLATION_MODES = [
 ]
 MATRIX_SCHEMA_VERSION = "retrieval-answer-ablation-matrix-v1"
 SEMANTIC_SMOKE_SCHEMA_VERSION = "semantic-live-smoke-aggregate-v1"
+LOCAL_HASH_BENCHMARK_WARNING = (
+    "local_hash_v1 vectors are deterministic smoke fallback; benchmark semantic "
+    "quality claims require provider-backed embedding metadata."
+)
+UNDECLARED_BENCHMARK_WARNING = (
+    "Hybrid semantic retrieval ran without provider-backed embedding metadata; "
+    "semantic quality claims are disabled for this benchmark output."
+)
 DEFAULT_MATRIX_VARIANTS = [
     {
         "variant_id": "segment_lexical",
@@ -368,7 +382,23 @@ def _semantic_smoke_payload(
         if isinstance((row.get("config") or {}).get("query_vector"), dict)
         and (row["config"]["query_vector"]).get("configured") is True
     ]
-    ok = bool(hybrid_rows) and (bool(semantic_rows) or bool(query_vector_rows))
+    provider_backed_rows = [
+        row for row in hybrid_rows if _row_has_provider_backed_query_vector(row)
+    ]
+    local_hash_rows = [
+        row
+        for row in query_vector_rows
+        if _row_query_vector_source(row) == LOCAL_HASH_VECTOR_SOURCE
+    ]
+    undeclared_backend_rows = [
+        row for row in hybrid_rows if not _row_has_provider_backed_query_vector(row)
+    ]
+    ok = bool(provider_backed_rows) and bool(semantic_rows)
+    warnings: list[str] = []
+    if local_hash_rows:
+        warnings.append(LOCAL_HASH_BENCHMARK_WARNING)
+    if undeclared_backend_rows:
+        warnings.append(UNDECLARED_BENCHMARK_WARNING)
     return {
         "schema_version": SEMANTIC_SMOKE_SCHEMA_VERSION,
         "run_id": metrics.get("run_id"),
@@ -376,12 +406,19 @@ def _semantic_smoke_payload(
             "ok": ok,
             "passed": ok,
             "method": "retrieval_answer_matrix_aggregate",
+            "provider_backed": bool(provider_backed_rows),
+            "quality_claim": PROVIDER_EMBEDDING_QUALITY_CLAIM
+            if ok
+            else NO_SEMANTIC_QUALITY_CLAIM,
         },
         "counts": {
             "hybrid_variant_count": len([item for item in hybrid_variant_ids if item]),
             "hybrid_query_result_count": len(hybrid_rows),
             "semantic_top_candidate_count": len(semantic_rows),
             "query_vector_configured_count": len(query_vector_rows),
+            "provider_backed_query_vector_count": len(provider_backed_rows),
+            "local_hash_query_vector_count": len(local_hash_rows),
+            "undeclared_backend_query_count": len(undeclared_backend_rows),
             "semantic_channel_query_count": sum(
                 int((row.get("semantic_retrieval") or {}).get("semantic_call_count") or 0)
                 for row in hybrid_rows
@@ -389,6 +426,7 @@ def _semantic_smoke_payload(
             ),
         },
         "hybrid_variant_ids": sorted(item for item in hybrid_variant_ids if item),
+        "warnings": warnings,
         "privacy": {
             "payload": "aggregate_counts_and_variant_ids_only",
             "raw_queries": "excluded",
@@ -1516,10 +1554,17 @@ def _matrix_query_vector_config(
 
     config: dict[str, Any] = {}
     if manifest is not None:
-        config["manifest_path"] = _resolve_matrix_query_vector_manifest_path(
+        manifest_path = _resolve_matrix_query_vector_manifest_path(
             value=manifest,
             base_dir=base_dir,
             project_dir=project_dir,
+        )
+        config["manifest_path"] = manifest_path
+        config.update(
+            _matrix_query_vector_manifest_metadata(
+                manifest_path,
+                vector_name=name,
+            )
         )
     if name is not None:
         config["name"] = name
@@ -1543,6 +1588,49 @@ def _resolve_matrix_query_vector_manifest_path(
     if project_candidate.exists():
         return project_candidate
     return (base_dir / path).resolve()
+
+
+def _matrix_query_vector_manifest_metadata(
+    path: Path,
+    *,
+    vector_name: str | None,
+) -> dict[str, Any]:
+    loaded = _read_json(path)
+    queries = loaded.get("queries")
+    if not isinstance(queries, dict) or not queries:
+        return {}
+    selected_name = vector_name
+    if selected_name is None and len(queries) == 1:
+        selected_name = str(next(iter(queries)))
+    entry = queries.get(selected_name) if selected_name is not None else None
+    if not isinstance(entry, dict):
+        return {}
+    embedder = _optional_str(entry.get("embedder")) or _optional_str(loaded.get("embedder"))
+    dimensions = _optional_int(entry.get("dimensions"))
+    if embedder is not None and dimensions is None:
+        embedders = loaded.get("embedders")
+        if isinstance(embedders, dict):
+            embedder_settings = embedders.get(embedder)
+            if isinstance(embedder_settings, dict):
+                dimensions = _optional_int(embedder_settings.get("dimensions"))
+    provider = loaded.get("provider") if isinstance(loaded.get("provider"), dict) else {}
+    metadata: dict[str, Any] = {
+        "name": selected_name,
+        "backend_contract": embedding_backend_contract(
+            source="query_vector_manifest",
+            provider=provider,
+            embedder_names=[embedder] if embedder else [],
+            dimensions_by_embedder={embedder: dimensions}
+            if embedder is not None
+            else {},
+            vector_count=len(queries),
+        ),
+    }
+    if embedder is not None:
+        metadata["embedder"] = embedder
+    if dimensions is not None:
+        metadata["dimensions"] = dimensions
+    return {key: value for key, value in metadata.items() if value is not None}
 
 
 def _public_matrix_config(
@@ -1575,17 +1663,40 @@ def _public_matrix_config(
 
 def _public_query_vector_config(config: dict[str, Any]) -> dict[str, Any]:
     manifest_path = config.get("manifest_path")
+    backend_contract = (
+        config.get("backend_contract")
+        if isinstance(config.get("backend_contract"), dict)
+        else None
+    )
+    source = (
+        "manifest"
+        if manifest_path is not None
+        else LOCAL_HASH_VECTOR_SOURCE
+        if config.get("dimensions") is not None
+        else None
+    )
+    quality_claim = (
+        backend_contract.get("quality_claim")
+        if backend_contract is not None
+        else NO_SEMANTIC_QUALITY_CLAIM
+        if source == LOCAL_HASH_VECTOR_SOURCE
+        else None
+    )
     return {
         "configured": bool(config),
-        "source": "manifest" if manifest_path is not None else "local_hash_v1"
-        if config.get("dimensions") is not None
-        else None,
+        "source": source,
         "embedder": config.get("embedder"),
         "dimensions": config.get("dimensions"),
         "name_present": config.get("name") is not None,
         "manifest_ref": f"artifact:{_short_hash(str(manifest_path))}"
         if manifest_path is not None
         else None,
+        "provider": backend_contract.get("provider") if backend_contract is not None else None,
+        "source_model": backend_contract.get("source_model")
+        if backend_contract is not None
+        else None,
+        "quality_claim": quality_claim,
+        "backend_contract": backend_contract,
         "purpose": (
             "local_reproducibility_smoke_fallback"
             if config.get("dimensions") is not None and manifest_path is None
@@ -1628,6 +1739,8 @@ def _public_semantic_retrieval(value: Any) -> dict[str, Any]:
     semantic_call_count = 0
     semantic_hit_count = 0
     query_vector_configured_count = 0
+    query_vector_sources: Counter[str] = Counter()
+    query_vector_quality_claims: Counter[str] = Counter()
     for source in ("segment", "window", "visual_entity"):
         metadata = searches.get(source)
         if not isinstance(metadata, dict):
@@ -1647,6 +1760,12 @@ def _public_semantic_retrieval(value: Any) -> dict[str, Any]:
             query_vector = call.get("query_vector")
             if isinstance(query_vector, dict) and query_vector.get("used") is True:
                 query_vector_configured_count += 1
+                query_vector_source = query_vector.get("source")
+                if query_vector_source:
+                    query_vector_sources[str(query_vector_source)] += 1
+                quality_claim = query_vector.get("quality_claim")
+                if quality_claim:
+                    query_vector_quality_claims[str(quality_claim)] += 1
     semantic_channel_executed = semantic_call_count > 0 or any(
         "semantic" in modes for modes in retrieval_modes_by_source.values()
     )
@@ -1656,8 +1775,27 @@ def _public_semantic_retrieval(value: Any) -> dict[str, Any]:
         "semantic_call_count": semantic_call_count,
         "semantic_hit_count": semantic_hit_count,
         "query_vector_configured_count": query_vector_configured_count,
+        "provider_backed_query_vector_count": query_vector_quality_claims.get(
+            PROVIDER_EMBEDDING_QUALITY_CLAIM,
+            0,
+        ),
+        "query_vector_sources": dict(sorted(query_vector_sources.items())),
+        "query_vector_quality_claims": dict(sorted(query_vector_quality_claims.items())),
         "retrieval_modes_by_source": retrieval_modes_by_source,
     }
+
+
+def _row_has_provider_backed_query_vector(row: dict[str, Any]) -> bool:
+    config = row.get("config") if isinstance(row.get("config"), dict) else {}
+    query_vector = config.get("query_vector") if isinstance(config.get("query_vector"), dict) else {}
+    return query_vector.get("quality_claim") == PROVIDER_EMBEDDING_QUALITY_CLAIM
+
+
+def _row_query_vector_source(row: dict[str, Any]) -> str | None:
+    config = row.get("config") if isinstance(row.get("config"), dict) else {}
+    query_vector = config.get("query_vector") if isinstance(config.get("query_vector"), dict) else {}
+    source = query_vector.get("source")
+    return str(source) if source else None
 
 
 def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | None:

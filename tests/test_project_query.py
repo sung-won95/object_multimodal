@@ -1026,7 +1026,9 @@ def test_query_project_userprovided_vector_hits_semantic_channel_without_leaking
         "embedder": "default",
         "dimensions": 3,
         "source": "argument",
+        "quality_claim": "unverified",
     }
+    assert any("provider-backed query embedding metadata" in warning for warning in response["warnings"])
     serialized = json.dumps(response, sort_keys=True)
     assert "0.111111" not in serialized
     assert "0.222222" not in serialized
@@ -1082,6 +1084,7 @@ def test_query_project_generates_local_hash_vector_for_smoke_fallback(
         "purpose": "local_reproducibility_smoke_fallback",
         "quality_claim": "none",
     }
+    assert any("local_hash_v1 query vectors" in warning for warning in response["warnings"])
     serialized = json.dumps(response, sort_keys=True)
     assert "local_reproducibility_smoke_fallback" in serialized
     assert '"vector": [' not in serialized
@@ -1185,15 +1188,20 @@ def test_query_project_loads_userprovided_vector_manifest_for_window_search() ->
 
     assert client.searches[1]["vector"] == [0.98, 0.02, 0.0]
     assert response["bundles"][0]["candidate"]["segment_id"] == "vector_semantic_seg_001"
-    assert response["retrieval_context"]["hybrid_retrieval"]["query_vector"] == {
-        "used": True,
-        "embedder": "default",
-        "dimensions": 3,
-        "source": "manifest",
-        "name": "gradient_direction",
-    }
+    query_vector = response["retrieval_context"]["hybrid_retrieval"]["query_vector"]
+    assert query_vector["used"] is True
+    assert query_vector["embedder"] == "default"
+    assert query_vector["dimensions"] == 3
+    assert query_vector["source"] == "manifest"
+    assert query_vector["name"] == "gradient_direction"
+    assert query_vector["provider"] is None
+    assert query_vector["source_model"] is None
+    assert query_vector["quality_claim"] == "none"
+    assert query_vector["backend_contract"]["dimensions_by_embedder"] == {"default": 3}
+    assert any("provider-backed query embedding metadata" in warning for warning in response["warnings"])
     semantic_call = response["retrieval_context"]["searches"]["window"]["calls"][1]
     assert semantic_call["query_vector"]["dimensions"] == 3
+    assert semantic_call["query_vector"]["quality_claim"] == "none"
     assert "vector" not in semantic_call["query_vector"]
 
 
