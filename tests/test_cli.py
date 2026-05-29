@@ -475,7 +475,7 @@ def test_extract_visual_entities_cli_defaults() -> None:
 
     assert args.project_id == "sample_project"
     assert args.project_dir is None
-    assert args.backend == "auto"
+    assert args.backend == "vlm-first"
     assert args.vlm_jsonl is None
     assert args.vlm_observations is None
     assert args.frames_manifest is None
@@ -528,6 +528,7 @@ def test_extract_visual_entities_cli_help_mentions_vlm_observations(capsys) -> N
     captured = capsys.readouterr()
     assert "vlm-observations" in captured.out
     assert "--vlm-observations" in captured.out
+    assert "baseline/fallback" in captured.out
 
 
 def test_run_vlm_cli_accepts_backend_model_and_options() -> None:
@@ -557,6 +558,36 @@ def test_run_vlm_cli_accepts_backend_model_and_options() -> None:
     assert args.vlm_options == "confidence=0.8,detected_text=Matrix A"
     assert args.vlm_frame_candidates.as_posix() == "manifests/vlm_frame_candidates.jsonl"
     assert args.resume is True
+
+
+def test_run_vlm_cli_accepts_jsonl_and_mock_backend_choices() -> None:
+    jsonl_args = build_parser().parse_args(
+        [
+            "run-vlm",
+            "--project-id",
+            "sample_project",
+            "--vlm-backend",
+            "jsonl",
+            "--vlm-model",
+            "fixture-vlm",
+            "--vlm-options",
+            "jsonl_path=manifests/vlm_backend_fixture.jsonl",
+        ]
+    )
+    mock_args = build_parser().parse_args(
+        [
+            "run-vlm",
+            "--project-id",
+            "sample_project",
+            "--vlm-backend",
+            "mock",
+            "--vlm-model",
+            "fixture-vlm",
+        ]
+    )
+
+    assert jsonl_args.vlm_backend == "jsonl"
+    assert mock_args.vlm_backend == "mock"
 
 
 def test_run_vlm_alignment_cli_accepts_pipeline_options() -> None:

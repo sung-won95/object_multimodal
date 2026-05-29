@@ -60,6 +60,85 @@ def test_extract_visual_entities_stub_writes_empty_jsonl_and_updates_manifest(tm
     assert manifest["visual_entity_extraction"]["raw_visual_entities"] == 0
 
 
+def test_extract_visual_entities_vlm_first_prefers_observations_over_ocr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "vlm_first_project"
+    frame_path = project_dir / "frames" / "frame_000001.jpg"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000001", "frame_path": str(frame_path), "timestamp": 1.0}],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "vlm_visual_observations.jsonl",
+        [
+            {
+                "observation_id": "obs_vlm_first",
+                "project_id": "vlm_first_project",
+                "video_id": "lecture_01",
+                "frame_id": "frame_000001",
+                "timestamp": 1.0,
+                "segment_id": None,
+                "backend": "jsonl",
+                "source_model": "fixture-vlm",
+                "model_version": None,
+                "confidence": 0.9,
+                "status": "success",
+                "observation_type": "diagram",
+                "visual_description": "A VLM-first diagram",
+                "metadata": {"parser_version": "fixture-parser-v1"},
+            }
+        ],
+    )
+    monkeypatch.setattr("oarag.visual_entities.shutil.which", lambda _: "/usr/bin/tesseract")
+
+    summary = extract_visual_entities(project_dir=project_dir)
+    rows = _read_jsonl(project_dir / "manifests" / "visual_entities.jsonl")
+
+    assert summary["requested_backend"] == "vlm-first"
+    assert summary["backend"] == "vlm-observations"
+    assert summary["backend_role"] == "vlm_parser"
+    assert summary["fallback_policy"]["ocr_role"] == "baseline_or_fallback_only"
+    assert rows[0]["parser_version"] == "fixture-parser-v1"
+    assert rows[0]["source"] == "vlm:fixture-vlm"
+
+
+def test_extract_visual_entities_vlm_first_falls_back_to_ocr_when_no_vlm_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "ocr_fallback_project"
+    frame_path = project_dir / "frames" / "frame_000001.jpg"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_000001", "frame_path": str(frame_path), "timestamp": 2.0}],
+    )
+
+    def fake_run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\t"
+                "left\ttop\twidth\theight\tconf\ttext\n"
+                "5\t1\t1\t1\t1\t1\t10\t20\t30\t40\t91.0\tOCR\n"
+            ),
+        )
+
+    monkeypatch.setattr("oarag.visual_entities.shutil.which", lambda _: "/usr/bin/tesseract")
+    monkeypatch.setattr("oarag.visual_entities._run", fake_run)
+
+    summary = extract_visual_entities(project_dir=project_dir)
+    rows = _read_jsonl(project_dir / "manifests" / "visual_entities.jsonl")
+
+    assert summary["requested_backend"] == "vlm-first"
+    assert summary["backend"] == "local-ocr"
+    assert summary["backend_role"] == "ocr_baseline_fallback"
+    assert rows[0]["text"] == "OCR"
+    assert rows[0]["source"] == "ocr:tesseract"
+
+
 def test_extract_visual_entities_rejects_entity_with_mismatched_frame_reference(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -390,6 +469,7 @@ def test_extract_visual_entities_vlm_observations_maps_success_observations(
                 "bbox": {"left": 12, "top": 34, "width": 56, "height": 78},
                 "position": {"region": "center", "x": 0.5, "y": 0.4},
                 "relations": [{"type": "contains", "target": "matrix_label"}],
+                "metadata": {"parser_version": "observation-parser-v2"},
             },
             {
                 "observation_id": "obs_failure",
@@ -440,7 +520,7 @@ def test_extract_visual_entities_vlm_observations_maps_success_observations(
             "visual_description": "A labeled covariance matrix diagram",
             "position": {"region": "center", "x": 0.5, "y": 0.4},
             "relations": [{"type": "contains", "target": "matrix_label"}],
-            "parser_version": "vlm-consistency-v1",
+            "parser_version": "observation-parser-v2",
             "source_model": "offline-vlm",
         }
     ]
@@ -600,3 +680,11 @@ def test_filter_visual_entities_applies_low_confidence_policy_to_ocr_only() -> N
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]

@@ -23,6 +23,8 @@ from oarag.core.schemas import (
 
 
 DEFAULT_VLM_BACKEND = "deterministic"
+MOCK_VLM_BACKEND = "mock"
+JSONL_VLM_BACKEND = "jsonl"
 DEFAULT_VLM_PROMPT_TEMPLATE_VERSION = "vlm-visual-parser-v1"
 VLM_SUCCESS_STATUS = "success"
 VLM_SKIPPED_RESUMED_STATUS = "skipped_resumed"
@@ -35,6 +37,8 @@ VLM_ALLOWED_ROW_STATUSES = {
     VLM_PARSE_FAILURE_STATUS,
 }
 _SENSITIVE_OPTION_PARTS = ("api_key", "apikey", "token", "secret", "password", "credential")
+_CONFIGURED_OPTION_KEYS = {"command", "jsonl_path", "input_path", "path", "input"}
+_JSONL_BACKEND_PATH_OPTION_KEYS = ("jsonl_path", "input_path", "path", "input")
 _COMMAND_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
@@ -203,12 +207,48 @@ class CommandVLMBackend:
         return observations
 
 
+@dataclass
+class JsonlVLMBackend:
+    backend: str = JSONL_VLM_BACKEND
+    _records_by_frame_id: dict[str, list[dict[str, Any]]] = field(
+        init=False, default_factory=dict, repr=False
+    )
+    _loaded_path: Path | None = field(init=False, default=None, repr=False)
+
+    def run(
+        self,
+        *,
+        frames: list[VLMFrameInput],
+        config: VLMRunConfig,
+    ) -> list[VLMVisualObservation]:
+        jsonl_path = _jsonl_backend_path(config.options)
+        if self._loaded_path != jsonl_path:
+            self._records_by_frame_id = _read_vlm_backend_jsonl_records(jsonl_path)
+            self._loaded_path = jsonl_path
+
+        observations: list[VLMVisualObservation] = []
+        for frame in frames:
+            for payload in self._records_by_frame_id.get(frame.frame_id, []):
+                observations.extend(
+                    _observations_from_payload(
+                        payload,
+                        frame=frame,
+                        config=config,
+                        backend=self.backend,
+                        source_label="VLM JSONL backend",
+                    )
+                )
+        return observations
+
+
 BackendFactory = Callable[[], VLMBackend]
 
 
 VLM_BACKEND_REGISTRY: dict[str, BackendFactory] = {
     DEFAULT_VLM_BACKEND: DeterministicVLMBackend,
+    MOCK_VLM_BACKEND: lambda: DeterministicVLMBackend(backend=MOCK_VLM_BACKEND),
     "command": CommandVLMBackend,
+    JSONL_VLM_BACKEND: JsonlVLMBackend,
 }
 
 
@@ -282,11 +322,16 @@ def run_vlm(
     )
 
     runner = make_vlm_backend(backend)
+    resolved_options = _resolve_vlm_backend_options(
+        project_dir=resolved_project_dir,
+        backend=runner.backend,
+        options=dict(options or {}),
+    )
     config = VLMRunConfig(
         backend=runner.backend,
         model=resolved_model,
         device=_optional_str(device),
-        options=dict(options or {}),
+        options=resolved_options,
     )
 
     started_at = time.perf_counter()
@@ -559,10 +604,29 @@ def _observations_from_command_stdout(
             f"VLM command returned invalid JSON for frame_id={frame.frame_id}"
         ) from exc
 
+    return _observations_from_payload(
+        payload,
+        frame=frame,
+        config=config,
+        backend=backend,
+        source_label="VLM command",
+    )
+
+
+def _observations_from_payload(
+    payload: Any,
+    *,
+    frame: VLMFrameInput,
+    config: VLMRunConfig,
+    backend: str,
+    source_label: str,
+) -> list[VLMVisualObservation]:
+    parent = payload if isinstance(payload, dict) else {}
     if isinstance(payload, dict) and isinstance(payload.get("observations"), list):
         raw_observations = payload["observations"]
     elif isinstance(payload, list):
         raw_observations = payload
+        parent = {}
     else:
         raw_observations = [payload]
 
@@ -570,38 +634,57 @@ def _observations_from_command_stdout(
     for index, raw in enumerate(raw_observations, start=1):
         if not isinstance(raw, dict):
             raise VLMParseError(
-                f"VLM command returned non-object observation for {frame.frame_id}"
+                f"{source_label} returned non-object observation for {frame.frame_id}"
             )
-        frame_id = _optional_str(raw.get("frame_id"))
+        frame_id = _optional_str(_inherited_value(raw, parent, "frame_id"))
         if frame_id is not None and frame_id != frame.frame_id:
             raise VLMParseError(
-                f"VLM command frame_id mismatch for {frame.frame_id}: returned {frame_id}"
+                f"{source_label} frame_id mismatch for {frame.frame_id}: returned {frame_id}"
             )
+        raw_metadata = _mapping(raw.get("metadata"))
+        parser_version = _optional_str(
+            raw.get("parser_version", parent.get("parser_version"))
+        ) or _optional_str(raw_metadata.get("parser_version"))
+        if parser_version is not None:
+            raw_metadata["parser_version"] = parser_version
         observations.append(
             VLMVisualObservation(
-                observation_id=_optional_str(raw.get("observation_id"))
+                observation_id=_optional_str(_inherited_value(raw, parent, "observation_id"))
                 or f"obs_{slugify(frame.frame_id)}_{index:04d}",
-                project_id=_optional_str(raw.get("project_id")) or frame.project_id,
-                video_id=_optional_str(raw.get("video_id")) or frame.video_id,
+                project_id=_optional_str(_inherited_value(raw, parent, "project_id"))
+                or frame.project_id,
+                video_id=_optional_str(_inherited_value(raw, parent, "video_id"))
+                or frame.video_id,
                 frame_id=frame.frame_id,
-                timestamp=_optional_float(raw.get("timestamp"))
-                if raw.get("timestamp") is not None
+                timestamp=_optional_float(_inherited_value(raw, parent, "timestamp"))
+                if _inherited_value(raw, parent, "timestamp") is not None
                 else frame.timestamp,
-                segment_id=_optional_str(raw.get("segment_id")) or frame.segment_id,
-                backend=_optional_str(raw.get("backend")) or backend,
-                source_model=_optional_str(raw.get("source_model")) or config.model,
-                model_version=_optional_str(raw.get("model_version")) or config.model_version,
-                confidence=_optional_float(raw.get("confidence")),
-                status=_optional_str(raw.get("status")) or VLM_SUCCESS_STATUS,
-                observation_type=_optional_str(raw.get("observation_type")) or "frame_summary",
-                visual_description=str(raw.get("visual_description") or ""),
-                detected_text=_optional_str(raw.get("detected_text")),
+                segment_id=_optional_str(_inherited_value(raw, parent, "segment_id"))
+                or frame.segment_id,
+                backend=_optional_str(_inherited_value(raw, parent, "backend")) or backend,
+                source_model=_optional_str(_inherited_value(raw, parent, "source_model"))
+                or config.model,
+                model_version=_optional_str(_inherited_value(raw, parent, "model_version"))
+                or config.model_version,
+                confidence=_optional_float(_inherited_value(raw, parent, "confidence")),
+                status=_optional_str(_inherited_value(raw, parent, "status"))
+                or VLM_SUCCESS_STATUS,
+                observation_type=_optional_str(
+                    _inherited_value(raw, parent, "observation_type")
+                )
+                or "frame_summary",
+                visual_description=str(
+                    _inherited_value(raw, parent, "visual_description")
+                    or _inherited_value(raw, parent, "description")
+                    or ""
+                ),
+                detected_text=_optional_str(_inherited_value(raw, parent, "detected_text")),
                 bbox=_float_mapping_or_none(raw.get("bbox")),
                 position=_optional_mapping(raw.get("position")),
                 attributes=_mapping(raw.get("attributes")),
                 relations=_dict_list(raw.get("relations")),
                 metadata={
-                    **_mapping(raw.get("metadata")),
+                    **raw_metadata,
                     "run_id": config.run_id,
                     "backend_options": _public_backend_options(config.options),
                     "prompt_template_version": config.prompt_template_version,
@@ -609,6 +692,10 @@ def _observations_from_command_stdout(
             )
         )
     return observations
+
+
+def _inherited_value(raw: Mapping[str, Any], parent: Mapping[str, Any], key: str) -> Any:
+    return raw[key] if key in raw else parent.get(key)
 
 
 def _validate_success_observation(
@@ -765,6 +852,63 @@ def _command_request_payload(*, frame: VLMFrameInput, config: VLMRunConfig) -> d
     }
 
 
+def _resolve_vlm_backend_options(
+    *,
+    project_dir: Path,
+    backend: str,
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    resolved = dict(options)
+    if backend != JSONL_VLM_BACKEND:
+        return resolved
+
+    for key in _JSONL_BACKEND_PATH_OPTION_KEYS:
+        raw_path = resolved.get(key)
+        path_text = _optional_str(raw_path)
+        if path_text is None:
+            continue
+        resolved["jsonl_path"] = str(
+            _resolve_path(
+                project_dir=project_dir,
+                candidate=Path(path_text),
+                default=project_dir / "manifests" / "vlm_backend_output.jsonl",
+            )
+        )
+        return resolved
+    return resolved
+
+
+def _jsonl_backend_path(options: Mapping[str, Any]) -> Path:
+    for key in _JSONL_BACKEND_PATH_OPTION_KEYS:
+        path_text = _optional_str(options.get(key))
+        if path_text is not None:
+            return Path(path_text).expanduser().resolve()
+    raise ValueError("VLM jsonl backend requires vlm_options.jsonl_path")
+
+
+def _read_vlm_backend_jsonl_records(path: Path) -> dict[str, list[dict[str, Any]]]:
+    records_by_frame_id: dict[str, list[dict[str, Any]]] = {}
+    for payload in _read_jsonl(path, missing_message="VLM JSONL backend input not found"):
+        frame_id = _optional_str(payload.get("frame_id"))
+        if frame_id is not None:
+            records_by_frame_id.setdefault(frame_id, []).append(payload)
+            continue
+
+        observations = payload.get("observations")
+        if not isinstance(observations, list):
+            raise ValueError(f"VLM JSONL backend row is missing frame_id: {path}")
+        for observation in observations:
+            if not isinstance(observation, dict):
+                raise ValueError(f"VLM JSONL backend observation is not an object: {path}")
+            observation_frame_id = _optional_str(observation.get("frame_id"))
+            if observation_frame_id is None:
+                raise ValueError(f"VLM JSONL backend observation is missing frame_id: {path}")
+            scoped_payload = dict(payload)
+            scoped_payload["observations"] = [observation]
+            records_by_frame_id.setdefault(observation_frame_id, []).append(scoped_payload)
+    return records_by_frame_id
+
+
 def _update_project_manifest(
     *,
     manifest_path: Path,
@@ -906,7 +1050,7 @@ def _public_backend_options(options: Mapping[str, Any]) -> dict[str, Any]:
     for key, value in options.items():
         normalized_key = str(key)
         lowered = normalized_key.lower().replace("-", "_")
-        if lowered == "command":
+        if lowered in _CONFIGURED_OPTION_KEYS or lowered.endswith("_path"):
             public[normalized_key] = "<configured>"
         elif any(part in lowered for part in _SENSITIVE_OPTION_PARTS):
             public[normalized_key] = "<redacted>"

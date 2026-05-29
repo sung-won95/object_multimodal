@@ -72,6 +72,86 @@ def test_run_vlm_deterministic_backend_writes_observations_and_manifest(tmp_path
     assert manifest["vlm_consistency"]["settings"]["run_id"].startswith("vlm_")
 
 
+def test_run_vlm_mock_backend_alias_is_dependency_free(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "mock_project"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": "frames/frame_000001.jpg",
+                "timestamp": 1.0,
+            }
+        ],
+    )
+
+    summary = run_vlm(project_dir=project_dir, backend="mock", model="stub-vlm")
+    rows = _read_jsonl(project_dir / "manifests" / "vlm_visual_observations.jsonl")
+
+    assert summary["backend"] == "mock"
+    assert summary["counts"]["vlm_visual_observations"] == 1
+    assert rows[0]["backend"] == "mock"
+    assert rows[0]["source_model"] == "stub-vlm"
+
+
+def test_run_vlm_jsonl_backend_replays_fixture_observations_and_redacts_path(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "jsonl_project"
+    frames_manifest = project_dir / "manifests" / "frames_manifest.jsonl"
+    fixture = project_dir / "manifests" / "vlm_fixture_observations.jsonl"
+    project_manifest = project_dir / "manifests" / "project_manifest.json"
+    _write_jsonl(
+        frames_manifest,
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": "frames/frame_000001.jpg",
+                "timestamp": 1.25,
+            }
+        ],
+    )
+    _write_jsonl(
+        fixture,
+        [
+            {
+                "parser_version": "jsonl-parser-v1",
+                "source_model": "fixture-vlm",
+                "observations": [
+                    {
+                        "frame_id": "frame_000001",
+                        "observation_type": "diagram",
+                        "visual_description": "JSONL fixture diagram",
+                        "detected_text": "fixture label",
+                        "confidence": 0.77,
+                        "position": {"region": "right"},
+                        "relations": [{"type": "points_to", "target": "axis"}],
+                    }
+                ],
+            }
+        ],
+    )
+
+    summary = run_vlm(
+        project_dir=project_dir,
+        backend="jsonl",
+        model="fallback-vlm",
+        options={"jsonl_path": "manifests/vlm_fixture_observations.jsonl"},
+    )
+
+    rows = _read_jsonl(project_dir / "manifests" / "vlm_visual_observations.jsonl")
+    manifest = json.loads(project_manifest.read_text(encoding="utf-8"))
+
+    assert summary["backend"] == "jsonl"
+    assert summary["counts"]["vlm_visual_observations"] == 1
+    assert rows[0]["backend"] == "jsonl"
+    assert rows[0]["source_model"] == "fixture-vlm"
+    assert rows[0]["visual_description"] == "JSONL fixture diagram"
+    assert rows[0]["metadata"]["parser_version"] == "jsonl-parser-v1"
+    assert rows[0]["metadata"]["backend_options"]["jsonl_path"] == "<configured>"
+    assert manifest["vlm_consistency"]["settings"]["options"]["jsonl_path"] == "<configured>"
+
+
 def test_run_vlm_uses_default_frame_candidates_when_present(tmp_path: Path) -> None:
     project_dir = tmp_path / "artifacts" / "projects" / "candidate_project"
     frames_manifest = project_dir / "manifests" / "frames_manifest.jsonl"
@@ -281,6 +361,7 @@ def test_run_vlm_command_backend_accepts_json_stdin_and_records_public_contract(
         "f=req['frame'];"
         "print(json.dumps({'observations':[{'frame_id':f['frame_id'],"
         "'observation_type':'diagram','visual_description':'A VLM parsed chart',"
+        "'parser_version':'command-parser-v1',"
         "'detected_text':'Chart A','confidence':0.91,"
         "'position':{'region':'center'},"
         "'relations':[{'type':'contains','target':'label'}]}]}))"
@@ -306,6 +387,7 @@ def test_run_vlm_command_backend_accepts_json_stdin_and_records_public_contract(
     assert rows[0]["backend"] == "command"
     assert rows[0]["source_model"] == "fixture-vlm"
     assert rows[0]["visual_description"] == "A VLM parsed chart"
+    assert rows[0]["metadata"]["parser_version"] == "command-parser-v1"
     assert rows[0]["metadata"]["prompt_template_version"] == "fixture-template-v2"
     assert rows[0]["metadata"]["backend_options"]["command"] == "<configured>"
     assert rows[0]["metadata"]["backend_options"]["api_key"] == "<redacted>"
