@@ -2,6 +2,9 @@
 
 This folder is the public-safe landing zone for the MIT Deep Learning paper bundle.
 It is intentionally a skeleton until a full local run produces fresh artifacts.
+Until then, use it as a reproducibility plan only. It is not evidence for final
+performance, VLM quality, provider-backed hybrid quality, or aggregate entity-link
+ratio claims.
 
 ## Matrix Contract
 
@@ -76,3 +79,5 @@ stage statuses, and coarse claim/readiness statuses only.
 If this folder still contains only skeleton files after the indexing fix lands, open a
 follow-up issue to execute the full MIT paper bundle locally, replace the completeness
 gate with final paper thresholds, and commit only privacy-checked aggregate artifacts.
+Before opening that follow-up, check `../../paper/current_claim_status.md` so the run
+targets the held claims that are still missing evidence.

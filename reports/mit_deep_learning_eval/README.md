@@ -29,3 +29,14 @@ The default gate in `paper_matrix_v1/retrieval_quality_gate.json` is a completen
 guard for bundle continuity, not a final paper performance threshold. Treat a bundle
 as paper-ready only when the generated registry, readiness audit, claim matrix, and
 robustness intervals all support the intended claim.
+
+## Current Claim Boundary
+
+As of the current repository state, this directory should be read as a public-safe
+runbook and aggregate-report area, not as proof of final MIT paper performance. The
+claim boundary is maintained in `../paper/current_claim_status.md`.
+
+Do not claim provider-backed hybrid retrieval gains, VLM-over-OCR improvements, frame
+coverage improvement, or aggregate timestamp-only link reduction from the skeleton
+files alone. Those claims require a fresh local bundle run and privacy-checked
+aggregate artifacts.

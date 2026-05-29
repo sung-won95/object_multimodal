@@ -159,6 +159,11 @@ PYTHONPATH=src python3 -m oarag query-project \
 
 ## Known Failure Cases
 
+Interpretation update: this is a historical OCR-baseline smoke report. Current
+code has VLM-first extraction, frame-gap coverage warnings, and richer entity-link
+evidence types, but this report should not be rewritten as a performance gain until
+the pilot artifacts are regenerated.
+
 1. `--max-frames 120`와 `1fps` 조합에서는 약 120초 이후 구간이 frame-free가 되기 쉬웠다.
 2. local OCR는 chart/UI-heavy frame에서 token을 과다 추출했고, 의미 없는 partial string이 많았다.
 3. 이번 run의 weak entity linking은 두 프로젝트 모두 `lexical_links=0`, `mention_links=0`이었다.

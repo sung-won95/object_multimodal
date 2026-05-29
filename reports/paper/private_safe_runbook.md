@@ -20,6 +20,10 @@ Use `--seed`, `--sample-count`, and `--confidence-level` when the paper run need
 explicit bootstrap settings. Use `--no-fail-on-gate` only when you need the bundle
 artifacts for inspection after a failing quality gate.
 
+Before using any generated number in paper prose, compare the run output against
+`reports/paper/current_claim_status.md`. That file records which claims are
+currently supported, which are held, and which limitations must stay visible.
+
 The bundle runs these stages in order and records the stage status in
 `paper_bundle_result.json`:
 
@@ -127,6 +131,16 @@ artifact builder.
 The artifact registry links the quality gate, readiness audit, claim matrix, and robustness
 interval status by filename and coarse status. Treat small-sample, missing-baseline, or
 missing-paired-delta caveats as `needs_evidence`, not as a passing robustness claim.
+
+## Claim Interpretation Rules
+
+- `local_hash_v1` vectors are smoke fallback only and must carry `quality_claim: none`.
+- Provider-backed embedding claims require provider/source model metadata in the vector
+  or query-vector manifest and a passing paper bundle registry.
+- OCR-only visual entity outputs are baseline/fallback artifacts. The target method is
+  the VLM-first path, with mock/jsonl/command backends available for reproducible tests.
+- Frame coverage, timestamp-only link ratio, and VLM/OCR comparisons are held claims
+  until regenerated aggregate artifacts demonstrate them for the target suite.
 
 ## Review Gate
 

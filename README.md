@@ -68,6 +68,11 @@ python -m pytest
 
 The pytest configuration adds `src` to the test import path, so `PYTHONPATH=src` is not required for tests.
 
+Current paper-claim status is tracked in
+`reports/paper/current_claim_status.md`. Treat that file as the boundary between
+implementation-readiness claims, smoke/fallback claims, and held paper-performance
+claims.
+
 Run the public-safe RAG readiness suite:
 
 ```bash
@@ -211,8 +216,9 @@ PYTHONPATH=src python -m oarag run-paper-bundle \
 The bundle writes the experiment manifest, quality gate result, metric intervals,
 paper readiness audit, claim matrix, artifact registry, and bundle result in one
 private-safe flow. The registry connects gate, readiness, claims, and robustness
-statuses by artifact filename. See `reports/paper/private_safe_runbook.md` for the
-manual fallback flow.
+statuses by artifact filename. See `reports/paper/current_claim_status.md` before
+turning any bundle output into paper prose, and
+`reports/paper/private_safe_runbook.md` for the manual fallback flow.
 
 ## Private-Safe Lecture Smoke
 
@@ -288,8 +294,13 @@ Frame cap behavior:
 - `--frame-selection none` is the default and keeps all sampled frames.
 - `--frame-selection representative` post-processes sampled frames with domain-agnostic
   image-diff and low-information checks to reduce near-duplicate or blank frames before OCR.
+- `--frame-selection scene-change` keeps frames when adjacent visual signals cross
+  the scene-change distance threshold.
+- `--max-frame-gap-seconds` adds optional temporal-gap policy timestamps before
+  applying the frame cap.
 - `--max-frames 0` disables the cap and samples at `--frame-rate` through the whole video.
-- `project_manifest.json` records `frame_sampling`, including selected frame count, timestamp span, and temporal coverage ratio.
+- `project_manifest.json` records `frame_sampling`, including selected frame count,
+  timestamp span, temporal coverage ratio, max temporal gap, and coverage warnings.
 - `project_manifest.json` also records `frame_selection`, including dropped-frame reasons,
   quality signals, and the estimated OCR cost/recall tradeoff.
 
