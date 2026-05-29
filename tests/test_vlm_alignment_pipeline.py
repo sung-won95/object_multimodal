@@ -87,6 +87,56 @@ def test_run_vlm_alignment_pipeline_generates_all_artifacts(tmp_path: Path) -> N
     )
 
 
+def test_run_vlm_alignment_pipeline_accepts_jsonl_backend_fixture(tmp_path: Path) -> None:
+    project_dir = _make_project(tmp_path)
+    fixture = project_dir / "manifests" / "vlm_backend_fixture.jsonl"
+    _write_jsonl(
+        fixture,
+        [
+            {
+                "frame_id": frame_id,
+                "parser_version": "pipeline-jsonl-parser-v1",
+                "source_model": "fixture-vlm",
+                "observations": [
+                    {
+                        "observation_type": "diagram",
+                        "visual_description": f"Fixture observation for {frame_id}",
+                        "detected_text": "matrix determinant",
+                        "confidence": 0.8,
+                    }
+                ],
+            }
+            for frame_id in ["frame_000000", "frame_000001", "frame_000002"]
+        ],
+    )
+
+    summary = run_vlm_alignment_pipeline(
+        VLMAlignmentPipelineConfig(
+            project_dir=project_dir,
+            vlm_backend="jsonl",
+            vlm_model="fixture-fallback",
+            vlm_options={"jsonl_path": "manifests/vlm_backend_fixture.jsonl"},
+            candidate_config=VLMFrameCandidateConfig(
+                max_candidates=3,
+                max_per_segment=3,
+                min_time_gap_seconds=0.0,
+            ),
+        )
+    )
+
+    observations = _read_jsonl(project_dir / "manifests" / "vlm_visual_observations.jsonl")
+    manifest = json.loads(
+        (project_dir / "manifests" / "project_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["counts"]["vlm_visual_observations"] == 3
+    assert {row["backend"] for row in observations} == {"jsonl"}
+    assert {row["source_model"] for row in observations} == {"fixture-vlm"}
+    assert observations[0]["metadata"]["parser_version"] == "pipeline-jsonl-parser-v1"
+    assert manifest["vlm_consistency"]["settings"]["options"]["jsonl_path"] == "<configured>"
+
+
 def test_run_vlm_alignment_pipeline_resume_reuses_existing_candidates_and_observations(
     tmp_path: Path,
 ) -> None:

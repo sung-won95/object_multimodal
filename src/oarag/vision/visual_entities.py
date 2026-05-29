@@ -16,7 +16,12 @@ from oarag.core.schemas import VLMVisualObservation, VisualEntity, slugify
 OCR_MIN_CONFIDENCE = 0.40
 OCR_SHORT_TEXT_MIN_CONFIDENCE = 0.85
 OCR_SHORT_TEXT_MAX_ALNUM_CHARS = 1
+DEFAULT_VISUAL_ENTITY_BACKEND = "vlm-first"
+VLM_FIRST_BACKEND = "vlm-first"
+AUTO_VISUAL_ENTITY_BACKEND = "auto"
 VLM_OBSERVATIONS_BACKEND = "vlm-observations"
+VLM_JSONL_BACKEND = "vlm-jsonl"
+LOCAL_OCR_BACKEND = "local-ocr"
 VLM_OBSERVATION_SUCCESS_STATUS = "success"
 
 
@@ -213,7 +218,10 @@ class VlmObservationsVisualEntityExtractor:
                     visual_description=visual_description,
                     position=observation.position,
                     relations=observation.relations,
-                    parser_version=observation.schema_version,
+                    parser_version=(
+                        _optional_str(observation.metadata.get("parser_version"))
+                        or observation.schema_version
+                    ),
                     source_model=source_model,
                 )
             )
@@ -227,7 +235,7 @@ class VlmObservationsVisualEntityExtractor:
 def extract_visual_entities(
     *,
     project_dir: Path,
-    backend: str = "auto",
+    backend: str = DEFAULT_VISUAL_ENTITY_BACKEND,
     frames_manifest_path: Path | None = None,
     output_path: Path | None = None,
     manifest_path: Path | None = None,
@@ -258,13 +266,21 @@ def extract_visual_entities(
     frames = _read_frames_manifest(resolved_frames_manifest_path)
     project_id = _project_id_from_manifest_or_dir(resolved_manifest_path, resolved_project_dir)
     normalized_backend = backend.strip().lower()
+    vlm_first_requested = normalized_backend in {
+        VLM_FIRST_BACKEND,
+        AUTO_VISUAL_ENTITY_BACKEND,
+    }
     resolved_vlm_jsonl_path = (
         _resolve_path(
             project_dir=resolved_project_dir,
             candidate=vlm_jsonl_path,
             default=resolved_project_dir / "manifests" / "vlm_parser_output.jsonl",
         )
-        if vlm_jsonl_path is not None
+        if (
+            vlm_jsonl_path is not None
+            or normalized_backend == VLM_JSONL_BACKEND
+            or vlm_first_requested
+        )
         else None
     )
     resolved_vlm_observations_path = (
@@ -273,7 +289,11 @@ def extract_visual_entities(
             candidate=vlm_observations_path,
             default=resolved_project_dir / "manifests" / "vlm_visual_observations.jsonl",
         )
-        if vlm_observations_path is not None or normalized_backend == VLM_OBSERVATIONS_BACKEND
+        if (
+            vlm_observations_path is not None
+            or normalized_backend == VLM_OBSERVATIONS_BACKEND
+            or vlm_first_requested
+        )
         else None
     )
     extractor = make_extractor(
@@ -311,6 +331,7 @@ def extract_visual_entities(
     _update_project_manifest(
         manifest_path=resolved_manifest_path,
         visual_entities_path=resolved_output_path,
+        requested_backend=normalized_backend,
         backend=extractor.backend,
         frames_total=len(frames),
         raw_entities_total=len(raw_entities),
@@ -320,7 +341,10 @@ def extract_visual_entities(
 
     return {
         "project_id": project_id,
+        "requested_backend": normalized_backend,
         "backend": extractor.backend,
+        "backend_role": _visual_entity_backend_role(extractor.backend),
+        "fallback_policy": _visual_entity_fallback_policy(normalized_backend),
         "paths": {
             "project_dir": str(resolved_project_dir),
             "frames_manifest": str(resolved_frames_manifest_path),
@@ -398,7 +422,7 @@ def make_extractor(
     normalized = backend.strip().lower()
     if normalized == "stub":
         return StubVisualEntityExtractor()
-    if normalized == "vlm-jsonl":
+    if normalized == VLM_JSONL_BACKEND:
         if vlm_jsonl_path is None:
             raise ValueError("Backend vlm-jsonl requires --vlm-jsonl")
         return VlmJsonlVisualEntityExtractor(jsonl_path=vlm_jsonl_path)
@@ -406,11 +430,15 @@ def make_extractor(
         if vlm_observations_path is None:
             raise ValueError("Backend vlm-observations requires --vlm-observations")
         return VlmObservationsVisualEntityExtractor(observations_path=vlm_observations_path)
-    if normalized == "local-ocr":
+    if normalized == LOCAL_OCR_BACKEND:
         if shutil.which("tesseract") is None:
             raise RuntimeError("Backend local-ocr requested, but `tesseract` command is not available")
         return TesseractVisualEntityExtractor(language=ocr_language)
-    if normalized == "auto":
+    if normalized in {VLM_FIRST_BACKEND, AUTO_VISUAL_ENTITY_BACKEND}:
+        if vlm_observations_path is not None and vlm_observations_path.exists():
+            return VlmObservationsVisualEntityExtractor(observations_path=vlm_observations_path)
+        if vlm_jsonl_path is not None and vlm_jsonl_path.exists():
+            return VlmJsonlVisualEntityExtractor(jsonl_path=vlm_jsonl_path)
         if shutil.which("tesseract") is not None:
             return TesseractVisualEntityExtractor(language=ocr_language)
         return StubVisualEntityExtractor()
@@ -611,6 +639,7 @@ def _update_project_manifest(
     *,
     manifest_path: Path,
     visual_entities_path: Path,
+    requested_backend: str,
     backend: str,
     frames_total: int,
     raw_entities_total: int,
@@ -637,7 +666,10 @@ def _update_project_manifest(
     counts["visual_entities"] = entities_total
 
     payload["visual_entity_extraction"] = {
+        "requested_backend": requested_backend,
         "backend": backend,
+        "backend_role": _visual_entity_backend_role(backend),
+        "fallback_policy": _visual_entity_fallback_policy(requested_backend),
         "frames_total": frames_total,
         "raw_visual_entities": raw_entities_total,
         "visual_entities": entities_total,
@@ -646,6 +678,32 @@ def _update_project_manifest(
         "filter_policy": filter_summary["policy"],
     }
     write_json(manifest_path, payload)
+
+
+def _visual_entity_backend_role(backend: str) -> str:
+    normalized = backend.strip().lower()
+    if normalized in {VLM_OBSERVATIONS_BACKEND, VLM_JSONL_BACKEND}:
+        return "vlm_parser"
+    if normalized == LOCAL_OCR_BACKEND:
+        return "ocr_baseline_fallback"
+    if normalized == "stub":
+        return "empty_stub"
+    return "custom"
+
+
+def _visual_entity_fallback_policy(requested_backend: str) -> dict[str, Any]:
+    normalized = requested_backend.strip().lower()
+    if normalized in {VLM_FIRST_BACKEND, AUTO_VISUAL_ENTITY_BACKEND}:
+        return {
+            "mode": VLM_FIRST_BACKEND,
+            "order": [VLM_OBSERVATIONS_BACKEND, VLM_JSONL_BACKEND, LOCAL_OCR_BACKEND, "stub"],
+            "ocr_role": "baseline_or_fallback_only",
+        }
+    if normalized == LOCAL_OCR_BACKEND:
+        return {"mode": "ocr_baseline", "order": [LOCAL_OCR_BACKEND]}
+    if normalized in {VLM_OBSERVATIONS_BACKEND, VLM_JSONL_BACKEND}:
+        return {"mode": "vlm_only", "order": [normalized]}
+    return {"mode": normalized, "order": [normalized]}
 
 
 def _resolve_path(*, project_dir: Path, candidate: Path | None, default: Path) -> Path:

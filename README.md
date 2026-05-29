@@ -383,7 +383,7 @@ Extract frame-level visual entities from sampled frames:
 ```bash
 PYTHONPATH=src python -m oarag extract-visual-entities \
   --project-id sample_lecture \
-  --backend auto
+  --backend vlm-first
 ```
 
 Defaults:
@@ -397,10 +397,15 @@ Defaults:
 
 Backends:
 
-- `--backend stub` always emits zero entities (safe test/default fallback).
+- `--backend vlm-first` is the default. It reads VLM observations first, then
+  structured VLM parser JSONL, then falls back to local OCR only when no VLM
+  artifact is available.
+- `--backend auto` is an alias for the same VLM-first fallback order.
+- `--backend stub` always emits zero entities (safe empty test fallback).
 - `--backend local-ocr` uses local `tesseract` command and emits `ocr_text` entities. This is the OCR-only baseline/fallback.
 - `--backend vlm-jsonl` loads deterministic, precomputed VLM/MLLM parser output from JSONL. It does not call an external model.
-- `--backend auto` uses `local-ocr` when `tesseract` is available, otherwise `stub`.
+- `--backend vlm-observations` converts `run-vlm` output from
+  `manifests/vlm_visual_observations.jsonl` into the shared entity schema.
 
 `vlm-jsonl` expects one JSON object per frame with a `frame_id` and an `entities` array. The parser output is validated against the frame manifest and converted into the shared `VisualEntity` schema:
 
@@ -437,6 +442,8 @@ PYTHONPATH=src python -m oarag extract-visual-entities \
 - `relations`
 - `parser_version`
 - `source_model`
+- `confidence`
+- `source`
 
 Visual entity output is filtered before it is written:
 
@@ -469,9 +476,10 @@ PYTHONPATH=src python -m oarag run-vlm-alignment \
   --resume
 ```
 
-The deterministic backend is the safe default for CI and smoke reports. It emits stable
-visual observations without calling an external model, then runs audio-visual
-consistency checks over the aligned transcript windows.
+The deterministic/mock backends are safe defaults for CI and smoke reports. They emit
+stable visual observations without calling an external model. The `command` backend
+shells out to a configured parser, and the `jsonl` backend replays fixture
+observations from `--vlm-options jsonl_path=...`.
 
 Defaults:
 

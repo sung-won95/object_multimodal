@@ -72,8 +72,8 @@ from oarag.retrieval.project_index import (
 )
 from oarag.core.schemas import SearchCandidate
 from oarag.ingestion.stt import DEFAULT_MLX_WHISPER_MODEL
-from oarag.vision.visual_entities import extract_visual_entities
-from oarag.vision.vlm import DEFAULT_VLM_BACKEND, run_vlm
+from oarag.vision.visual_entities import DEFAULT_VISUAL_ENTITY_BACKEND, extract_visual_entities
+from oarag.vision.vlm import DEFAULT_VLM_BACKEND, available_vlm_backends, run_vlm
 from oarag.vision.audio_visual_consistency import AudioVisualConsistencyConfig
 from oarag.vision.vlm_alignment_pipeline import VLMAlignmentPipelineConfig, run_vlm_alignment_pipeline
 from oarag.vision.vlm_frame_candidates import VLMFrameCandidateConfig
@@ -658,26 +658,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     extract_visual = subparsers.add_parser(
         "extract-visual-entities",
-        help="Extract visual entities from sampled frames",
+        help="Build VLM-first visual_entities; OCR is an explicit baseline/fallback.",
     )
     location = extract_visual.add_mutually_exclusive_group(required=True)
     location.add_argument("--project-id", help="Project ID under artifacts/projects/")
     location.add_argument("--project-dir", type=Path, help="Project artifact directory")
     extract_visual.add_argument(
         "--backend",
-        choices=["auto", "stub", "local-ocr", "vlm-jsonl", "vlm-observations"],
-        default="auto",
+        choices=["vlm-first", "auto", "vlm-observations", "vlm-jsonl", "local-ocr", "stub"],
+        default=DEFAULT_VISUAL_ENTITY_BACKEND,
         help=(
-            "auto uses local OCR when available, otherwise stub. vlm-jsonl loads "
-            "structured parser output. vlm-observations loads VLM observation JSONL."
+            "vlm-first/auto prefer VLM observations, then VLM parser JSONL; "
+            "local-ocr is used only as an OCR fallback/baseline, otherwise stub."
         ),
     )
     extract_visual.add_argument(
         "--vlm-jsonl",
         type=Path,
         help=(
-            "Structured VLM parser output JSONL for --backend vlm-jsonl. "
-            "Relative paths are resolved from project dir."
+            "Structured VLM parser output JSONL for --backend vlm-jsonl or "
+            "vlm-first. Defaults to manifests/vlm_parser_output.jsonl when that "
+            "backend is selected. Relative paths resolve from project dir."
         ),
     )
     extract_visual.add_argument(
@@ -705,7 +706,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extract_visual.add_argument(
         "--ocr-language",
-        help="Optional OCR language hint for the local-ocr backend (for example eng or kor).",
+        help=(
+            "Optional OCR language hint for the local-ocr baseline/fallback "
+            "(for example eng or kor)."
+        ),
     )
     extract_visual.set_defaults(func=cmd_extract_visual_entities)
 
@@ -718,8 +722,12 @@ def build_parser() -> argparse.ArgumentParser:
     location.add_argument("--project-dir", type=Path, help="Project artifact directory")
     vlm.add_argument(
         "--vlm-backend",
+        choices=available_vlm_backends(),
         default=DEFAULT_VLM_BACKEND,
-        help="VLM backend to run. Built-in options include deterministic and command.",
+        help=(
+            "VLM parser backend. deterministic/mock are dependency-free, command "
+            "shells out to an external parser, and jsonl replays fixture observations."
+        ),
     )
     vlm.add_argument(
         "--vlm-model",
@@ -729,7 +737,10 @@ def build_parser() -> argparse.ArgumentParser:
     vlm.add_argument("--vlm-device", help="Optional device hint recorded in run metadata.")
     vlm.add_argument(
         "--vlm-options",
-        help="Backend options as a JSON object or comma-separated key=value pairs.",
+        help=(
+            "Backend options as JSON or key=value pairs. command uses command/input_mode; "
+            "jsonl uses jsonl_path."
+        ),
     )
     vlm.add_argument(
         "--frames-manifest",
@@ -1463,8 +1474,12 @@ def add_vlm_alignment_arguments(parser: argparse.ArgumentParser) -> None:
     location.add_argument("--project-dir", type=Path, help="Project artifact directory")
     parser.add_argument(
         "--vlm-backend",
+        choices=available_vlm_backends(),
         default=DEFAULT_VLM_BACKEND,
-        help="VLM backend to run. Built-in options include deterministic and command.",
+        help=(
+            "VLM parser backend. deterministic/mock are dependency-free, command "
+            "shells out to an external parser, and jsonl replays fixture observations."
+        ),
     )
     parser.add_argument(
         "--vlm-model",
@@ -1474,7 +1489,10 @@ def add_vlm_alignment_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--vlm-device", help="Optional device hint recorded in run metadata.")
     parser.add_argument(
         "--vlm-options",
-        help="Backend options as a JSON object or comma-separated key=value pairs.",
+        help=(
+            "Backend options as JSON or key=value pairs. command uses command/input_mode; "
+            "jsonl uses jsonl_path."
+        ),
     )
     parser.add_argument(
         "--max-vlm-frames",
