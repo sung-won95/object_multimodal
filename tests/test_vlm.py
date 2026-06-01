@@ -511,6 +511,48 @@ def test_run_vlm_command_backend_rejects_unknown_placeholder(
     )
 
 
+def test_run_vlm_command_backend_preflight_fails_before_frame_processing(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "preflight_project"
+    output = project_dir / "manifests" / "vlm_visual_observations.jsonl"
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "frame_000001",
+                "frame_path": "frames/frame_000001.jpg",
+                "timestamp": 1.0,
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="preflight failed before frame processing"):
+        run_vlm(
+            project_dir=project_dir,
+            backend="command",
+            model="fixture-vlm",
+            options={
+                "command": [sys.executable, "-c", "raise SystemExit(99)"],
+                "input_mode": "json-stdin",
+                "preflight_command": [
+                    sys.executable,
+                    "-m",
+                    "oarag.vision.vlm_command_adapter",
+                    "--preflight",
+                    "--api-key-env",
+                    "OARAG_TEST_MISSING_VLM_API_KEY_198",
+                    "--fallback-api-key-env",
+                    "OARAG_TEST_MISSING_OPENAI_API_KEY_198",
+                    "--model",
+                    "{model}",
+                ],
+            },
+        )
+
+    assert not output.exists()
+
+
 def test_vlm_backend_errors_are_clear() -> None:
     with pytest.raises(ValueError, match="Unsupported VLM backend"):
         make_vlm_backend("missing-backend")

@@ -1,0 +1,69 @@
+{
+  "schema_version": "real-vlm-command-adapter-preflight-public-v1",
+  "run_id": "issue_198_real_vlm_adapter_preflight",
+  "issue": 198,
+  "date": "2026-06-01",
+  "privacy": {
+    "raw_query_text": "redacted",
+    "transcript_excerpt": "redacted",
+    "local_paths": "redacted",
+    "raw_ids": "redacted",
+    "raw_frames": "not_included",
+    "raw_vlm_responses": "not_included",
+    "secret_values": "not_included"
+  },
+  "adapter": {
+    "module": "oarag.vision.vlm_command_adapter",
+    "script": "scripts/oarag_vlm_command_adapter.py",
+    "stdin_schema": "vlm-command-request-v1",
+    "stdout_shape": "observations",
+    "preflight_supported": true,
+    "endpoint_shape": "OpenAI-compatible chat completions"
+  },
+  "preflight": {
+    "executed": true,
+    "status": "blocked_missing_config",
+    "failed_before_frame_processing": true,
+    "missing": [
+      "OARAG_VLM_API_KEY or OPENAI_API_KEY",
+      "OARAG_VLM_MODEL or request.model"
+    ],
+    "optional_config": [
+      "OARAG_VLM_BASE_URL",
+      "OARAG_VLM_TIMEOUT_SECONDS",
+      "adapter --frame-root for relative frame paths"
+    ]
+  },
+  "real_vlm_run": {
+    "executed": false,
+    "bounded_two_lecture_smoke": false,
+    "max_frames_per_lecture": 12,
+    "candidate_max_per_segment": 1,
+    "candidate_max_per_window": 4,
+    "reason": "Required real VLM credential/model config was not present in the execution environment."
+  },
+  "mock_or_deterministic_output_used_as_evidence": false,
+  "checks": {
+    "adapter_vlm_pytest": {
+      "command": "python3 -m pytest tests/test_vlm_command_adapter.py tests/test_vlm.py tests/test_vlm_alignment_pipeline.py -q",
+      "status": "passed",
+      "passed": 22
+    },
+    "expanded_focused_pytest": {
+      "command": "python3 -m pytest tests/test_vlm_command_adapter.py tests/test_vlm.py tests/test_vlm_alignment_pipeline.py tests/test_visual_entities.py tests/test_evidence_units.py tests/test_evidence_unit_smoke.py tests/test_cli.py -q",
+      "status": "passed",
+      "passed": 97
+    },
+    "full_pytest": {
+      "command": "python3 -m pytest -q",
+      "status": "passed",
+      "passed": 362,
+      "skipped": 4
+    },
+    "run_vlm_help": "passed",
+    "run_vlm_alignment_help": "passed",
+    "extract_visual_entities_help": "passed",
+    "adapter_missing_config_preflight": "passed",
+    "real_environment_preflight": "blocked_missing_config"
+  }
+}
