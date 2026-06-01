@@ -1,0 +1,161 @@
+{
+  "schema_version": "evidence-unit-retrieval-smoke-public-v1",
+  "run_id": "issue_186_mit_evidence_unit_retrieval_smoke",
+  "manifest_ref": "c804f3239e0f",
+  "privacy": {
+    "raw_query_text": "redacted",
+    "transcript_excerpt": "redacted",
+    "semantic_text": "redacted",
+    "local_paths": "redacted",
+    "raw_ids": "hashed_refs",
+    "raw_response_in_public_output": false
+  },
+  "dry_run": false,
+  "meilisearch": {
+    "available": true,
+    "status": "available",
+    "skip_reason": null
+  },
+  "suite_count": 2,
+  "query_count": 4,
+  "query_status_counts": {
+    "queried": 4
+  },
+  "suites": [
+    {
+      "schema_version": "evidence-unit-retrieval-smoke-public-v1",
+      "suite_id": "mit_lec01",
+      "project_ref": "a4d414165b1c",
+      "query_count": 2,
+      "build": {
+        "status": "built",
+        "counts": {
+          "segments_total": 1023,
+          "frames_total": 35,
+          "visual_entities_total": 499,
+          "entity_links_total": 710,
+          "evidence_units_total": 1023
+        },
+        "alignment_status_counts": {
+          "transcript_only": 12,
+          "candidate": 1011
+        },
+        "source_quality_counts": {
+          "units_with_visual_state": 1011,
+          "units_with_visual_entity": 774,
+          "units_with_vlm_entity": 0,
+          "units_with_verified_link": 0
+        },
+        "link_counts": {
+          "candidate_links": 126,
+          "verified_links": 0,
+          "timestamp_fallback_links": 1946
+        },
+        "verified_alignment_note": "timestamp fallback links present, but verified object alignment count is zero"
+      },
+      "meilisearch": {
+        "available": true,
+        "status": "available"
+      },
+      "index": {
+        "ref": "index:28e5b31923e8",
+        "status": "indexed",
+        "indexed_documents": 1023,
+        "indexed_batches": 3,
+        "alignment_status_counts": {
+          "transcript_only": 12,
+          "candidate": 1011
+        },
+        "source_quality_counts": {
+          "has_visual_state": 1011,
+          "has_visual_entity": 774,
+          "has_vlm_entity": 0,
+          "has_verified_link": 0,
+          "has_timestamp_fallback_link": 88
+        },
+        "settings_profile": "evidence_units_default_v1",
+        "settings_hash": "83fe22992f0aac66cf4ff7918bbfd047b25c6c2b549b363fad481bfff5cdb43a"
+      },
+      "rag_input_inspection": {
+        "query_count": 2,
+        "queried_count": 2,
+        "inspectable_top_hit_count": 2,
+        "top_hits_with_visual_state_count": 2,
+        "artifact_evidence_units_total": 1023,
+        "public_note": "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/semantic_text availability flags; text content remains redacted from this report."
+      }
+    },
+    {
+      "schema_version": "evidence-unit-retrieval-smoke-public-v1",
+      "suite_id": "mit_lec04",
+      "project_ref": "6324c4df1af9",
+      "query_count": 2,
+      "build": {
+        "status": "built",
+        "counts": {
+          "segments_total": 1451,
+          "frames_total": 37,
+          "visual_entities_total": 386,
+          "entity_links_total": 800,
+          "evidence_units_total": 1451
+        },
+        "alignment_status_counts": {
+          "transcript_only": 20,
+          "candidate": 1431
+        },
+        "source_quality_counts": {
+          "units_with_visual_state": 1431,
+          "units_with_visual_entity": 831,
+          "units_with_vlm_entity": 0,
+          "units_with_verified_link": 0
+        },
+        "link_counts": {
+          "candidate_links": 144,
+          "verified_links": 0,
+          "timestamp_fallback_links": 2256
+        },
+        "verified_alignment_note": "timestamp fallback links present, but verified object alignment count is zero"
+      },
+      "meilisearch": {
+        "available": true,
+        "status": "available"
+      },
+      "index": {
+        "ref": "index:526158425b4b",
+        "status": "indexed",
+        "indexed_documents": 1451,
+        "indexed_batches": 3,
+        "alignment_status_counts": {
+          "transcript_only": 20,
+          "candidate": 1431
+        },
+        "source_quality_counts": {
+          "has_visual_state": 1431,
+          "has_visual_entity": 831,
+          "has_vlm_entity": 0,
+          "has_verified_link": 0,
+          "has_timestamp_fallback_link": 84
+        },
+        "settings_profile": "evidence_units_default_v1",
+        "settings_hash": "83fe22992f0aac66cf4ff7918bbfd047b25c6c2b549b363fad481bfff5cdb43a"
+      },
+      "rag_input_inspection": {
+        "query_count": 2,
+        "queried_count": 2,
+        "inspectable_top_hit_count": 2,
+        "top_hits_with_visual_state_count": 2,
+        "artifact_evidence_units_total": 1451,
+        "public_note": "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/semantic_text availability flags; text content remains redacted from this report."
+      }
+    }
+  ],
+  "rag_input_inspection": {
+    "query_count": 4,
+    "queried_count": 4,
+    "inspectable_top_hit_count": 4,
+    "top_hits_with_visual_state_count": 4,
+    "artifact_evidence_units_total": null,
+    "public_note": "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/semantic_text availability flags; text content remains redacted from this report."
+  },
+  "object_alignment_note": "timestamp-only overlap is reported as candidate/fallback evidence only; it is not counted as verified object alignment"
+}
