@@ -29,4 +29,3 @@ Timestamp-only overlap is not counted as verified object alignment.
 - index status: `indexed`
 - RAG input inspectable top hits: `2`
 - target rank buckets: `{"not_found": 1, "top10": 1}`
-
