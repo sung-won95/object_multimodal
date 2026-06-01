@@ -62,6 +62,7 @@ class AvailableFakeClient:
                 "processingTimeMs": 1,
             }
         hits = list(self.documents.get(index_uid, []))
+        hits = list(reversed(hits))
         return {"hits": hits[:limit], "processingTimeMs": 2}
 
 
@@ -75,7 +76,11 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     manifest_path = _write_manifest(
         tmp_path,
         project_dir=project_dir,
-        extra_suite={"segment_index": "segment_baseline"},
+        extra_suite={
+            "segment_index": "segment_baseline",
+            "previous_neighbor_count": 0,
+            "next_neighbor_count": 0,
+        },
     )
 
     run = run_evidence_unit_smoke(
@@ -94,7 +99,7 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert suite["build"]["counts"]["evidence_units_total"] == 2
     assert suite["build"]["alignment_status_counts"] == {"candidate": 2}
     assert suite["build"]["link_counts"]["verified_links"] == 0
-    assert suite["build"]["link_counts"]["timestamp_fallback_links"] == 2
+    assert suite["build"]["link_counts"]["timestamp_fallback_links"] == 1
     assert suite["index"]["status"] == "indexed"
     assert suite["rag_input_inspection"]["inspectable_top_hit_count"] == 1
 
@@ -105,10 +110,25 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert rows[0]["status"] == "queried"
     assert rows[0]["top_evidence_unit"]["alignment_status"] == "candidate"
     assert rows[0]["top_evidence_unit"]["source_quality"]["has_verified_link"] is False
-    assert rows[0]["top_evidence_unit"]["source_quality"]["has_timestamp_fallback_link"] is True
-    assert rows[0]["top_hit_memo"]["top_expected_match"] is True
+    assert rows[0]["top_evidence_unit"]["source_quality"]["has_timestamp_fallback_link"] is False
+    assert rows[0]["top_hit_memo"]["top_expected_match"] is False
+    assert rows[0]["target_diagnostics"]["target_configured"] is True
+    assert rows[0]["target_diagnostics"]["target_found_in_top_k"] is True
+    assert rows[0]["target_diagnostics"]["target_rank"] == 2
+    assert rows[0]["target_diagnostics"]["target_rank_bucket"] == "top5"
+    assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_verified_link"] is False
+    assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_timestamp_fallback_link"] is True
+    assert rows[0]["target_diagnostics"]["top_vs_target_quality_delta"]["status"] == "available"
+    assert rows[0]["target_diagnostics"]["top_vs_target_quality_delta"]["same_evidence_unit"] is False
+    assert rows[0]["target_diagnostics"]["top_vs_target_quality_delta"]["verified_alignment_note"].startswith(
+        "has_verified_link only reflects explicit verified links"
+    )
     assert rows[0]["segment_baseline"]["top_hit_memo"]["top_expected_match"] is False
     assert rows[0]["rag_input_inspectable"] is True
+    assert payload["target_rank_diagnostics"]["target_configured_count"] == 1
+    assert payload["target_rank_diagnostics"]["target_found_in_top_k_count"] == 1
+    assert payload["target_rank_diagnostics"]["rank_bucket_counts"] == {"top5": 1}
+    assert suite["target_rank_diagnostics"]["rank_bucket_counts"] == {"top5": 1}
 
     public_text = _public_text(run)
     for sensitive in [
@@ -119,6 +139,7 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
         "SECRET baseline transcript",
         str(project_dir),
         "seg_private_1",
+        "evu_seg_private_1",
         "video_private",
     ]:
         assert sensitive not in public_text
@@ -149,6 +170,7 @@ def test_evidence_unit_smoke_unavailable_path_records_skip_reason(tmp_path: Path
     ]
     assert rows[0]["status"] == "skipped"
     assert rows[0]["segment_baseline"]["status"] == "skipped"
+    assert rows[0]["target_diagnostics"]["target_rank_bucket"] == "not_queried"
     assert "PRIVATE RAW QUERY TEXT" not in _public_text(run)
 
 
