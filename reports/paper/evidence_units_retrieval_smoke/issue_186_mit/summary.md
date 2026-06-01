@@ -27,4 +27,3 @@ Timestamp-only overlap is not counted as verified object alignment.
 - link counts: `{"candidate_links": 144, "timestamp_fallback_links": 2256, "verified_links": 0}`
 - index status: `indexed`
 - RAG input inspectable top hits: `2`
-
