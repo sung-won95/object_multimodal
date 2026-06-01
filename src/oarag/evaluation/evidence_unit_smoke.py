@@ -52,6 +52,7 @@ def run_evidence_unit_smoke(
     output_dir: Path | None = None,
     repo_root: Path | None = None,
     dry_run: bool = False,
+    quality_rerank: bool = False,
 ) -> EvidenceUnitSmokeRun:
     manifest = _read_json(manifest_path)
     base_dir = manifest_path.expanduser().resolve().parent
@@ -86,6 +87,7 @@ def run_evidence_unit_smoke(
             run_id=run_id,
             health=health,
             dry_run=dry_run,
+            quality_rerank=quality_rerank,
         )
         suite_summaries.append(suite_summary)
         query_rows.extend(rows)
@@ -97,6 +99,7 @@ def run_evidence_unit_smoke(
         query_rows=query_rows,
         health=health,
         dry_run=dry_run,
+        quality_rerank=quality_rerank,
     )
     metrics_path = resolved_output_dir / "metrics.json"
     query_results_path = resolved_output_dir / "query_results.jsonl"
@@ -125,6 +128,7 @@ def _run_suite(
     run_id: str,
     health: dict[str, Any],
     dry_run: bool,
+    quality_rerank: bool,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     suite_id = str(suite.get("suite_id") or suite.get("project_id") or "lecture_suite")
     project_dir = _project_dir_from_suite(suite=suite, base_dir=base_dir, repo_root=repo_root)
@@ -137,6 +141,7 @@ def _run_suite(
         field_name="target_rank_limit",
     )
     target_rank_limit = max(limit, target_rank_limit)
+    suite_quality_rerank = bool(suite.get("quality_rerank", quality_rerank))
     queries = _read_queries(base_dir=base_dir, suite=suite)
 
     build_summary = None
@@ -211,6 +216,7 @@ def _run_suite(
                         query_row=query_row,
                         limit=limit,
                         target_rank_limit=target_rank_limit,
+                        quality_rerank=suite_quality_rerank,
                     )
                 )
         except Exception as exc:  # noqa: BLE001 - smoke runner should record skip/failure context.
@@ -244,6 +250,7 @@ def _run_suite(
         },
         "rag_input_inspection": _rag_input_inspection(query_rows, artifact_summary),
         "target_rank_diagnostics": _target_rank_inspection(query_rows),
+        "rerank_diagnostics": _rerank_inspection(query_rows),
     }
     return suite_summary, query_rows
 
@@ -260,6 +267,7 @@ def _query_row(
     query_row: dict[str, Any],
     limit: int,
     target_rank_limit: int,
+    quality_rerank: bool,
 ) -> dict[str, Any]:
     query_id = _query_id(query_row)
     query_text = _query_text(query_row)
@@ -283,6 +291,22 @@ def _query_row(
         candidates=candidates,
         expected_segment_ids=expected_segment_ids,
         search_depth=target_rank_limit,
+    )
+    reranked_candidates = _quality_rerank_candidates(candidates) if quality_rerank else []
+    reranked_top_candidate = reranked_candidates[0] if reranked_candidates else {}
+    reranked_expected_match = (
+        _candidate_matches_expected(reranked_top_candidate, expected_segment_ids)
+        if quality_rerank
+        else None
+    )
+    reranked_target_diagnostics = (
+        _target_diagnostics(
+            candidates=reranked_candidates,
+            expected_segment_ids=expected_segment_ids,
+            search_depth=target_rank_limit,
+        )
+        if quality_rerank
+        else {}
     )
     baseline = _segment_baseline(
         client=client,
@@ -311,6 +335,25 @@ def _query_row(
             target_rank_bucket=str(target_diagnostics.get("target_rank_bucket") or ""),
         ),
         "target_diagnostics": target_diagnostics,
+        "reranked_top_evidence_unit": _public_candidate(reranked_top_candidate) if quality_rerank else None,
+        "reranked_top_hit_memo": (
+            _top_hit_memo(
+                candidate=reranked_top_candidate,
+                expected_match=reranked_expected_match,
+                expected_configured=bool(expected_segment_ids),
+                target_rank_bucket=str(reranked_target_diagnostics.get("target_rank_bucket") or ""),
+            )
+            if quality_rerank
+            else None
+        ),
+        "rerank_diagnostics": _rerank_diagnostics(
+            enabled=quality_rerank,
+            base_top_candidate=top_candidate,
+            reranked_candidates=reranked_candidates,
+            expected_segment_ids=expected_segment_ids,
+            base_target_diagnostics=target_diagnostics,
+            reranked_target_diagnostics=reranked_target_diagnostics,
+        ),
         "segment_baseline": baseline,
         "rag_input_inspectable": _candidate_is_rag_inspectable(top_candidate),
     }
@@ -391,6 +434,10 @@ def _skipped_query_row(
             "target_found_in_top_k": None,
             "target_rank_bucket": "not_queried",
             "target_search_depth": 0,
+        },
+        "rerank_diagnostics": {
+            "enabled": False,
+            "status": "not_queried",
         },
         "segment_baseline": {"status": "skipped", "skip_reason": skip_reason},
         "rag_input_inspectable": False,
@@ -615,6 +662,128 @@ def _candidate_quality_delta(
     }
 
 
+def _quality_rerank_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    scored: list[tuple[float, int, dict[str, Any]]] = []
+    for fallback_rank, candidate in enumerate(candidates, start=1):
+        original_rank = _optional_int(candidate.get("rank")) or fallback_rank
+        breakdown = _quality_rerank_breakdown(candidate, original_rank=original_rank)
+        updated = dict(candidate)
+        updated["quality_rerank"] = {
+            "strategy": "deterministic_quality_v1",
+            "score": breakdown["score"],
+            "original_rank": original_rank,
+            "components": breakdown["components"],
+            "flags": breakdown["flags"],
+            "explanation": (
+                "Deterministic smoke-only quality score from rank/score, text availability, "
+                "visual evidence counts, VLM/verified-link flags, and transcript/timestamp fallback flags."
+            ),
+        }
+        scored.append((float(breakdown["score"]), original_rank, updated))
+
+    reranked: list[dict[str, Any]] = []
+    for new_rank, (_, _, candidate) in enumerate(
+        sorted(scored, key=lambda item: (-item[0], item[1])),
+        start=1,
+    ):
+        updated = dict(candidate)
+        rerank = dict(_mapping(updated.get("quality_rerank")))
+        rerank["reranked_rank"] = new_rank
+        updated["quality_rerank"] = rerank
+        updated["rank"] = new_rank
+        reranked.append(updated)
+    return reranked
+
+
+def _quality_rerank_breakdown(candidate: dict[str, Any], *, original_rank: int) -> dict[str, Any]:
+    source_quality = _mapping(candidate.get("source_quality"))
+    alignment_status = _alignment_status(candidate.get("alignment_status"))
+    visual_state_count = len(_string_list(candidate.get("visual_state_ids")))
+    visual_entity_count = len(_string_list(candidate.get("visual_entity_ids")))
+    candidate_link_count = len(_string_list(candidate.get("candidate_entity_link_ids")))
+    verified_link_count = len(_string_list(candidate.get("verified_entity_link_ids")))
+    evidence_text_available = bool(candidate.get("evidence_text"))
+    semantic_text_available = bool(candidate.get("semantic_text"))
+    meili_score = _optional_float(candidate.get("score"))
+    if meili_score is None:
+        meili_score = _optional_float(candidate.get("_rankingScore"))
+    has_vlm_entity = bool(source_quality.get("has_vlm_entity"))
+    has_verified_link = bool(source_quality.get("has_verified_link")) or verified_link_count > 0
+    has_timestamp_fallback = bool(source_quality.get("has_timestamp_fallback_link"))
+    transcript_only = alignment_status == "transcript_only"
+    components = {
+        "rank_preservation": round(1.0 / max(original_rank, 1), 6),
+        "meili_score": round(max(0.0, min(float(meili_score or 0.0), 1.0)), 6),
+        "evidence_text_available": 0.35 if evidence_text_available else 0.0,
+        "semantic_text_available": 0.25 if semantic_text_available else 0.0,
+        "visual_state_count": round(min(visual_state_count, 3) * 0.18, 6),
+        "visual_entity_count": round(min(visual_entity_count, 10) * 0.06, 6),
+        "candidate_entity_link_count": round(min(candidate_link_count, 5) * 0.04, 6),
+        "vlm_entity_presence": 0.7 if has_vlm_entity else 0.0,
+        "verified_link_presence": 1.0 if has_verified_link else 0.0,
+        "transcript_only_penalty": -0.65 if transcript_only else 0.0,
+        "timestamp_fallback_penalty": -0.15 if has_timestamp_fallback else 0.0,
+    }
+    score = round(sum(float(value) for value in components.values()), 6)
+    return {
+        "score": score,
+        "components": components,
+        "flags": {
+            "has_vlm_entity": has_vlm_entity,
+            "has_verified_link": has_verified_link,
+            "has_timestamp_fallback_link": has_timestamp_fallback,
+            "transcript_only": transcript_only,
+            "evidence_text_available": evidence_text_available,
+            "semantic_text_available": semantic_text_available,
+        },
+    }
+
+
+def _rerank_diagnostics(
+    *,
+    enabled: bool,
+    base_top_candidate: dict[str, Any],
+    reranked_candidates: list[dict[str, Any]],
+    expected_segment_ids: set[str],
+    base_target_diagnostics: dict[str, Any],
+    reranked_target_diagnostics: dict[str, Any],
+) -> dict[str, Any]:
+    if not enabled:
+        return {
+            "enabled": False,
+            "status": "disabled",
+        }
+    reranked_top = reranked_candidates[0] if reranked_candidates else {}
+    rerank = _mapping(reranked_top.get("quality_rerank"))
+    base_top_match = _candidate_matches_expected(base_top_candidate, expected_segment_ids)
+    reranked_top_match = _candidate_matches_expected(reranked_top, expected_segment_ids)
+    return {
+        "enabled": True,
+        "status": "computed",
+        "strategy": "deterministic_quality_v1",
+        "candidate_count": len(reranked_candidates),
+        "base_top_expected_match": base_top_match,
+        "reranked_top_expected_match": reranked_top_match,
+        "top_changed": base_top_candidate.get("evidence_unit_id") != reranked_top.get("evidence_unit_id"),
+        "base_target_rank": base_target_diagnostics.get("target_rank"),
+        "base_target_rank_bucket": base_target_diagnostics.get("target_rank_bucket"),
+        "reranked_target_rank": reranked_target_diagnostics.get("target_rank"),
+        "reranked_target_rank_bucket": reranked_target_diagnostics.get("target_rank_bucket"),
+        "reranked_top": {
+            "ref": _id_ref(_optional_str(reranked_top.get("evidence_unit_id")), prefix="evu"),
+            "original_rank": rerank.get("original_rank"),
+            "reranked_rank": rerank.get("reranked_rank"),
+            "score": rerank.get("score"),
+            "score_components": _mapping(rerank.get("components")),
+            "flags": _mapping(rerank.get("flags")),
+        },
+        "public_note": (
+            "Quality rerank is smoke-only and never uses expected target labels. "
+            "Expected segments are used only for diagnostics after reranking."
+        ),
+    }
+
+
 def _top_hit_memo(
     *,
     candidate: dict[str, Any],
@@ -645,6 +814,7 @@ def _summary_payload(
     query_rows: list[dict[str, Any]],
     health: dict[str, Any],
     dry_run: bool,
+    quality_rerank: bool,
 ) -> dict[str, Any]:
     status_counts = Counter(str(row.get("status") or "unknown") for row in query_rows)
     return {
@@ -664,6 +834,8 @@ def _summary_payload(
         "suites": suites,
         "rag_input_inspection": _rag_input_inspection(query_rows, {}),
         "target_rank_diagnostics": _target_rank_inspection(query_rows),
+        "rerank_diagnostics": _rerank_inspection(query_rows),
+        "quality_rerank_requested": quality_rerank,
         "object_alignment_note": (
             "timestamp-only overlap is reported as candidate/fallback evidence only; "
             "it is not counted as verified object alignment"
@@ -701,6 +873,8 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- index status: `{index.get('status')}`",
                 f"- RAG input inspectable top hits: `{suite.get('rag_input_inspection', {}).get('inspectable_top_hit_count', 0)}`",
                 f"- target rank buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('rank_bucket_counts', {}), sort_keys=True)}`",
+                f"- reranked target rank buckets: `{json.dumps(suite.get('rerank_diagnostics', {}).get('reranked_target_rank_bucket_counts', {}), sort_keys=True)}`",
+                f"- reranked top-hit matches: `{suite.get('rerank_diagnostics', {}).get('reranked_top_match_count', 0)}`",
                 "",
             ]
         )
@@ -766,6 +940,49 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
         "public_note": (
             "Target rank diagnostics use only configured expected segment IDs and "
             "hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
+        ),
+    }
+
+
+def _rerank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    diagnostics = [_mapping(row.get("rerank_diagnostics")) for row in query_rows]
+    enabled = [diag for diag in diagnostics if diag.get("enabled") is True]
+    computed = [diag for diag in enabled if diag.get("status") == "computed"]
+    base_buckets = Counter(
+        str(diag.get("base_target_rank_bucket") or "unknown")
+        for diag in computed
+    )
+    reranked_buckets = Counter(
+        str(diag.get("reranked_target_rank_bucket") or "unknown")
+        for diag in computed
+    )
+    component_presence = Counter()
+    top_changed_count = 0
+    base_top_match_count = 0
+    reranked_top_match_count = 0
+    for diag in computed:
+        if diag.get("top_changed") is True:
+            top_changed_count += 1
+        if diag.get("base_top_expected_match") is True:
+            base_top_match_count += 1
+        if diag.get("reranked_top_expected_match") is True:
+            reranked_top_match_count += 1
+        components = _mapping(_mapping(diag.get("reranked_top")).get("score_components"))
+        for key, value in components.items():
+            if _optional_float(value):
+                component_presence[str(key)] += 1
+    return {
+        "enabled_query_count": len(enabled),
+        "computed_query_count": len(computed),
+        "top_changed_count": top_changed_count,
+        "base_top_match_count": base_top_match_count,
+        "reranked_top_match_count": reranked_top_match_count,
+        "base_target_rank_bucket_counts": dict(base_buckets),
+        "reranked_target_rank_bucket_counts": dict(reranked_buckets),
+        "reranked_top_score_component_presence_counts": dict(component_presence),
+        "public_note": (
+            "Rerank diagnostics compare base and deterministic quality-aware ordering using "
+            "only candidate metadata. Expected targets are evaluation-only labels."
         ),
     }
 

@@ -1270,12 +1270,14 @@ def test_evidence_unit_smoke_cli_accepts_manifest_output_and_dry_run() -> None:
             "--output-dir",
             "reports/evidence_unit_smoke/dev",
             "--dry-run",
+            "--quality-rerank",
         ]
     )
 
     assert str(args.manifest) == "reports/evidence_unit_smoke/manifest.json"
     assert str(args.output_dir) == "reports/evidence_unit_smoke/dev"
     assert args.dry_run is True
+    assert args.quality_rerank is True
 
 
 def test_cmd_evidence_unit_smoke_forwards_inputs(monkeypatch, capsys) -> None:
@@ -1304,6 +1306,7 @@ def test_cmd_evidence_unit_smoke_forwards_inputs(monkeypatch, capsys) -> None:
             "--output-dir",
             "reports/public",
             "--dry-run",
+            "--quality-rerank",
         ]
     )
 
@@ -1313,4 +1316,5 @@ def test_cmd_evidence_unit_smoke_forwards_inputs(monkeypatch, capsys) -> None:
     assert calls["run_kwargs"]["manifest_path"].as_posix() == "manifest.json"
     assert calls["run_kwargs"]["output_dir"].as_posix() == "reports/public"
     assert calls["run_kwargs"]["dry_run"] is True
+    assert calls["run_kwargs"]["quality_rerank"] is True
     assert json.loads(capsys.readouterr().out)["summary"] == "reports/run1/summary.md"

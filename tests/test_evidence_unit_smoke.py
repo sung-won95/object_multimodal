@@ -71,6 +71,70 @@ class UnavailableFakeClient:
         raise OSError("connection refused on localhost:7700")
 
 
+class QualityRerankFakeClient(AvailableFakeClient):
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        if index_uid != "evidence_index":
+            return super().search(index_uid, query, limit=limit, filter=filter, **kwargs)
+        hits = [
+            {
+                "evidence_unit_id": "evu_top_transcript_private",
+                "project_id": "project_private",
+                "video_id": "video_private",
+                "target_segment_id": "seg_private_2",
+                "source_segment_ids": ["seg_private_2"],
+                "start_time": 20.0,
+                "end_time": 22.0,
+                "evidence_text": "SECRET top transcript",
+                "semantic_text": "SECRET top semantic",
+                "visual_state_ids": [],
+                "visual_entity_ids": [],
+                "verified_entity_link_ids": [],
+                "candidate_entity_link_ids": [],
+                "alignment_status": "transcript_only",
+                "source_quality": {
+                    "has_visual_state": False,
+                    "has_visual_entity": False,
+                    "has_vlm_entity": False,
+                    "has_verified_link": False,
+                    "has_timestamp_fallback_link": False,
+                },
+                "_rankingScore": 0.95,
+            },
+            {
+                "evidence_unit_id": "evu_target_visual_private",
+                "project_id": "project_private",
+                "video_id": "video_private",
+                "target_segment_id": "seg_private_1",
+                "source_segment_ids": ["seg_private_1"],
+                "start_time": 10.0,
+                "end_time": 12.0,
+                "evidence_text": "SECRET target transcript",
+                "semantic_text": "SECRET target semantic",
+                "visual_state_ids": ["vstate_private"],
+                "visual_entity_ids": ["entity_private_1", "entity_private_2", "entity_private_3"],
+                "verified_entity_link_ids": [],
+                "candidate_entity_link_ids": ["link_private"],
+                "alignment_status": "candidate",
+                "source_quality": {
+                    "has_visual_state": True,
+                    "has_visual_entity": True,
+                    "has_vlm_entity": True,
+                    "has_verified_link": False,
+                    "has_timestamp_fallback_link": True,
+                },
+                "_rankingScore": 0.55,
+            },
+        ]
+        return {"hits": hits[:limit], "processingTimeMs": 2}
+
+
 def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: Path) -> None:
     project_dir = _write_project(tmp_path)
     manifest_path = _write_manifest(
@@ -145,6 +209,53 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
         assert sensitive not in public_text
     assert "Timestamp-only overlap is not counted" in run.summary_path.read_text(encoding="utf-8")
     assert "redacted" in public_text
+
+
+def test_evidence_unit_smoke_quality_rerank_compares_base_and_reranked(tmp_path: Path) -> None:
+    project_dir = _write_project(tmp_path)
+    manifest_path = _write_manifest(tmp_path, project_dir=project_dir)
+
+    run = run_evidence_unit_smoke(
+        client=QualityRerankFakeClient(),
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "public",
+        repo_root=tmp_path,
+        quality_rerank=True,
+    )
+
+    payload = json.loads(run.metrics_path.read_text(encoding="utf-8"))
+    row = json.loads(run.query_results_path.read_text(encoding="utf-8").splitlines()[0])
+
+    assert row["top_hit_memo"]["top_expected_match"] is False
+    assert row["target_diagnostics"]["target_rank"] == 2
+    assert row["rerank_diagnostics"]["enabled"] is True
+    assert row["rerank_diagnostics"]["strategy"] == "deterministic_quality_v1"
+    assert row["rerank_diagnostics"]["base_top_expected_match"] is False
+    assert row["rerank_diagnostics"]["reranked_top_expected_match"] is True
+    assert row["rerank_diagnostics"]["base_target_rank_bucket"] == "top5"
+    assert row["rerank_diagnostics"]["reranked_target_rank_bucket"] == "top1"
+    assert row["rerank_diagnostics"]["reranked_top"]["original_rank"] == 2
+    components = row["rerank_diagnostics"]["reranked_top"]["score_components"]
+    assert components["vlm_entity_presence"] > 0
+    assert components["verified_link_presence"] == 0
+    assert components["timestamp_fallback_penalty"] < 0
+    assert row["reranked_top_hit_memo"]["top_expected_match"] is True
+    assert row["reranked_top_evidence_unit"]["source_quality"]["has_vlm_entity"] is True
+    assert payload["rerank_diagnostics"]["base_top_match_count"] == 0
+    assert payload["rerank_diagnostics"]["reranked_top_match_count"] == 1
+    assert payload["rerank_diagnostics"]["base_target_rank_bucket_counts"] == {"top5": 1}
+    assert payload["rerank_diagnostics"]["reranked_target_rank_bucket_counts"] == {"top1": 1}
+    assert payload["suites"][0]["rerank_diagnostics"]["top_changed_count"] == 1
+
+    public_text = _public_text(run)
+    for sensitive in [
+        "SECRET top transcript",
+        "SECRET target transcript",
+        "evu_target_visual_private",
+        "seg_private_1",
+        str(project_dir),
+    ]:
+        assert sensitive not in public_text
 
 
 def test_evidence_unit_smoke_unavailable_path_records_skip_reason(tmp_path: Path) -> None:
