@@ -19,6 +19,7 @@ from oarag.retrieval.project_index import index_project_evidence_units, iter_jso
 PUBLIC_SCHEMA_VERSION = "evidence-unit-retrieval-smoke-public-v1"
 DEFAULT_OUTPUT_ROOT = Path("reports") / "paper" / "evidence_units_retrieval_smoke"
 DEFAULT_INDEX_PREFIX = "evidence_units_smoke"
+DEFAULT_TARGET_RANK_LIMIT = 50
 
 
 class EvidenceUnitSmokeClient(Protocol):
@@ -131,6 +132,11 @@ def _run_suite(
     index_uid = str(suite.get("index") or _default_index_uid(run_id, suite_id))
     segment_index_uid = _optional_str(suite.get("segment_index"))
     limit = _positive_int(suite.get("limit", 5), field_name="limit")
+    target_rank_limit = _positive_int(
+        suite.get("target_rank_limit", max(limit, DEFAULT_TARGET_RANK_LIMIT)),
+        field_name="target_rank_limit",
+    )
+    target_rank_limit = max(limit, target_rank_limit)
     queries = _read_queries(base_dir=base_dir, suite=suite)
 
     build_summary = None
@@ -204,6 +210,7 @@ def _run_suite(
                         segment_index_uid=segment_index_uid,
                         query_row=query_row,
                         limit=limit,
+                        target_rank_limit=target_rank_limit,
                     )
                 )
         except Exception as exc:  # noqa: BLE001 - smoke runner should record skip/failure context.
@@ -236,6 +243,7 @@ def _run_suite(
             **index_summary,
         },
         "rag_input_inspection": _rag_input_inspection(query_rows, artifact_summary),
+        "target_rank_diagnostics": _target_rank_inspection(query_rows),
     }
     return suite_summary, query_rows
 
@@ -251,6 +259,7 @@ def _query_row(
     segment_index_uid: str | None,
     query_row: dict[str, Any],
     limit: int,
+    target_rank_limit: int,
 ) -> dict[str, Any]:
     query_id = _query_id(query_row)
     query_text = _query_text(query_row)
@@ -264,12 +273,17 @@ def _query_row(
         index_uid=index_uid,
         project_dir=project_dir,
         query=query_text,
-        limit=limit,
+        limit=target_rank_limit,
         evidence_units=evidence_units,
     )
     candidates = _list_of_dicts(response.get("candidates"))
     top_candidate = candidates[0] if candidates else {}
     expected_match = _candidate_matches_expected(top_candidate, expected_segment_ids)
+    target_diagnostics = _target_diagnostics(
+        candidates=candidates,
+        expected_segment_ids=expected_segment_ids,
+        search_depth=target_rank_limit,
+    )
     baseline = _segment_baseline(
         client=client,
         segment_index_uid=segment_index_uid,
@@ -294,7 +308,9 @@ def _query_row(
             candidate=top_candidate,
             expected_match=expected_match,
             expected_configured=bool(expected_segment_ids),
+            target_rank_bucket=str(target_diagnostics.get("target_rank_bucket") or ""),
         ),
+        "target_diagnostics": target_diagnostics,
         "segment_baseline": baseline,
         "rag_input_inspectable": _candidate_is_rag_inspectable(top_candidate),
     }
@@ -366,6 +382,15 @@ def _skipped_query_row(
             ),
             "top_expected_match": None,
             "public_note": "index/query skipped; no top-hit judgment",
+        },
+        "target_diagnostics": {
+            "target_configured": bool(
+                _optional_str(query_row.get("expected_segment_id"))
+                or _string_list(query_row.get("expected_segment_ids"))
+            ),
+            "target_found_in_top_k": None,
+            "target_rank_bucket": "not_queried",
+            "target_search_depth": 0,
         },
         "segment_baseline": {"status": "skipped", "skip_reason": skip_reason},
         "rag_input_inspectable": False,
@@ -467,16 +492,141 @@ def _public_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _target_diagnostics(
+    *,
+    candidates: list[dict[str, Any]],
+    expected_segment_ids: set[str],
+    search_depth: int,
+) -> dict[str, Any]:
+    if not expected_segment_ids:
+        return {
+            "target_configured": False,
+            "target_found_in_top_k": None,
+            "target_rank_bucket": "not_configured",
+            "target_search_depth": search_depth,
+        }
+    target_candidate = None
+    target_rank = None
+    for rank, candidate in enumerate(candidates, start=1):
+        if _candidate_matches_expected(candidate, expected_segment_ids):
+            target_candidate = candidate
+            target_rank = rank
+            break
+    top_candidate = candidates[0] if candidates else {}
+    found = target_candidate is not None and target_rank is not None
+    return {
+        "target_configured": True,
+        "target_found_in_top_k": found,
+        "target_rank": target_rank,
+        "target_rank_bucket": _target_rank_bucket(target_rank),
+        "target_search_depth": search_depth,
+        "target_evidence_unit_ref": (
+            _id_ref(_optional_str(target_candidate.get("evidence_unit_id")), prefix="evu")
+            if target_candidate
+            else None
+        ),
+        "target_evidence_unit_quality": _candidate_quality_summary(target_candidate or {}),
+        "top_vs_target_quality_delta": _candidate_quality_delta(
+            top_candidate=top_candidate,
+            target_candidate=target_candidate or {},
+        ),
+    }
+
+
+def _target_rank_bucket(rank: int | None) -> str:
+    if rank is None:
+        return "not_found"
+    if rank <= 1:
+        return "top1"
+    if rank <= 5:
+        return "top5"
+    if rank <= 10:
+        return "top10"
+    if rank <= 50:
+        return "top50"
+    return "not_found"
+
+
+def _candidate_quality_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    if not candidate:
+        return {}
+    source_quality = _mapping(candidate.get("source_quality"))
+    return {
+        "alignment_status": _alignment_status(candidate.get("alignment_status")),
+        "visual_state_count": len(_string_list(candidate.get("visual_state_ids"))),
+        "visual_entity_count": len(_string_list(candidate.get("visual_entity_ids"))),
+        "verified_entity_link_count": len(_string_list(candidate.get("verified_entity_link_ids"))),
+        "candidate_entity_link_count": len(_string_list(candidate.get("candidate_entity_link_ids"))),
+        "has_visual_state": bool(source_quality.get("has_visual_state")),
+        "has_visual_entity": bool(source_quality.get("has_visual_entity")),
+        "has_vlm_entity": bool(source_quality.get("has_vlm_entity")),
+        "has_verified_link": bool(source_quality.get("has_verified_link")),
+        "has_timestamp_fallback_link": bool(source_quality.get("has_timestamp_fallback_link")),
+        "rag_fields": {
+            "evidence_text_available": bool(candidate.get("evidence_text")),
+            "semantic_text_available": bool(candidate.get("semantic_text")),
+        },
+    }
+
+
+def _candidate_quality_delta(
+    *,
+    top_candidate: dict[str, Any],
+    target_candidate: dict[str, Any],
+) -> dict[str, Any]:
+    if not top_candidate or not target_candidate:
+        return {"status": "not_available"}
+    top_quality = _candidate_quality_summary(top_candidate)
+    target_quality = _candidate_quality_summary(target_candidate)
+    visual_entity_delta = int(top_quality.get("visual_entity_count") or 0) - int(
+        target_quality.get("visual_entity_count") or 0
+    )
+    visual_state_delta = int(top_quality.get("visual_state_count") or 0) - int(
+        target_quality.get("visual_state_count") or 0
+    )
+    verified_link_delta = int(top_quality.get("verified_entity_link_count") or 0) - int(
+        target_quality.get("verified_entity_link_count") or 0
+    )
+    candidate_link_delta = int(top_quality.get("candidate_entity_link_count") or 0) - int(
+        target_quality.get("candidate_entity_link_count") or 0
+    )
+    return {
+        "status": "available",
+        "same_evidence_unit": top_candidate.get("evidence_unit_id") == target_candidate.get("evidence_unit_id"),
+        "alignment_status_changed": top_quality.get("alignment_status") != target_quality.get("alignment_status"),
+        "top_alignment_status": top_quality.get("alignment_status"),
+        "target_alignment_status": target_quality.get("alignment_status"),
+        "visual_entity_count_delta": visual_entity_delta,
+        "visual_state_count_delta": visual_state_delta,
+        "verified_entity_link_count_delta": verified_link_delta,
+        "candidate_entity_link_count_delta": candidate_link_delta,
+        "top_has_more_visual_entities": visual_entity_delta > 0,
+        "target_has_more_visual_entities": visual_entity_delta < 0,
+        "top_has_verified_link_only": bool(top_quality.get("has_verified_link"))
+        and not bool(target_quality.get("has_verified_link")),
+        "target_has_verified_link_only": bool(target_quality.get("has_verified_link"))
+        and not bool(top_quality.get("has_verified_link")),
+        "timestamp_fallback_flag_changed": bool(top_quality.get("has_timestamp_fallback_link"))
+        != bool(target_quality.get("has_timestamp_fallback_link")),
+        "verified_alignment_note": (
+            "has_verified_link only reflects explicit verified links; timestamp fallback "
+            "is never counted as verified object alignment"
+        ),
+    }
+
+
 def _top_hit_memo(
     *,
     candidate: dict[str, Any],
     expected_match: bool | None,
     expected_configured: bool,
+    target_rank_bucket: str = "",
 ) -> dict[str, Any]:
     public_candidate = _public_candidate(candidate) or {}
     return {
         "expected_target_configured": expected_configured,
         "top_expected_match": expected_match,
+        "target_rank_bucket": target_rank_bucket or "unknown",
         "public_note": _evidence_unit_note(
             expected_match=expected_match,
             alignment_status=str(public_candidate.get("alignment_status") or ""),
@@ -513,6 +663,7 @@ def _summary_payload(
         "query_status_counts": dict(status_counts),
         "suites": suites,
         "rag_input_inspection": _rag_input_inspection(query_rows, {}),
+        "target_rank_diagnostics": _target_rank_inspection(query_rows),
         "object_alignment_note": (
             "timestamp-only overlap is reported as candidate/fallback evidence only; "
             "it is not counted as verified object alignment"
@@ -549,6 +700,7 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- link counts: `{json.dumps(build.get('link_counts', {}), sort_keys=True)}`",
                 f"- index status: `{index.get('status')}`",
                 f"- RAG input inspectable top hits: `{suite.get('rag_input_inspection', {}).get('inspectable_top_hit_count', 0)}`",
+                f"- target rank buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('rank_bucket_counts', {}), sort_keys=True)}`",
                 "",
             ]
         )
@@ -572,6 +724,48 @@ def _rag_input_inspection(query_rows: list[dict[str, Any]], artifact_summary: di
         "public_note": (
             "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/"
             "semantic_text availability flags; text content remains redacted from this report."
+        ),
+    }
+
+
+def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    diagnostics = [_mapping(row.get("target_diagnostics")) for row in query_rows]
+    configured = [diag for diag in diagnostics if diag.get("target_configured") is True]
+    found = [diag for diag in configured if diag.get("target_found_in_top_k") is True]
+    buckets = Counter(
+        str(diag.get("target_rank_bucket") or "unknown")
+        for diag in configured
+    )
+    target_quality = Counter()
+    top_better_counts = Counter()
+    for diag in found:
+        quality = _mapping(diag.get("target_evidence_unit_quality"))
+        if quality.get("has_visual_state") is True:
+            target_quality["has_visual_state"] += 1
+        if quality.get("has_visual_entity") is True:
+            target_quality["has_visual_entity"] += 1
+        if quality.get("has_vlm_entity") is True:
+            target_quality["has_vlm_entity"] += 1
+        if quality.get("has_verified_link") is True:
+            target_quality["has_verified_link"] += 1
+        delta = _mapping(diag.get("top_vs_target_quality_delta"))
+        for key in (
+            "top_has_more_visual_entities",
+            "target_has_more_visual_entities",
+            "top_has_verified_link_only",
+            "target_has_verified_link_only",
+        ):
+            if delta.get(key) is True:
+                top_better_counts[key] += 1
+    return {
+        "target_configured_count": len(configured),
+        "target_found_in_top_k_count": len(found),
+        "rank_bucket_counts": dict(buckets),
+        "found_target_quality_counts": dict(target_quality),
+        "quality_delta_flag_counts": dict(top_better_counts),
+        "public_note": (
+            "Target rank diagnostics use only configured expected segment IDs and "
+            "hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
         ),
     }
 
