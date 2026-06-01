@@ -1,0 +1,865 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Protocol
+
+from oarag.core.config import default_paths
+from oarag.core.io import write_json, write_jsonl
+from oarag.integrations.meili import EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE
+from oarag.retrieval.evidence_unit_index import query_project_evidence_units
+from oarag.retrieval.evidence_units import build_project_evidence_units
+from oarag.retrieval.project_index import index_project_evidence_units, iter_jsonl_documents
+
+
+PUBLIC_SCHEMA_VERSION = "evidence-unit-retrieval-smoke-public-v1"
+DEFAULT_OUTPUT_ROOT = Path("reports") / "paper" / "evidence_units_retrieval_smoke"
+DEFAULT_INDEX_PREFIX = "evidence_units_smoke"
+
+
+class EvidenceUnitSmokeClient(Protocol):
+    def health(self) -> dict[str, Any]: ...
+
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True)
+class EvidenceUnitSmokeRun:
+    run_id: str
+    output_dir: Path
+    metrics_path: Path
+    query_results_path: Path
+    summary_path: Path
+    payload: dict[str, Any]
+
+
+def run_evidence_unit_smoke(
+    *,
+    client: EvidenceUnitSmokeClient,
+    manifest_path: Path,
+    output_dir: Path | None = None,
+    repo_root: Path | None = None,
+    dry_run: bool = False,
+) -> EvidenceUnitSmokeRun:
+    manifest = _read_json(manifest_path)
+    base_dir = manifest_path.expanduser().resolve().parent
+    run_id = str(manifest.get("run_id") or f"evidence_unit_smoke_{int(time.time())}")
+    resolved_repo_root = (repo_root or default_paths().repo_root).expanduser().resolve()
+    resolved_output_dir = _resolve_output_dir(
+        manifest=manifest,
+        output_dir=output_dir,
+        base_dir=base_dir,
+        run_id=run_id,
+    )
+
+    suites = manifest.get("suites") or []
+    if not isinstance(suites, list):
+        raise ValueError("evidence-unit-smoke manifest requires a list under 'suites'")
+
+    health = (
+        {"available": False, "status": "dry_run", "skip_reason": "dry_run_requested"}
+        if dry_run
+        else _meili_health(client)
+    )
+    suite_summaries: list[dict[str, Any]] = []
+    query_rows: list[dict[str, Any]] = []
+    for suite_index, suite in enumerate(suites, start=1):
+        if not isinstance(suite, dict):
+            raise ValueError(f"evidence-unit-smoke suite #{suite_index} must be a JSON object")
+        suite_summary, rows = _run_suite(
+            client=client,
+            suite=suite,
+            base_dir=base_dir,
+            repo_root=resolved_repo_root,
+            run_id=run_id,
+            health=health,
+            dry_run=dry_run,
+        )
+        suite_summaries.append(suite_summary)
+        query_rows.extend(rows)
+
+    payload = _summary_payload(
+        run_id=run_id,
+        manifest_path=manifest_path,
+        suites=suite_summaries,
+        query_rows=query_rows,
+        health=health,
+        dry_run=dry_run,
+    )
+    metrics_path = resolved_output_dir / "metrics.json"
+    query_results_path = resolved_output_dir / "query_results.jsonl"
+    summary_path = resolved_output_dir / "summary.md"
+    write_json(metrics_path, payload)
+    write_jsonl(query_results_path, query_rows)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(_summary_markdown(payload), encoding="utf-8")
+
+    return EvidenceUnitSmokeRun(
+        run_id=run_id,
+        output_dir=resolved_output_dir,
+        metrics_path=metrics_path,
+        query_results_path=query_results_path,
+        summary_path=summary_path,
+        payload=payload,
+    )
+
+
+def _run_suite(
+    *,
+    client: EvidenceUnitSmokeClient,
+    suite: dict[str, Any],
+    base_dir: Path,
+    repo_root: Path,
+    run_id: str,
+    health: dict[str, Any],
+    dry_run: bool,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    suite_id = str(suite.get("suite_id") or suite.get("project_id") or "lecture_suite")
+    project_dir = _project_dir_from_suite(suite=suite, base_dir=base_dir, repo_root=repo_root)
+    evidence_units_path = _optional_path(suite.get("evidence_units"))
+    index_uid = str(suite.get("index") or _default_index_uid(run_id, suite_id))
+    segment_index_uid = _optional_str(suite.get("segment_index"))
+    limit = _positive_int(suite.get("limit", 5), field_name="limit")
+    queries = _read_queries(base_dir=base_dir, suite=suite)
+
+    build_summary = None
+    if not dry_run:
+        build_summary = build_project_evidence_units(
+            project_dir=project_dir,
+            output_path=evidence_units_path,
+            segments=_optional_path(suite.get("segments")),
+            frames_manifest=_optional_path(suite.get("frames_manifest")),
+            visual_entities=_optional_path(suite.get("visual_entities")),
+            entity_links=_optional_path(suite.get("entity_links")),
+            manifest_path=_optional_path(suite.get("project_manifest")),
+            window_seconds=_optional_float(suite.get("window_seconds")),
+            neighbor_count=int(suite.get("neighbor_count", 1)),
+            previous_neighbor_count=_optional_int(suite.get("previous_neighbor_count")),
+            next_neighbor_count=_optional_int(suite.get("next_neighbor_count")),
+            window_before_seconds=_optional_float(suite.get("window_before_seconds")),
+            window_after_seconds=_optional_float(suite.get("window_after_seconds")),
+            state_padding_seconds=float(suite.get("state_padding_seconds", 15.0)),
+        )
+        evidence_units_path = _path_from_build_summary(build_summary)
+
+    artifact_summary = _artifact_summary(
+        project_dir=project_dir,
+        evidence_units=evidence_units_path,
+        build_summary=build_summary,
+        dry_run=dry_run,
+    )
+    index_summary: dict[str, Any]
+    query_rows: list[dict[str, Any]] = []
+    if dry_run:
+        index_summary = {"status": "dry_run", "skip_reason": "dry_run_requested"}
+    elif not health["available"]:
+        index_summary = {
+            "status": "skipped",
+            "skip_reason": health["skip_reason"],
+            "indexed_documents": 0,
+        }
+        query_rows = [
+            _skipped_query_row(
+                run_id=run_id,
+                suite_id=suite_id,
+                query_row=query_row,
+                index_uid=index_uid,
+                segment_index_uid=segment_index_uid,
+                skip_reason=health["skip_reason"],
+            )
+            for query_row in queries
+        ]
+    else:
+        try:
+            raw_index_summary = index_project_evidence_units(
+                client,  # type: ignore[arg-type]
+                index_uid=index_uid,
+                project_dir=project_dir,
+                batch_size=_positive_int(suite.get("batch_size", 500), field_name="batch_size"),
+                reset=bool(suite.get("reset", True)),
+                evidence_units=evidence_units_path,
+                settings_profile=str(suite.get("settings_profile") or EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE),
+            )
+            index_summary = _public_index_summary(raw_index_summary)
+            for query_row in queries:
+                query_rows.append(
+                    _query_row(
+                        client=client,
+                        run_id=run_id,
+                        suite_id=suite_id,
+                        project_dir=project_dir,
+                        evidence_units=evidence_units_path,
+                        index_uid=index_uid,
+                        segment_index_uid=segment_index_uid,
+                        query_row=query_row,
+                        limit=limit,
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 - smoke runner should record skip/failure context.
+            reason = _exception_reason(exc)
+            index_summary = {"status": "failed", "skip_reason": reason, "indexed_documents": 0}
+            query_rows = [
+                _skipped_query_row(
+                    run_id=run_id,
+                    suite_id=suite_id,
+                    query_row=query_row,
+                    index_uid=index_uid,
+                    segment_index_uid=segment_index_uid,
+                    skip_reason=reason,
+                )
+                for query_row in queries
+            ]
+
+    suite_summary = {
+        "schema_version": PUBLIC_SCHEMA_VERSION,
+        "suite_id": suite_id,
+        "project_ref": _short_hash(str(project_dir)),
+        "query_count": len(queries),
+        "build": artifact_summary,
+        "meilisearch": {
+            "available": health["available"],
+            "status": health["status"],
+        },
+        "index": {
+            "ref": _index_ref(index_uid),
+            **index_summary,
+        },
+        "rag_input_inspection": _rag_input_inspection(query_rows, artifact_summary),
+    }
+    return suite_summary, query_rows
+
+
+def _query_row(
+    *,
+    client: EvidenceUnitSmokeClient,
+    run_id: str,
+    suite_id: str,
+    project_dir: Path,
+    evidence_units: Path | None,
+    index_uid: str,
+    segment_index_uid: str | None,
+    query_row: dict[str, Any],
+    limit: int,
+) -> dict[str, Any]:
+    query_id = _query_id(query_row)
+    query_text = _query_text(query_row)
+    expected_segment_ids = set(_string_list(query_row.get("expected_segment_ids")))
+    expected_segment_id = _optional_str(query_row.get("expected_segment_id"))
+    if expected_segment_id:
+        expected_segment_ids.add(expected_segment_id)
+
+    response = query_project_evidence_units(
+        client=client,  # type: ignore[arg-type]
+        index_uid=index_uid,
+        project_dir=project_dir,
+        query=query_text,
+        limit=limit,
+        evidence_units=evidence_units,
+    )
+    candidates = _list_of_dicts(response.get("candidates"))
+    top_candidate = candidates[0] if candidates else {}
+    expected_match = _candidate_matches_expected(top_candidate, expected_segment_ids)
+    baseline = _segment_baseline(
+        client=client,
+        segment_index_uid=segment_index_uid,
+        query_text=query_text,
+        limit=limit,
+        expected_segment_ids=expected_segment_ids,
+    )
+    return {
+        "schema_version": PUBLIC_SCHEMA_VERSION,
+        "run_id": run_id,
+        "suite_id": suite_id,
+        "query_id": query_id,
+        "query_label": _optional_public_label(query_row),
+        "privacy": _privacy_policy(),
+        "index_ref": _index_ref(index_uid),
+        "segment_baseline_index_ref": _index_ref(segment_index_uid) if segment_index_uid else None,
+        "status": "queried",
+        "search_hit_count": len(candidates),
+        "processing_time_ms": _optional_float(response.get("processing_time_ms")),
+        "top_evidence_unit": _public_candidate(top_candidate),
+        "top_hit_memo": _top_hit_memo(
+            candidate=top_candidate,
+            expected_match=expected_match,
+            expected_configured=bool(expected_segment_ids),
+        ),
+        "segment_baseline": baseline,
+        "rag_input_inspectable": _candidate_is_rag_inspectable(top_candidate),
+    }
+
+
+def _segment_baseline(
+    *,
+    client: EvidenceUnitSmokeClient,
+    segment_index_uid: str | None,
+    query_text: str,
+    limit: int,
+    expected_segment_ids: set[str],
+) -> dict[str, Any]:
+    if not segment_index_uid:
+        return {"status": "not_configured"}
+    try:
+        response = client.search(segment_index_uid, query_text, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "failed", "skip_reason": _exception_reason(exc)}
+    hits = _list_of_dicts(response.get("hits"))
+    top_hit = hits[0] if hits else {}
+    top_segment_id = _optional_str(top_hit.get("segment_id") or top_hit.get("sample_id"))
+    expected_match = top_segment_id in expected_segment_ids if expected_segment_ids else None
+    return {
+        "status": "queried",
+        "search_hit_count": len(hits),
+        "top_candidate": {
+            "ref": _id_ref(top_segment_id, prefix="seg"),
+            "timestamp_available": _optional_float(
+                top_hit.get("timestamp_center") or top_hit.get("start_time")
+            )
+            is not None,
+            "score_available": _optional_float(top_hit.get("_rankingScore")) is not None,
+        },
+        "top_hit_memo": {
+            "expected_target_configured": bool(expected_segment_ids),
+            "top_expected_match": expected_match,
+            "public_note": _baseline_note(expected_match),
+        },
+    }
+
+
+def _skipped_query_row(
+    *,
+    run_id: str,
+    suite_id: str,
+    query_row: dict[str, Any],
+    index_uid: str,
+    segment_index_uid: str | None,
+    skip_reason: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": PUBLIC_SCHEMA_VERSION,
+        "run_id": run_id,
+        "suite_id": suite_id,
+        "query_id": _query_id(query_row),
+        "query_label": _optional_public_label(query_row),
+        "privacy": _privacy_policy(),
+        "index_ref": _index_ref(index_uid),
+        "segment_baseline_index_ref": _index_ref(segment_index_uid) if segment_index_uid else None,
+        "status": "skipped",
+        "skip_reason": skip_reason,
+        "search_hit_count": 0,
+        "top_evidence_unit": None,
+        "top_hit_memo": {
+            "expected_target_configured": bool(
+                _optional_str(query_row.get("expected_segment_id"))
+                or _string_list(query_row.get("expected_segment_ids"))
+            ),
+            "top_expected_match": None,
+            "public_note": "index/query skipped; no top-hit judgment",
+        },
+        "segment_baseline": {"status": "skipped", "skip_reason": skip_reason},
+        "rag_input_inspectable": False,
+    }
+
+
+def _artifact_summary(
+    *,
+    project_dir: Path,
+    evidence_units: Path | None,
+    build_summary: dict[str, Any] | None,
+    dry_run: bool,
+) -> dict[str, Any]:
+    if dry_run:
+        return {
+            "status": "dry_run",
+            "counts": {},
+            "alignment_status_counts": {},
+            "source_quality_counts": {},
+            "link_counts": {},
+        }
+    if build_summary is not None:
+        counts = _mapping(build_summary.get("counts"))
+        return {
+            "status": "built",
+            "counts": _public_build_counts(counts),
+            "alignment_status_counts": _mapping(build_summary.get("alignment_status_counts")),
+            "source_quality_counts": {
+                "units_with_visual_state": int(counts.get("units_with_visual_state") or 0),
+                "units_with_visual_entity": int(counts.get("units_with_visual_entity") or 0),
+                "units_with_vlm_entity": int(counts.get("units_with_vlm_entity") or 0),
+                "units_with_verified_link": int(counts.get("units_with_verified_link") or 0),
+            },
+            "link_counts": {
+                "candidate_links": int(counts.get("candidate_links") or 0),
+                "verified_links": int(counts.get("verified_links") or 0),
+                "timestamp_fallback_links": int(counts.get("timestamp_fallback_links") or 0),
+            },
+            "verified_alignment_note": _verified_alignment_note(counts),
+        }
+
+    rows = _evidence_unit_rows(project_dir=project_dir, evidence_units=evidence_units)
+    counts = Counter()
+    source_quality = Counter()
+    for row in rows:
+        counts[str(row.get("alignment_status") or "unknown")] += 1
+        quality = _mapping(row.get("source_quality"))
+        for key in ("has_visual_state", "has_visual_entity", "has_vlm_entity", "has_verified_link"):
+            if quality.get(key) is True:
+                source_quality[key] += 1
+        source_quality["candidate_links"] += int(quality.get("candidate_link_count") or 0)
+        source_quality["verified_links"] += int(quality.get("verified_link_count") or 0)
+        source_quality["timestamp_fallback_links"] += int(quality.get("timestamp_fallback_link_count") or 0)
+    return {
+        "status": "loaded_existing",
+        "counts": {"evidence_units_total": len(rows)},
+        "alignment_status_counts": dict(counts),
+        "source_quality_counts": {
+            "units_with_visual_state": source_quality["has_visual_state"],
+            "units_with_visual_entity": source_quality["has_visual_entity"],
+            "units_with_vlm_entity": source_quality["has_vlm_entity"],
+            "units_with_verified_link": source_quality["has_verified_link"],
+        },
+        "link_counts": {
+            "candidate_links": source_quality["candidate_links"],
+            "verified_links": source_quality["verified_links"],
+            "timestamp_fallback_links": source_quality["timestamp_fallback_links"],
+        },
+        "verified_alignment_note": _verified_alignment_note(source_quality),
+    }
+
+
+def _public_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    if not candidate:
+        return None
+    source_quality = _mapping(candidate.get("source_quality"))
+    return {
+        "rank": candidate.get("rank"),
+        "ref": _id_ref(_optional_str(candidate.get("evidence_unit_id")), prefix="evu"),
+        "target_ref": _id_ref(_optional_str(candidate.get("target_segment_id")), prefix="seg"),
+        "source_segment_ref_count": len(_string_list(candidate.get("source_segment_ids"))),
+        "timestamp_available": _optional_float(candidate.get("start_time")) is not None,
+        "visual_state_count": len(_string_list(candidate.get("visual_state_ids"))),
+        "visual_entity_count": len(_string_list(candidate.get("visual_entity_ids"))),
+        "verified_entity_link_count": len(_string_list(candidate.get("verified_entity_link_ids"))),
+        "candidate_entity_link_count": len(_string_list(candidate.get("candidate_entity_link_ids"))),
+        "alignment_status": _alignment_status(candidate.get("alignment_status")),
+        "source_quality": {
+            "has_visual_state": bool(source_quality.get("has_visual_state")),
+            "has_visual_entity": bool(source_quality.get("has_visual_entity")),
+            "has_vlm_entity": bool(source_quality.get("has_vlm_entity")),
+            "has_verified_link": bool(source_quality.get("has_verified_link")),
+            "has_timestamp_fallback_link": bool(source_quality.get("has_timestamp_fallback_link")),
+        },
+        "rag_fields": {
+            "evidence_text_available": bool(candidate.get("evidence_text")),
+            "semantic_text_available": bool(candidate.get("semantic_text")),
+        },
+    }
+
+
+def _top_hit_memo(
+    *,
+    candidate: dict[str, Any],
+    expected_match: bool | None,
+    expected_configured: bool,
+) -> dict[str, Any]:
+    public_candidate = _public_candidate(candidate) or {}
+    return {
+        "expected_target_configured": expected_configured,
+        "top_expected_match": expected_match,
+        "public_note": _evidence_unit_note(
+            expected_match=expected_match,
+            alignment_status=str(public_candidate.get("alignment_status") or ""),
+            has_verified_link=bool(
+                _mapping(public_candidate.get("source_quality")).get("has_verified_link")
+            ),
+        ),
+    }
+
+
+def _summary_payload(
+    *,
+    run_id: str,
+    manifest_path: Path,
+    suites: list[dict[str, Any]],
+    query_rows: list[dict[str, Any]],
+    health: dict[str, Any],
+    dry_run: bool,
+) -> dict[str, Any]:
+    status_counts = Counter(str(row.get("status") or "unknown") for row in query_rows)
+    return {
+        "schema_version": PUBLIC_SCHEMA_VERSION,
+        "run_id": run_id,
+        "manifest_ref": _short_hash(str(manifest_path.expanduser().resolve())),
+        "privacy": _privacy_policy(),
+        "dry_run": dry_run,
+        "meilisearch": {
+            "available": health["available"],
+            "status": health["status"],
+            "skip_reason": health.get("skip_reason"),
+        },
+        "suite_count": len(suites),
+        "query_count": len(query_rows),
+        "query_status_counts": dict(status_counts),
+        "suites": suites,
+        "rag_input_inspection": _rag_input_inspection(query_rows, {}),
+        "object_alignment_note": (
+            "timestamp-only overlap is reported as candidate/fallback evidence only; "
+            "it is not counted as verified object alignment"
+        ),
+    }
+
+
+def _summary_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Evidence Unit Retrieval Smoke",
+        "",
+        f"Run ID: `{payload['run_id']}`",
+        "",
+        "This public-safe report redacts raw query text, transcripts, local paths, and raw IDs.",
+        "Timestamp-only overlap is not counted as verified object alignment.",
+        "",
+        "## Meilisearch",
+        "",
+        f"- available: `{payload['meilisearch']['available']}`",
+        f"- status: `{payload['meilisearch']['status']}`",
+    ]
+    if payload["meilisearch"].get("skip_reason"):
+        lines.append(f"- skip reason: `{payload['meilisearch']['skip_reason']}`")
+    lines.extend(["", "## Suites", ""])
+    for suite in payload.get("suites", []):
+        build = suite.get("build", {})
+        index = suite.get("index", {})
+        lines.extend(
+            [
+                f"### {suite.get('suite_id')}",
+                "",
+                f"- evidence units: `{_mapping(build.get('counts')).get('evidence_units_total', 0)}`",
+                f"- alignment statuses: `{json.dumps(build.get('alignment_status_counts', {}), sort_keys=True)}`",
+                f"- link counts: `{json.dumps(build.get('link_counts', {}), sort_keys=True)}`",
+                f"- index status: `{index.get('status')}`",
+                f"- RAG input inspectable top hits: `{suite.get('rag_input_inspection', {}).get('inspectable_top_hit_count', 0)}`",
+                "",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _rag_input_inspection(query_rows: list[dict[str, Any]], artifact_summary: dict[str, Any]) -> dict[str, Any]:
+    queried = [row for row in query_rows if row.get("status") == "queried"]
+    inspectable = [row for row in queried if row.get("rag_input_inspectable") is True]
+    top_with_visual = [
+        row
+        for row in queried
+        if _mapping(_mapping(row.get("top_evidence_unit")).get("source_quality")).get("has_visual_state")
+    ]
+    return {
+        "query_count": len(query_rows),
+        "queried_count": len(queried),
+        "inspectable_top_hit_count": len(inspectable),
+        "top_hits_with_visual_state_count": len(top_with_visual),
+        "artifact_evidence_units_total": _mapping(artifact_summary.get("counts")).get("evidence_units_total"),
+        "public_note": (
+            "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/"
+            "semantic_text availability flags; text content remains redacted from this report."
+        ),
+    }
+
+
+def _meili_health(client: EvidenceUnitSmokeClient) -> dict[str, Any]:
+    try:
+        response = client.health()
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "available": False,
+            "status": "unavailable",
+            "skip_reason": _exception_reason(exc),
+        }
+    status = str(response.get("status") or "").lower()
+    available = status == "available" or bool(response.get("available") is True)
+    return {
+        "available": available,
+        "status": status or "unknown",
+        "skip_reason": None if available else f"health_status:{status or 'unknown'}",
+    }
+
+
+def _public_index_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "indexed",
+        "indexed_documents": int(summary.get("indexed_documents") or 0),
+        "indexed_batches": int(summary.get("indexed_batches") or 0),
+        "alignment_status_counts": _mapping(summary.get("alignment_status_counts")),
+        "source_quality_counts": _mapping(summary.get("source_quality_counts")),
+        "settings_profile": str(summary.get("settings_profile") or ""),
+        "settings_hash": str(summary.get("settings_hash") or ""),
+    }
+
+
+def _public_build_counts(counts: dict[str, Any]) -> dict[str, int]:
+    keys = [
+        "segments_total",
+        "frames_total",
+        "visual_entities_total",
+        "entity_links_total",
+        "evidence_units_total",
+    ]
+    return {key: int(counts.get(key) or 0) for key in keys}
+
+
+def _evidence_unit_rows(*, project_dir: Path, evidence_units: Path | None) -> list[dict[str, Any]]:
+    path = evidence_units
+    if path is None:
+        path = Path("segments") / "evidence_units.jsonl"
+    if not path.is_absolute():
+        path = project_dir / path
+    return list(iter_jsonl_documents(path))
+
+
+def _path_from_build_summary(summary: dict[str, Any]) -> Path | None:
+    paths = _mapping(summary.get("paths"))
+    value = paths.get("evidence_units")
+    return Path(str(value)) if value else None
+
+
+def _candidate_matches_expected(candidate: dict[str, Any], expected_segment_ids: set[str]) -> bool | None:
+    if not expected_segment_ids:
+        return None
+    target = _optional_str(candidate.get("target_segment_id"))
+    source_ids = set(_string_list(candidate.get("source_segment_ids")))
+    return bool((target and target in expected_segment_ids) or (source_ids & expected_segment_ids))
+
+
+def _candidate_is_rag_inspectable(candidate: dict[str, Any]) -> bool:
+    return bool(
+        candidate
+        and candidate.get("evidence_unit_id")
+        and (candidate.get("evidence_text") or candidate.get("semantic_text"))
+        and candidate.get("alignment_status")
+        and isinstance(candidate.get("source_quality"), dict)
+    )
+
+
+def _verified_alignment_note(counts: dict[str, Any]) -> str:
+    verified = int(counts.get("verified_links") or counts.get("has_verified_link") or 0)
+    fallback = int(counts.get("timestamp_fallback_links") or 0)
+    if verified == 0 and fallback > 0:
+        return "timestamp fallback links present, but verified object alignment count is zero"
+    return "verified links are counted only from explicit verified link fields"
+
+
+def _evidence_unit_note(
+    *,
+    expected_match: bool | None,
+    alignment_status: str,
+    has_verified_link: bool,
+) -> str:
+    match_word = "unknown"
+    if expected_match is True:
+        match_word = "top hit matches configured target"
+    elif expected_match is False:
+        match_word = "top hit misses configured target"
+    if alignment_status == "verified" and has_verified_link:
+        return f"{match_word}; top hit has explicit verified link"
+    if alignment_status == "candidate":
+        return f"{match_word}; top hit is candidate-level, not verified object alignment"
+    if alignment_status == "transcript_only":
+        return f"{match_word}; top hit is transcript-only"
+    return f"{match_word}; alignment status {alignment_status or 'unknown'}"
+
+
+def _baseline_note(expected_match: bool | None) -> str:
+    if expected_match is True:
+        return "segment baseline top hit matches configured target"
+    if expected_match is False:
+        return "segment baseline top hit misses configured target"
+    return "segment baseline top-hit target match unknown"
+
+
+def _project_dir_from_suite(*, suite: dict[str, Any], base_dir: Path, repo_root: Path) -> Path:
+    if suite.get("project_dir"):
+        path = Path(str(suite["project_dir"])).expanduser()
+        if not path.is_absolute():
+            path = base_dir / path
+        return path.resolve()
+    project_id = _optional_str(suite.get("project_id"))
+    if not project_id:
+        raise ValueError("suite requires either project_dir or project_id")
+    return (repo_root / "artifacts" / "projects" / project_id).resolve()
+
+
+def _read_queries(*, base_dir: Path, suite: dict[str, Any]) -> list[dict[str, Any]]:
+    if suite.get("queries_file"):
+        path = Path(str(suite["queries_file"])).expanduser()
+        if not path.is_absolute():
+            path = base_dir / path
+        suffix = path.suffix.lower()
+        if suffix == ".jsonl":
+            return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        data = _read_json(path)
+        if isinstance(data, list):
+            return [row for row in data if isinstance(row, dict)]
+        rows = data.get("queries") if isinstance(data, dict) else None
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+        raise ValueError(f"queries_file must contain a list or object with queries: {path}")
+    queries = suite.get("queries") or []
+    if not isinstance(queries, list):
+        raise ValueError("suite queries must be a list")
+    return [query for query in queries if isinstance(query, dict)]
+
+
+def _resolve_output_dir(
+    *,
+    manifest: dict[str, Any],
+    output_dir: Path | None,
+    base_dir: Path,
+    run_id: str,
+) -> Path:
+    configured = output_dir or _optional_path(manifest.get("output_dir"))
+    if configured is None:
+        configured = DEFAULT_OUTPUT_ROOT / run_id
+    if not configured.is_absolute():
+        configured = base_dir / configured
+    return configured.resolve()
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.expanduser().read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected JSON object at {path}")
+    return payload
+
+
+def _default_index_uid(run_id: str, suite_id: str) -> str:
+    return f"{DEFAULT_INDEX_PREFIX}_{_slug(run_id)}_{_slug(suite_id)}"
+
+
+def _privacy_policy() -> dict[str, Any]:
+    return {
+        "raw_query_text": "redacted",
+        "transcript_excerpt": "redacted",
+        "semantic_text": "redacted",
+        "local_paths": "redacted",
+        "raw_ids": "hashed_refs",
+        "raw_response_in_public_output": False,
+    }
+
+
+def _query_text(query_row: dict[str, Any]) -> str:
+    value = _optional_str(query_row.get("query_text") or query_row.get("query"))
+    if not value:
+        raise ValueError("query row requires query_text or query")
+    return value
+
+
+def _query_id(query_row: dict[str, Any]) -> str:
+    return _optional_str(query_row.get("query_id") or query_row.get("id")) or "query"
+
+
+def _optional_public_label(query_row: dict[str, Any]) -> str | None:
+    return _optional_str(query_row.get("query_label") or query_row.get("label"))
+
+
+def _optional_path(value: Any) -> Path | None:
+    if value in (None, ""):
+        return None
+    return Path(str(value))
+
+
+def _optional_str(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _positive_int(value: Any, *, field_name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be > 0") from exc
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be > 0")
+    return parsed
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item not in (None, "")]
+
+
+def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _alignment_status(value: Any) -> str:
+    status = str(value or "").strip()
+    if status == "verified":
+        return "verified"
+    if status == "transcript_only":
+        return "transcript_only"
+    return "candidate" if status == "candidate" else status
+
+
+def _id_ref(value: str | None, *, prefix: str) -> str | None:
+    if not value:
+        return None
+    return f"{prefix}:{_short_hash(value)}"
+
+
+def _index_ref(value: str | None) -> str | None:
+    if not value:
+        return None
+    return f"index:{_short_hash(value)}"
+
+
+def _short_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _slug(value: str) -> str:
+    chars = [char.lower() if char.isalnum() else "_" for char in value]
+    return "_".join(part for part in "".join(chars).split("_") if part)[:48] or "run"
+
+
+def _exception_reason(exc: Exception) -> str:
+    text = " ".join(str(exc).split())
+    if not text:
+        text = exc.__class__.__name__
+    return text[:200]

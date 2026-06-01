@@ -43,6 +43,7 @@ from oarag.ingestion.ingest import (
 )
 from oarag.core.io import write_json
 from oarag.evaluation.lecture_smoke import run_lecture_smoke
+from oarag.evaluation.evidence_unit_smoke import run_evidence_unit_smoke
 from oarag.integrations.meili import (
     EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
@@ -1511,6 +1512,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     lecture_smoke.set_defaults(func=cmd_lecture_smoke)
 
+    evidence_unit_smoke = subparsers.add_parser(
+        "evidence-unit-smoke",
+        help="Build, optionally index, and query evidence_units with public-safe smoke output",
+    )
+    evidence_unit_smoke.add_argument("--manifest", required=True, type=Path)
+    evidence_unit_smoke.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Optional public output directory. Writes sanitized metrics.json, query_results.jsonl, and summary.md.",
+    )
+    evidence_unit_smoke.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate manifest/output wiring without building artifacts or contacting Meilisearch.",
+    )
+    evidence_unit_smoke.set_defaults(func=cmd_evidence_unit_smoke)
+
     return parser
 
 
@@ -2624,6 +2642,30 @@ def cmd_lecture_smoke(args: argparse.Namespace) -> None:
     if run.private_query_outputs_path is not None:
         payload["private_query_outputs"] = str(run.private_query_outputs_path)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def cmd_evidence_unit_smoke(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    run = run_evidence_unit_smoke(
+        client=client,
+        manifest_path=args.manifest,
+        output_dir=args.output_dir,
+        repo_root=default_paths().repo_root,
+        dry_run=args.dry_run,
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": run.run_id,
+                "output_dir": str(run.output_dir),
+                "metrics": str(run.metrics_path),
+                "query_results": str(run.query_results_path),
+                "summary": str(run.summary_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def parse_deltas(value: str) -> list[int]:

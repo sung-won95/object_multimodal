@@ -1259,3 +1259,58 @@ def test_lecture_smoke_cli_accepts_manifest_and_output_dir() -> None:
     assert str(args.output_dir) == "reports/lecture_smoke/dev"
     assert str(args.private_output_dir) == "/tmp/private_lecture_smoke"
     assert args.allow_private_output is True
+
+
+def test_evidence_unit_smoke_cli_accepts_manifest_output_and_dry_run() -> None:
+    args = build_parser().parse_args(
+        [
+            "evidence-unit-smoke",
+            "--manifest",
+            "reports/evidence_unit_smoke/manifest.json",
+            "--output-dir",
+            "reports/evidence_unit_smoke/dev",
+            "--dry-run",
+        ]
+    )
+
+    assert str(args.manifest) == "reports/evidence_unit_smoke/manifest.json"
+    assert str(args.output_dir) == "reports/evidence_unit_smoke/dev"
+    assert args.dry_run is True
+
+
+def test_cmd_evidence_unit_smoke_forwards_inputs(monkeypatch, capsys) -> None:
+    calls = {}
+    fake_client = object()
+
+    class FakeRun:
+        run_id = "run1"
+        output_dir = Path("reports/run1")
+        metrics_path = Path("reports/run1/metrics.json")
+        query_results_path = Path("reports/run1/query_results.jsonl")
+        summary_path = Path("reports/run1/summary.md")
+
+    def fake_run_evidence_unit_smoke(**kwargs):
+        calls["run_kwargs"] = kwargs
+        return FakeRun()
+
+    monkeypatch.setattr("oarag.cli.client_from_args", lambda args: fake_client)
+    monkeypatch.setattr("oarag.cli.run_evidence_unit_smoke", fake_run_evidence_unit_smoke)
+
+    args = build_parser().parse_args(
+        [
+            "evidence-unit-smoke",
+            "--manifest",
+            "manifest.json",
+            "--output-dir",
+            "reports/public",
+            "--dry-run",
+        ]
+    )
+
+    args.func(args)
+
+    assert calls["run_kwargs"]["client"] is fake_client
+    assert calls["run_kwargs"]["manifest_path"].as_posix() == "manifest.json"
+    assert calls["run_kwargs"]["output_dir"].as_posix() == "reports/public"
+    assert calls["run_kwargs"]["dry_run"] is True
+    assert json.loads(capsys.readouterr().out)["summary"] == "reports/run1/summary.md"
