@@ -44,11 +44,13 @@ from oarag.ingestion.ingest import (
 from oarag.core.io import write_json
 from oarag.evaluation.lecture_smoke import run_lecture_smoke
 from oarag.integrations.meili import (
+    EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_SETTINGS,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
     MeiliClient,
+    evidence_unit_settings_profile_names,
     hybrid_embedder_settings_profile_names,
     lecture_segment_settings_profile_names,
     lecture_window_settings_profile_names,
@@ -65,12 +67,14 @@ from oarag.retrieval.project_query import (
 from oarag.retrieval.rerank import DEFAULT_RERANK_BACKEND, RERANK_BACKEND_CHOICES
 from oarag.retrieval.project_index import (
     build_project_windows,
+    index_project_evidence_units,
     index_project_segments,
     index_project_visual_entities,
     index_project_windows,
     project_dir_from_args,
 )
 from oarag.retrieval.evidence_units import build_project_evidence_units
+from oarag.retrieval.evidence_unit_index import query_project_evidence_units
 from oarag.core.schemas import SearchCandidate
 from oarag.ingestion.stt import DEFAULT_MLX_WHISPER_MODEL
 from oarag.vision.visual_entities import DEFAULT_VISUAL_ENTITY_BACKEND, extract_visual_entities
@@ -386,6 +390,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to include after each target when using time-window mode.",
     )
     build_evidence_units.set_defaults(func=cmd_build_project_evidence_units)
+
+    index_evidence_units = subparsers.add_parser(
+        "index-project-evidence-units",
+        help="Index local project evidence_units JSONL documents",
+    )
+    index_evidence_units.add_argument("--index", required=True)
+    location = index_evidence_units.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    index_evidence_units.add_argument(
+        "--evidence-units",
+        type=Path,
+        help="Optional evidence_units JSONL path. Relative paths are resolved from project dir.",
+    )
+    index_evidence_units.add_argument("--batch-size", type=int, default=500)
+    index_evidence_units.add_argument("--reset", action="store_true")
+    index_evidence_units.add_argument(
+        "--settings-profile",
+        choices=evidence_unit_settings_profile_names(),
+        default=EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
+        help="Meilisearch settings profile to apply to evidence unit documents.",
+    )
+    index_evidence_units.set_defaults(func=cmd_index_project_evidence_units)
 
     index_windows = subparsers.add_parser(
         "index-project-windows",
@@ -1034,6 +1061,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     query_project.add_argument("--output", type=Path, help="Optional JSON output path.")
     query_project.set_defaults(func=cmd_query_project)
+
+    query_evidence_units = subparsers.add_parser(
+        "query-project-evidence-units",
+        help="Search a local project evidence unit index",
+    )
+    query_evidence_units.add_argument("--index", required=True)
+    location = query_evidence_units.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    query_evidence_units.add_argument("--query", required=True)
+    query_evidence_units.add_argument("--limit", type=int, default=5)
+    query_evidence_units.add_argument(
+        "--evidence-units",
+        type=Path,
+        help="Optional evidence_units JSONL path used to resolve project_id filter.",
+    )
+    query_evidence_units.add_argument("--output", type=Path, help="Optional JSON output path.")
+    query_evidence_units.set_defaults(func=cmd_query_project_evidence_units)
 
     ask_project_parser = subparsers.add_parser(
         "ask-project",
@@ -1873,6 +1918,21 @@ def cmd_build_project_evidence_units(args: argparse.Namespace) -> None:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def cmd_index_project_evidence_units(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = index_project_evidence_units(
+        client,
+        index_uid=args.index,
+        project_dir=project_dir,
+        batch_size=args.batch_size,
+        reset=args.reset,
+        evidence_units=args.evidence_units,
+        settings_profile=args.settings_profile,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
 def cmd_index_project_windows(args: argparse.Namespace) -> None:
     client = client_from_args(args)
     project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
@@ -2180,6 +2240,25 @@ def cmd_query_project(args: argparse.Namespace) -> None:
         write_json(output_path, response)
     for line in response.get("summary_lines", []):
         print(line, file=sys.stderr)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+
+
+def cmd_query_project_evidence_units(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    response = query_project_evidence_units(
+        client=client,
+        index_uid=args.index,
+        project_dir=project_dir,
+        query=args.query,
+        limit=args.limit,
+        evidence_units=args.evidence_units,
+    )
+    if args.output is not None:
+        output_path = args.output
+        if not output_path.is_absolute():
+            output_path = project_dir / output_path
+        write_json(output_path, response)
     print(json.dumps(response, ensure_ascii=False, indent=2))
 
 

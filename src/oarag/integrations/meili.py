@@ -23,6 +23,7 @@ LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE = "lecture_segments_legacy_v0"
 LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE = "lecture_segments_default_v1"
 LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE = "lecture_segments_default_v2"
 LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE = "lecture_windows_default_v1"
+EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE = "evidence_units_default_v1"
 VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE = "visual_entities_default_v1"
 DEFAULT_HYBRID_EMBEDDER_NAME = "default"
 HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE = "manual_user_provided_v1"
@@ -387,6 +388,91 @@ LECTURE_WINDOW_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 
+EVIDENCE_UNIT_SETTINGS_PROFILES: dict[str, dict[str, Any]] = {
+    EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE: {
+        "searchableAttributes": [
+            "semantic_text",
+            "evidence_text",
+            "transcript_window_text",
+            "visual_entities.text",
+            "visual_entities.visual_description",
+            "visual_states.state_summary",
+            "video_id",
+        ],
+        "filterableAttributes": [
+            "project_id",
+            "video_id",
+            "evidence_unit_id",
+            "target_segment_id",
+            "source_segment_ids",
+            "visual_state_ids",
+            "visual_entity_ids",
+            "verified_entity_link_ids",
+            "candidate_entity_link_ids",
+            "alignment_status",
+            "source_quality.has_visual_state",
+            "source_quality.has_visual_entity",
+            "source_quality.has_vlm_entity",
+            "source_quality.has_verified_link",
+            "source_quality.has_timestamp_fallback_link",
+            "start_time",
+            "end_time",
+        ],
+        "sortableAttributes": [
+            "start_time",
+            "end_time",
+            "alignment_score",
+        ],
+        "displayedAttributes": [
+            "evidence_unit_id",
+            "project_id",
+            "video_id",
+            "target_segment_id",
+            "source_segment_ids",
+            "start_time",
+            "end_time",
+            "transcript_window_text",
+            "visual_state_ids",
+            "visual_entity_ids",
+            "verified_entity_link_ids",
+            "candidate_entity_link_ids",
+            "candidate_entity_link_statuses",
+            "alignment_status",
+            "source_quality",
+            "evidence_text",
+            "semantic_text",
+            "alignment_score",
+            "visual_states",
+            "visual_entities",
+            "modality",
+            "window_config",
+        ],
+        "rankingRules": [
+            "words",
+            "typo",
+            "proximity",
+            "attribute",
+            "sort",
+            "exactness",
+        ],
+        "stopWords": [],
+        "synonyms": {},
+        "typoTolerance": {
+            "enabled": True,
+            "minWordSizeForTypos": {
+                "oneTypo": 5,
+                "twoTypos": 9,
+            },
+            "disableOnAttributes": [
+                "video_id",
+                "evidence_unit_id",
+                "target_segment_id",
+            ],
+            "disableOnWords": [],
+        },
+    },
+}
+
 
 def lecture_segment_settings(
     profile: str = LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
@@ -501,6 +587,45 @@ def lecture_window_settings_snapshot(
     return {
         "profile": profile,
         "hash": lecture_window_settings_hash(payload),
+        "settings": payload,
+    }
+
+
+def evidence_unit_settings(
+    profile: str = EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
+) -> dict[str, Any]:
+    if profile not in EVIDENCE_UNIT_SETTINGS_PROFILES:
+        valid = ", ".join(sorted(EVIDENCE_UNIT_SETTINGS_PROFILES))
+        raise ValueError(f"Unknown evidence unit settings profile: {profile}. Valid profiles: {valid}")
+    return copy.deepcopy(EVIDENCE_UNIT_SETTINGS_PROFILES[profile])
+
+
+def evidence_unit_settings_profile_names() -> list[str]:
+    return sorted(EVIDENCE_UNIT_SETTINGS_PROFILES)
+
+
+def evidence_unit_settings_hash(
+    settings: dict[str, Any] | None = None,
+    *,
+    profile: str = EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
+) -> str:
+    payload = evidence_unit_settings(profile) if settings is None else settings
+    encoded = _canonical_settings_json(payload).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def evidence_unit_settings_snapshot(
+    settings: dict[str, Any] | None = None,
+    *,
+    profile: str = EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
+    redact_secrets: bool = False,
+) -> dict[str, Any]:
+    payload = evidence_unit_settings(profile) if settings is None else copy.deepcopy(settings)
+    if redact_secrets:
+        payload = sanitize_meili_settings_for_snapshot(payload)
+    return {
+        "profile": profile,
+        "hash": evidence_unit_settings_hash(payload),
         "settings": payload,
     }
 

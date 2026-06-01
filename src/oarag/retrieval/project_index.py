@@ -15,6 +15,7 @@ from oarag.embeddings.manifest import (
 )
 from oarag.integrations.meili import (
     DEFAULT_HYBRID_EMBEDDER_NAME,
+    EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
     HYBRID_EMBEDDER_CUSTOM_SETTINGS_PROFILE,
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
@@ -22,6 +23,8 @@ from oarag.integrations.meili import (
     MeiliClient,
 )
 from oarag.integrations.meili import (
+    evidence_unit_settings,
+    evidence_unit_settings_snapshot,
     hybrid_embedder_settings,
     hybrid_embedder_settings_snapshot,
     lecture_segment_settings,
@@ -49,6 +52,7 @@ from oarag.retrieval.vectors import (
 
 
 LECTURE_WINDOW_ARTIFACT_RELATIVE_PATH = Path("segments") / "lecture_windows.jsonl"
+EVIDENCE_UNITS_ARTIFACT_RELATIVE_PATH = Path("segments") / "evidence_units.jsonl"
 LOCAL_HASH_DOCUMENT_VECTOR_WARNING = (
     "local_hash_v1 document vectors are deterministic smoke-test fallback only; "
     "do not report semantic embedding quality without a provider-backed vector manifest."
@@ -127,6 +131,23 @@ def window_artifact_path(project_dir: Path, windows: Path | None = None) -> Path
     if default.exists():
         return default
     raise FileNotFoundError(f"No window artifact found at {default}")
+
+
+def evidence_unit_artifact_path(project_dir: Path, evidence_units: Path | None = None) -> Path:
+    if evidence_units is not None:
+        candidate = evidence_units.expanduser()
+        if not candidate.is_absolute():
+            candidate = (project_dir / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+        if not candidate.exists():
+            raise FileNotFoundError(f"Evidence unit artifact not found: {candidate}")
+        return candidate
+
+    default = project_dir / EVIDENCE_UNITS_ARTIFACT_RELATIVE_PATH
+    if default.exists():
+        return default
+    raise FileNotFoundError(f"No evidence unit artifact found at {default}")
 
 
 def iter_jsonl_documents(path: Path) -> Iterator[dict[str, Any]]:
@@ -492,6 +513,87 @@ def index_project_windows(
         live_smoke=hybrid_live_smoke,
     )
     return summary
+
+
+def index_project_evidence_units(
+    client: MeiliClient,
+    *,
+    index_uid: str,
+    project_dir: Path,
+    batch_size: int = 500,
+    reset: bool = False,
+    configure_index: bool = True,
+    evidence_units: Path | None = None,
+    settings_profile: str = EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
+) -> dict[str, Any]:
+    resolved_project_dir = project_dir.expanduser().resolve()
+    evidence_units_path = evidence_unit_artifact_path(
+        resolved_project_dir,
+        evidence_units=evidence_units,
+    )
+    settings = evidence_unit_settings(settings_profile)
+    settings_snapshot = evidence_unit_settings_snapshot(
+        settings,
+        profile=settings_profile,
+    )
+
+    if configure_index:
+        if reset:
+            client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
+        client.wait_task(
+            client.create_index(index_uid, primary_key="evidence_unit_id"),
+            ignored_error_codes={"index_already_exists"},
+        )
+        _apply_index_settings(
+            client,
+            index_uid=index_uid,
+            settings=settings,
+            settings_profile=settings_profile,
+            hybrid_snapshot=None,
+        )
+
+    indexed_documents = 0
+    indexed_batches = 0
+    alignment_status_counts: dict[str, int] = {}
+    source_quality_counts = {
+        "has_visual_state": 0,
+        "has_visual_entity": 0,
+        "has_vlm_entity": 0,
+        "has_verified_link": 0,
+        "has_timestamp_fallback_link": 0,
+    }
+    documents = (
+        _evidence_unit_index_document(document)
+        for document in iter_jsonl_documents(evidence_units_path)
+    )
+    for batch in iter_batches(documents, batch_size=batch_size):
+        client.wait_task(client.add_documents(index_uid, batch))
+        indexed_documents += len(batch)
+        indexed_batches += 1
+        for document in batch:
+            status = str(document.get("alignment_status") or "unknown")
+            alignment_status_counts[status] = alignment_status_counts.get(status, 0) + 1
+            source_quality = document.get("source_quality")
+            if isinstance(source_quality, dict):
+                for key in source_quality_counts:
+                    if source_quality.get(key) is True:
+                        source_quality_counts[key] += 1
+
+    return {
+        "index": index_uid,
+        "project_dir": str(resolved_project_dir),
+        "evidence_units_path": str(evidence_units_path),
+        "batch_size": batch_size,
+        "reset": reset,
+        "configure_index": configure_index,
+        "indexed_documents": indexed_documents,
+        "indexed_batches": indexed_batches,
+        "alignment_status_counts": alignment_status_counts,
+        "source_quality_counts": source_quality_counts,
+        "settings_profile": settings_snapshot["profile"],
+        "settings_hash": settings_snapshot["hash"],
+        "settings_snapshot": settings_snapshot,
+    }
 
 
 def index_project_segments(
@@ -1193,6 +1295,34 @@ def ensure_window_document_semantic_contract(document: dict[str, Any]) -> dict[s
     existing_source_fields = _string_list(indexed.get(LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD))
     indexed[LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD] = existing_text or semantic_text
     indexed[LECTURE_SEGMENT_SEMANTIC_SOURCE_FIELDS_FIELD] = existing_source_fields or source_fields
+    return indexed
+
+
+def _evidence_unit_index_document(document: dict[str, Any]) -> dict[str, Any]:
+    evidence_unit_id = _compact_text(str(document.get("evidence_unit_id") or ""))
+    if not evidence_unit_id:
+        raise ValueError("evidence unit document is missing evidence_unit_id")
+    indexed = dict(document)
+    indexed["evidence_unit_id"] = evidence_unit_id
+    semantic_text = _compact_text(str(indexed.get("semantic_text") or ""))
+    evidence_text = _compact_text(str(indexed.get("evidence_text") or ""))
+    transcript_text = _compact_text(str(indexed.get("transcript_window_text") or ""))
+    visual_text = text_from_document_fields(
+        indexed,
+        [
+            "visual_states",
+            "visual_entities",
+        ],
+    )
+    if not evidence_text:
+        evidence_text = _compact_text(
+            " ".join(part for part in (transcript_text, visual_text) if part)
+        )
+        indexed["evidence_text"] = evidence_text
+    if not semantic_text:
+        indexed["semantic_text"] = _compact_text(
+            " ".join(part for part in (evidence_text, transcript_text, visual_text) if part)
+        )
     return indexed
 
 
