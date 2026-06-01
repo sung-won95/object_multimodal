@@ -1,0 +1,181 @@
+{
+  "schema_version": "vlm-visual-coverage-preflight-public-v1",
+  "run_id": "issue_194_vlm_visual_coverage_preflight",
+  "issue": 194,
+  "date": "2026-06-01",
+  "privacy": {
+    "raw_query_text": "redacted",
+    "transcript_excerpt": "redacted",
+    "local_paths": "redacted",
+    "raw_ids": "redacted",
+    "raw_frames": "not_included",
+    "raw_response_in_public_output": false
+  },
+  "real_vlm_input_available": false,
+  "retrieval_smoke_rerun": false,
+  "skip_reason": "No checked suite had real VLM visual observations or structured VLM parser output; deterministic/mock VLM output was not used.",
+  "aggregate": {
+    "suites_checked": 2,
+    "suites_with_vlm_visual_observations": 0,
+    "suites_with_vlm_parser_output": 0,
+    "suites_with_manifest_vlm_artifact_key": 0,
+    "suites_with_local_ocr_backend": 2,
+    "frames_checked": 72,
+    "current_visual_entities_checked": 885,
+    "current_ocr_visual_entities": 885,
+    "current_vlm_visual_entities": 0,
+    "current_visual_entities_with_visual_description": 0,
+    "current_visual_entities_with_detected_text": 0,
+    "entity_links_checked": 1510,
+    "verified_like_links": 0
+  },
+  "artifact_types_checked": {
+    "manifests/vlm_visual_observations.jsonl": {
+      "available_suites": 0,
+      "missing_suites": 2
+    },
+    "manifests/vlm_parser_output.jsonl": {
+      "available_suites": 0,
+      "missing_suites": 2
+    },
+    "manifests/visual_entities.jsonl": {
+      "available_suites": 2,
+      "missing_suites": 0,
+      "status": "present_but_ocr_only"
+    },
+    "manifests/entity_links.jsonl": {
+      "available_suites": 2,
+      "missing_suites": 0,
+      "status": "present_without_verified_like_links"
+    },
+    "manifests/frames_manifest.jsonl": {
+      "available_suites": 2,
+      "missing_suites": 0
+    },
+    "manifests/project_manifest.json": {
+      "available_suites": 2,
+      "missing_suites": 0,
+      "status": "records_local_ocr_visual_entity_extraction"
+    }
+  },
+  "suites": [
+    {
+      "suite_id": "mit_lec01",
+      "project_ref": "a5b8cce4a4e4",
+      "artifacts": {
+        "frames_manifest": {
+          "exists": true,
+          "line_count": 35
+        },
+        "visual_entities": {
+          "exists": true,
+          "line_count": 499
+        },
+        "entity_links": {
+          "exists": true,
+          "line_count": 710
+        },
+        "project_manifest": {
+          "exists": true
+        },
+        "vlm_visual_observations": {
+          "exists": false,
+          "line_count": null
+        },
+        "vlm_parser_output": {
+          "exists": false,
+          "line_count": null
+        }
+      },
+      "project_manifest_summary": {
+        "visual_entity_extraction_backend": "local-ocr",
+        "manifest_records_vlm_artifact_key": false
+      },
+      "visual_entities_summary": {
+        "source_counts": {
+          "ocr:tesseract": 499
+        },
+        "entity_type_counts": {
+          "ocr_text": 499
+        },
+        "with_vlm_source_or_model": 0,
+        "with_visual_description": 0,
+        "with_detected_text": 0
+      },
+      "entity_links_summary": {
+        "total": 710,
+        "verified_like_links": 0,
+        "link_type_counts": {
+          "time_overlap": 668,
+          "time_overlap+lexical_match": 42
+        }
+      }
+    },
+    {
+      "suite_id": "mit_lec04",
+      "project_ref": "ddbcbead3467",
+      "artifacts": {
+        "frames_manifest": {
+          "exists": true,
+          "line_count": 37
+        },
+        "visual_entities": {
+          "exists": true,
+          "line_count": 386
+        },
+        "entity_links": {
+          "exists": true,
+          "line_count": 800
+        },
+        "project_manifest": {
+          "exists": true
+        },
+        "vlm_visual_observations": {
+          "exists": false,
+          "line_count": null
+        },
+        "vlm_parser_output": {
+          "exists": false,
+          "line_count": null
+        }
+      },
+      "project_manifest_summary": {
+        "visual_entity_extraction_backend": "local-ocr",
+        "manifest_records_vlm_artifact_key": false
+      },
+      "visual_entities_summary": {
+        "source_counts": {
+          "ocr:tesseract": 386
+        },
+        "entity_type_counts": {
+          "ocr_text": 386
+        },
+        "with_vlm_source_or_model": 0,
+        "with_visual_description": 0,
+        "with_detected_text": 0
+      },
+      "entity_links_summary": {
+        "total": 800,
+        "verified_like_links": 0,
+        "link_type_counts": {
+          "time_overlap": 752,
+          "time_overlap+lexical_match": 45,
+          "time_overlap+lexical_match+mention_candidate": 2,
+          "time_overlap+mention_candidate": 1
+        }
+      }
+    }
+  ],
+  "checks": {
+    "extract_visual_entities_help": "passed",
+    "run_vlm_help": "passed",
+    "run_vlm_alignment_help": "passed",
+    "evidence_unit_smoke_help": "passed",
+    "pytest": {
+      "command": "python3 -m pytest tests/test_visual_entities.py tests/test_vlm_alignment_pipeline.py tests/test_evidence_units.py tests/test_evidence_unit_smoke.py -q",
+      "status": "passed",
+      "passed": 30
+    }
+  },
+  "next_minimal_follow_up": "Generate real VLM visual observations or structured VLM parser output for the same two lecture projects, then rerun VLM-first visual entity extraction and evidence-unit smoke."
+}
