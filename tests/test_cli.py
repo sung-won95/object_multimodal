@@ -6,6 +6,7 @@ import pytest
 from oarag.cli import (
     build_parser,
     build_vlm_alignment_parser,
+    cmd_build_project_evidence_units,
     cmd_build_project_windows,
     cmd_index_project,
     cmd_index_project_visual_entities,
@@ -274,6 +275,77 @@ def test_cmd_build_project_windows_forwards_window_options(monkeypatch, capsys) 
     assert calls["build_kwargs"]["previous_neighbor_count"] == 2
     assert calls["build_kwargs"]["next_neighbor_count"] == 0
     assert json.loads(capsys.readouterr().out)["counts"]["windows_total"] == 1
+
+
+def test_build_project_evidence_units_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        ["build-project-evidence-units", "--project-id", "sample_project"]
+    )
+
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.segments is None
+    assert args.frames_manifest is None
+    assert args.visual_entities is None
+    assert args.entity_links is None
+    assert args.output is None
+    assert args.manifest is None
+    assert args.state_padding_seconds == 15.0
+    assert args.neighbor_count == 1
+    assert args.window_seconds is None
+    assert args.previous_neighbor_count is None
+    assert args.next_neighbor_count is None
+
+
+def test_cmd_build_project_evidence_units_forwards_inputs(monkeypatch, capsys) -> None:
+    calls = {}
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_build_project_evidence_units(**kwargs):
+        calls["build_kwargs"] = kwargs
+        return {"counts": {"evidence_units_total": 1}, "alignment_status_counts": {"candidate": 1}}
+
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr(
+        "oarag.cli.build_project_evidence_units",
+        fake_build_project_evidence_units,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "build-project-evidence-units",
+            "--project-dir",
+            str(project_dir),
+            "--segments",
+            "segments/custom.jsonl",
+            "--entity-links",
+            "manifests/entity_links.jsonl",
+            "--output",
+            "segments/evidence_units.jsonl",
+            "--state-padding-seconds",
+            "20",
+            "--previous-neighbor-count",
+            "2",
+            "--next-neighbor-count",
+            "0",
+        ]
+    )
+
+    cmd_build_project_evidence_units(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["build_kwargs"]["project_dir"] == Path("/tmp/project")
+    assert calls["build_kwargs"]["segments"].as_posix() == "segments/custom.jsonl"
+    assert calls["build_kwargs"]["entity_links"].as_posix() == "manifests/entity_links.jsonl"
+    assert calls["build_kwargs"]["output_path"].as_posix() == "segments/evidence_units.jsonl"
+    assert calls["build_kwargs"]["state_padding_seconds"] == 20.0
+    assert calls["build_kwargs"]["previous_neighbor_count"] == 2
+    assert calls["build_kwargs"]["next_neighbor_count"] == 0
+    assert json.loads(capsys.readouterr().out)["counts"]["evidence_units_total"] == 1
 
 
 def test_index_project_windows_cli_defaults() -> None:

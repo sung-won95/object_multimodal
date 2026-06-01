@@ -70,6 +70,7 @@ from oarag.retrieval.project_index import (
     index_project_windows,
     project_dir_from_args,
 )
+from oarag.retrieval.evidence_units import build_project_evidence_units
 from oarag.core.schemas import SearchCandidate
 from oarag.ingestion.stt import DEFAULT_MLX_WHISPER_MODEL
 from oarag.vision.visual_entities import DEFAULT_VISUAL_ENTITY_BACKEND, extract_visual_entities
@@ -309,6 +310,82 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to include after each target when using time-window mode.",
     )
     build_windows.set_defaults(func=cmd_build_project_windows)
+
+    build_evidence_units = subparsers.add_parser(
+        "build-project-evidence-units",
+        help="Build a local project evidence_units JSONL for evidence-first retrieval",
+    )
+    location = build_evidence_units.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    build_evidence_units.add_argument(
+        "--segments",
+        type=Path,
+        help="Optional segment JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_evidence_units.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Optional frames manifest JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_evidence_units.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Optional visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_evidence_units.add_argument(
+        "--entity-links",
+        type=Path,
+        help="Optional entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_evidence_units.add_argument(
+        "--output",
+        type=Path,
+        help="Output evidence_units JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_evidence_units.add_argument(
+        "--manifest",
+        type=Path,
+        help="Project manifest JSON path. Relative paths are resolved from project dir.",
+    )
+    build_evidence_units.add_argument(
+        "--state-padding-seconds",
+        type=float,
+        default=15.0,
+        help="Seconds to extend first/last sampled frames when building rough visual state intervals.",
+    )
+    build_evidence_units.add_argument(
+        "--window-seconds",
+        type=float,
+        help="Include segments whose timestamps overlap this many seconds around each target.",
+    )
+    build_evidence_units.add_argument(
+        "--neighbor-count",
+        type=int,
+        default=1,
+        help="Neighboring segments to include on each side when --window-seconds is omitted.",
+    )
+    build_evidence_units.add_argument(
+        "--previous-neighbor-count",
+        type=int,
+        help="Neighboring segments to include before the target when using neighbor mode.",
+    )
+    build_evidence_units.add_argument(
+        "--next-neighbor-count",
+        type=int,
+        help="Neighboring segments to include after the target when using neighbor mode.",
+    )
+    build_evidence_units.add_argument(
+        "--window-before-seconds",
+        type=float,
+        help="Seconds to include before each target when using time-window mode.",
+    )
+    build_evidence_units.add_argument(
+        "--window-after-seconds",
+        type=float,
+        help="Seconds to include after each target when using time-window mode.",
+    )
+    build_evidence_units.set_defaults(func=cmd_build_project_evidence_units)
 
     index_windows = subparsers.add_parser(
         "index-project-windows",
@@ -1771,6 +1848,27 @@ def cmd_build_project_windows(args: argparse.Namespace) -> None:
         next_neighbor_count=args.next_neighbor_count,
         window_before_seconds=args.window_before_seconds,
         window_after_seconds=args.window_after_seconds,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_build_project_evidence_units(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = build_project_evidence_units(
+        project_dir=project_dir,
+        output_path=args.output,
+        segments=args.segments,
+        frames_manifest=args.frames_manifest,
+        visual_entities=args.visual_entities,
+        entity_links=args.entity_links,
+        manifest_path=args.manifest,
+        window_seconds=args.window_seconds,
+        neighbor_count=args.neighbor_count,
+        previous_neighbor_count=args.previous_neighbor_count,
+        next_neighbor_count=args.next_neighbor_count,
+        window_before_seconds=args.window_before_seconds,
+        window_after_seconds=args.window_after_seconds,
+        state_padding_seconds=args.state_padding_seconds,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
