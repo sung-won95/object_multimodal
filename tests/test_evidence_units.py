@@ -131,6 +131,107 @@ def test_build_project_evidence_units_supports_transcript_only_project(tmp_path:
     assert rows[0]["visual_entity_ids"] == []
 
 
+def test_explicit_verified_link_is_not_downgraded_to_timestamp_fallback(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "verified_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_verified", 10.0, 14.0, "The instructor refers to this object."),
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {"frame_id": "frame_verified", "timestamp": 12.0, "frame_path": "frames/verified.jpg"},
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "ent_verified",
+                "project_id": "verified_project",
+                "frame_id": "frame_verified",
+                "timestamp": 12.0,
+                "frame_path": "frames/verified.jpg",
+                "bbox": None,
+                "text": "object",
+                "entity_type": "diagram_component",
+                "confidence": 0.9,
+                "source": "vlm",
+            },
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "entity_links.jsonl",
+        [
+            {
+                "link_id": "link_explicit_verified_bool",
+                "project_id": "verified_project",
+                "segment_id": "seg_verified",
+                "entity_id": "ent_verified",
+                "frame_id": "frame_verified",
+                "link_type": "time_overlap",
+                "score": 0.2,
+                "evidence": ["time_overlap", "timestamp_fallback"],
+                "time_overlap": True,
+                "lexical_match": [],
+                "mention_candidate": [],
+                "verified": True,
+            },
+            {
+                "link_id": "link_explicit_verified_status",
+                "project_id": "verified_project",
+                "segment_id": "seg_verified",
+                "entity_id": "ent_verified",
+                "frame_id": "frame_verified",
+                "link_type": "time_overlap",
+                "score": 0.2,
+                "evidence": [],
+                "time_overlap": True,
+                "lexical_match": [],
+                "mention_candidate": [],
+                "verification_status": "verified",
+            },
+            {
+                "link_id": "link_plain_timestamp",
+                "project_id": "verified_project",
+                "segment_id": "seg_verified",
+                "entity_id": "ent_verified",
+                "frame_id": "frame_verified",
+                "link_type": "time_overlap",
+                "score": 0.2,
+                "evidence": ["time_overlap"],
+                "time_overlap": True,
+                "lexical_match": [],
+                "mention_candidate": [],
+            },
+        ],
+    )
+
+    summary = build_project_evidence_units(project_dir=project_dir)
+
+    rows = _read_jsonl(project_dir / "segments" / "evidence_units.jsonl")
+    unit = rows[0]
+    assert unit["verified_entity_link_ids"] == [
+        "link_explicit_verified_bool",
+        "link_explicit_verified_status",
+    ]
+    assert unit["candidate_entity_link_ids"] == ["link_plain_timestamp"]
+    assert unit["candidate_entity_link_statuses"] == {
+        "link_plain_timestamp": "timestamp_fallback"
+    }
+    assert unit["source_quality"]["has_verified_link"] is True
+    assert unit["source_quality"]["verified_link_count"] == 2
+    assert unit["source_quality"]["timestamp_fallback_link_count"] == 1
+    assert unit["alignment_status"] == "verified"
+    assert summary["counts"]["verified_links"] == 2
+    assert summary["counts"]["timestamp_fallback_links"] == 1
+    assert summary["alignment_status_counts"] == {"verified": 1}
+
+
 def _segment(segment_id: str, start_time: float, end_time: float, text: str) -> dict:
     return {
         "segment_id": segment_id,

@@ -422,8 +422,6 @@ def _merge_entities(
 
 
 def _link_alignment_status(link: dict[str, Any]) -> str:
-    if _is_timestamp_fallback_link(link):
-        return "timestamp_fallback"
     explicit_status = _text(
         link.get("alignment_status")
         or link.get("verification_status")
@@ -431,6 +429,8 @@ def _link_alignment_status(link: dict[str, Any]) -> str:
     ).casefold()
     if explicit_status == "verified" or link.get("verified") is True:
         return "verified"
+    if _is_timestamp_fallback_link(link):
+        return "timestamp_fallback"
     return "candidate"
 
 
