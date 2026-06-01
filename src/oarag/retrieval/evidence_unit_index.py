@@ -103,6 +103,7 @@ def _evidence_unit_candidate(*, rank: int, hit: dict[str, Any]) -> dict[str, Any
     candidate["score"] = _optional_float(hit.get("_rankingScore"))
     candidate["evidence_text"] = hit.get("evidence_text")
     candidate["semantic_text"] = hit.get("semantic_text")
+    candidate["transcript_window_text"] = hit.get("transcript_window_text")
     return candidate
 
 

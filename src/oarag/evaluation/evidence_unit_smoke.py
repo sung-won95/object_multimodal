@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -291,6 +292,7 @@ def _query_row(
         candidates=candidates,
         expected_segment_ids=expected_segment_ids,
         search_depth=target_rank_limit,
+        query_text=query_text,
     )
     reranked_candidates = _quality_rerank_candidates(candidates) if quality_rerank else []
     reranked_top_candidate = reranked_candidates[0] if reranked_candidates else {}
@@ -304,6 +306,7 @@ def _query_row(
             candidates=reranked_candidates,
             expected_segment_ids=expected_segment_ids,
             search_depth=target_rank_limit,
+            query_text=query_text,
         )
         if quality_rerank
         else {}
@@ -327,7 +330,7 @@ def _query_row(
         "status": "queried",
         "search_hit_count": len(candidates),
         "processing_time_ms": _optional_float(response.get("processing_time_ms")),
-        "top_evidence_unit": _public_candidate(top_candidate),
+        "top_evidence_unit": _public_candidate(top_candidate, query_text=query_text),
         "top_hit_memo": _top_hit_memo(
             candidate=top_candidate,
             expected_match=expected_match,
@@ -335,7 +338,9 @@ def _query_row(
             target_rank_bucket=str(target_diagnostics.get("target_rank_bucket") or ""),
         ),
         "target_diagnostics": target_diagnostics,
-        "reranked_top_evidence_unit": _public_candidate(reranked_top_candidate) if quality_rerank else None,
+        "reranked_top_evidence_unit": (
+            _public_candidate(reranked_top_candidate, query_text=query_text) if quality_rerank else None
+        ),
         "reranked_top_hit_memo": (
             _top_hit_memo(
                 candidate=reranked_top_candidate,
@@ -470,6 +475,8 @@ def _artifact_summary(
                 "units_with_visual_entity": int(counts.get("units_with_visual_entity") or 0),
                 "units_with_vlm_entity": int(counts.get("units_with_vlm_entity") or 0),
                 "units_with_verified_link": int(counts.get("units_with_verified_link") or 0),
+                "units_with_detected_text": int(counts.get("units_with_detected_text") or 0),
+                "units_with_visual_description": int(counts.get("units_with_visual_description") or 0),
             },
             "link_counts": {
                 "candidate_links": int(counts.get("candidate_links") or 0),
@@ -488,6 +495,9 @@ def _artifact_summary(
         for key in ("has_visual_state", "has_visual_entity", "has_vlm_entity", "has_verified_link"):
             if quality.get(key) is True:
                 source_quality[key] += 1
+        for key in ("has_detected_text", "has_visual_description"):
+            if quality.get(key) is True:
+                source_quality[key] += 1
         source_quality["candidate_links"] += int(quality.get("candidate_link_count") or 0)
         source_quality["verified_links"] += int(quality.get("verified_link_count") or 0)
         source_quality["timestamp_fallback_links"] += int(quality.get("timestamp_fallback_link_count") or 0)
@@ -500,6 +510,8 @@ def _artifact_summary(
             "units_with_visual_entity": source_quality["has_visual_entity"],
             "units_with_vlm_entity": source_quality["has_vlm_entity"],
             "units_with_verified_link": source_quality["has_verified_link"],
+            "units_with_detected_text": source_quality["has_detected_text"],
+            "units_with_visual_description": source_quality["has_visual_description"],
         },
         "link_counts": {
             "candidate_links": source_quality["candidate_links"],
@@ -510,7 +522,7 @@ def _artifact_summary(
     }
 
 
-def _public_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
+def _public_candidate(candidate: dict[str, Any], *, query_text: str | None = None) -> dict[str, Any] | None:
     if not candidate:
         return None
     source_quality = _mapping(candidate.get("source_quality"))
@@ -531,11 +543,21 @@ def _public_candidate(candidate: dict[str, Any]) -> dict[str, Any] | None:
             "has_vlm_entity": bool(source_quality.get("has_vlm_entity")),
             "has_verified_link": bool(source_quality.get("has_verified_link")),
             "has_timestamp_fallback_link": bool(source_quality.get("has_timestamp_fallback_link")),
+            "has_detected_text": bool(source_quality.get("has_detected_text")),
+            "has_visual_description": bool(source_quality.get("has_visual_description")),
+            "visual_state_detected_text_count": int(source_quality.get("visual_state_detected_text_count") or 0),
+            "visual_entity_detected_text_count": int(source_quality.get("visual_entity_detected_text_count") or 0),
+            "visual_description_count": int(source_quality.get("visual_description_count") or 0),
         },
         "rag_fields": {
             "evidence_text_available": bool(candidate.get("evidence_text")),
             "semantic_text_available": bool(candidate.get("semantic_text")),
         },
+        "content_coverage": _candidate_content_coverage(candidate),
+        "query_term_coverage": _query_term_coverage(
+            query_text=query_text or "",
+            candidate=candidate,
+        ),
     }
 
 
@@ -544,6 +566,7 @@ def _target_diagnostics(
     candidates: list[dict[str, Any]],
     expected_segment_ids: set[str],
     search_depth: int,
+    query_text: str,
 ) -> dict[str, Any]:
     if not expected_segment_ids:
         return {
@@ -573,9 +596,19 @@ def _target_diagnostics(
             else None
         ),
         "target_evidence_unit_quality": _candidate_quality_summary(target_candidate or {}),
+        "target_content_coverage": _candidate_content_coverage(target_candidate or {}),
+        "target_query_term_coverage": _query_term_coverage(
+            query_text=query_text,
+            candidate=target_candidate or {},
+        ),
         "top_vs_target_quality_delta": _candidate_quality_delta(
             top_candidate=top_candidate,
             target_candidate=target_candidate or {},
+        ),
+        "top_vs_target_content_delta": _candidate_content_delta(
+            top_candidate=top_candidate,
+            target_candidate=target_candidate or {},
+            query_text=query_text,
         ),
     }
 
@@ -613,6 +646,90 @@ def _candidate_quality_summary(candidate: dict[str, Any]) -> dict[str, Any]:
             "evidence_text_available": bool(candidate.get("evidence_text")),
             "semantic_text_available": bool(candidate.get("semantic_text")),
         },
+        "content_coverage": _candidate_content_coverage(candidate),
+    }
+
+
+def _candidate_content_coverage(candidate: dict[str, Any]) -> dict[str, Any]:
+    if not candidate:
+        return {}
+    evidence_text = _text_for_coverage(candidate.get("evidence_text"))
+    semantic_text = _text_for_coverage(candidate.get("semantic_text"))
+    transcript_text = _text_for_coverage(candidate.get("transcript_window_text"))
+    source_quality = _mapping(candidate.get("source_quality"))
+    return {
+        "evidence_text_char_count": len(evidence_text),
+        "semantic_text_char_count": len(semantic_text),
+        "transcript_window_char_count": len(transcript_text),
+        "evidence_text_bucket": _char_count_bucket(len(evidence_text)),
+        "semantic_text_bucket": _char_count_bucket(len(semantic_text)),
+        "transcript_window_bucket": _char_count_bucket(len(transcript_text)),
+        "visual_state_count": len(_string_list(candidate.get("visual_state_ids"))),
+        "visual_entity_count": len(_string_list(candidate.get("visual_entity_ids"))),
+        "candidate_entity_link_count": len(_string_list(candidate.get("candidate_entity_link_ids"))),
+        "verified_entity_link_count": len(_string_list(candidate.get("verified_entity_link_ids"))),
+        "timestamp_fallback_link_count": int(source_quality.get("timestamp_fallback_link_count") or 0),
+        "visual_state_detected_text_count": int(source_quality.get("visual_state_detected_text_count") or 0),
+        "visual_entity_detected_text_count": int(source_quality.get("visual_entity_detected_text_count") or 0),
+        "visual_description_count": int(source_quality.get("visual_description_count") or 0),
+    }
+
+
+def _query_term_coverage(*, query_text: str, candidate: dict[str, Any]) -> dict[str, Any]:
+    query_terms = _coverage_terms(query_text)
+    evidence_terms = set(_coverage_terms(_text_for_coverage(candidate.get("evidence_text"))))
+    semantic_terms = set(_coverage_terms(_text_for_coverage(candidate.get("semantic_text"))))
+    transcript_terms = set(_coverage_terms(_text_for_coverage(candidate.get("transcript_window_text"))))
+    combined_terms = evidence_terms | semantic_terms | transcript_terms
+    query_term_count = len(query_terms)
+    evidence_matches = len(query_terms & evidence_terms)
+    semantic_matches = len(query_terms & semantic_terms)
+    transcript_matches = len(query_terms & transcript_terms)
+    combined_matches = len(query_terms & combined_terms)
+    return {
+        "query_term_count": query_term_count,
+        "evidence_text_match_count": evidence_matches,
+        "semantic_text_match_count": semantic_matches,
+        "transcript_window_match_count": transcript_matches,
+        "combined_match_count": combined_matches,
+        "combined_match_ratio": _ratio(combined_matches, query_term_count),
+        "combined_match_bucket": _ratio_bucket(combined_matches, query_term_count),
+    }
+
+
+def _candidate_content_delta(
+    *,
+    top_candidate: dict[str, Any],
+    target_candidate: dict[str, Any],
+    query_text: str,
+) -> dict[str, Any]:
+    if not top_candidate or not target_candidate:
+        return {"status": "not_available"}
+    top_content = _candidate_content_coverage(top_candidate)
+    target_content = _candidate_content_coverage(target_candidate)
+    top_terms = _query_term_coverage(query_text=query_text, candidate=top_candidate)
+    target_terms = _query_term_coverage(query_text=query_text, candidate=target_candidate)
+    return {
+        "status": "available",
+        "same_evidence_unit": top_candidate.get("evidence_unit_id") == target_candidate.get("evidence_unit_id"),
+        "evidence_text_char_count_delta": int(top_content.get("evidence_text_char_count") or 0)
+        - int(target_content.get("evidence_text_char_count") or 0),
+        "semantic_text_char_count_delta": int(top_content.get("semantic_text_char_count") or 0)
+        - int(target_content.get("semantic_text_char_count") or 0),
+        "transcript_window_char_count_delta": int(top_content.get("transcript_window_char_count") or 0)
+        - int(target_content.get("transcript_window_char_count") or 0),
+        "combined_query_term_match_count_delta": int(top_terms.get("combined_match_count") or 0)
+        - int(target_terms.get("combined_match_count") or 0),
+        "top_query_term_match_bucket": top_terms.get("combined_match_bucket"),
+        "target_query_term_match_bucket": target_terms.get("combined_match_bucket"),
+        "target_has_more_query_term_matches": int(top_terms.get("combined_match_count") or 0)
+        < int(target_terms.get("combined_match_count") or 0),
+        "target_has_longer_semantic_text": int(top_content.get("semantic_text_char_count") or 0)
+        < int(target_content.get("semantic_text_char_count") or 0),
+        "public_note": (
+            "Query-term diagnostics expose only counts, ratios, and buckets; raw query terms "
+            "and raw evidence text remain redacted."
+        ),
     }
 
 
@@ -873,6 +990,8 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- index status: `{index.get('status')}`",
                 f"- RAG input inspectable top hits: `{suite.get('rag_input_inspection', {}).get('inspectable_top_hit_count', 0)}`",
                 f"- target rank buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('rank_bucket_counts', {}), sort_keys=True)}`",
+                f"- found target query-term buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('found_target_query_term_bucket_counts', {}), sort_keys=True)}`",
+                f"- top-vs-target coverage flags: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('quality_delta_flag_counts', {}), sort_keys=True)}`",
                 f"- reranked target rank buckets: `{json.dumps(suite.get('rerank_diagnostics', {}).get('reranked_target_rank_bucket_counts', {}), sort_keys=True)}`",
                 f"- reranked top-hit matches: `{suite.get('rerank_diagnostics', {}).get('reranked_top_match_count', 0)}`",
                 "",
@@ -931,12 +1050,24 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
         ):
             if delta.get(key) is True:
                 top_better_counts[key] += 1
+        content_delta = _mapping(diag.get("top_vs_target_content_delta"))
+        for key in (
+            "target_has_more_query_term_matches",
+            "target_has_longer_semantic_text",
+        ):
+            if content_delta.get(key) is True:
+                top_better_counts[key] += 1
+    query_term_buckets = Counter(
+        str(_mapping(diag.get("target_query_term_coverage")).get("combined_match_bucket") or "unknown")
+        for diag in found
+    )
     return {
         "target_configured_count": len(configured),
         "target_found_in_top_k_count": len(found),
         "rank_bucket_counts": dict(buckets),
         "found_target_quality_counts": dict(target_quality),
         "quality_delta_flag_counts": dict(top_better_counts),
+        "found_target_query_term_bucket_counts": dict(query_term_buckets),
         "public_note": (
             "Target rank diagnostics use only configured expected segment IDs and "
             "hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
@@ -1067,6 +1198,51 @@ def _verified_alignment_note(counts: dict[str, Any]) -> str:
     if verified == 0 and fallback > 0:
         return "timestamp fallback links present, but verified object alignment count is zero"
     return "verified links are counted only from explicit verified link fields"
+
+
+def _text_for_coverage(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    return " ".join(str(value).split())
+
+
+def _coverage_terms(value: str) -> set[str]:
+    return {
+        term
+        for term in re.findall(r"[A-Za-z0-9]+", value.casefold())
+        if len(term) >= 2
+    }
+
+
+def _ratio(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator, 4)
+
+
+def _ratio_bucket(numerator: int, denominator: int) -> str:
+    if denominator <= 0:
+        return "no_query_terms"
+    ratio = numerator / denominator
+    if ratio <= 0:
+        return "none"
+    if ratio < 0.25:
+        return "low"
+    if ratio < 0.5:
+        return "medium"
+    if ratio < 0.75:
+        return "high"
+    return "very_high"
+
+
+def _char_count_bucket(count: int) -> str:
+    if count <= 0:
+        return "empty"
+    if count < 120:
+        return "short"
+    if count < 600:
+        return "medium"
+    return "long"
 
 
 def _evidence_unit_note(
