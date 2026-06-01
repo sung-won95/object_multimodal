@@ -8,12 +8,15 @@ from oarag.cli import (
     build_vlm_alignment_parser,
     cmd_build_project_evidence_units,
     cmd_build_project_windows,
+    cmd_index_project_evidence_units,
     cmd_index_project,
     cmd_index_project_visual_entities,
     cmd_index_project_windows,
+    cmd_query_project_evidence_units,
     parse_vlm_options,
 )
 from oarag.meili import (
+    EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
     HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
@@ -346,6 +349,77 @@ def test_cmd_build_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
     assert calls["build_kwargs"]["previous_neighbor_count"] == 2
     assert calls["build_kwargs"]["next_neighbor_count"] == 0
     assert json.loads(capsys.readouterr().out)["counts"]["evidence_units_total"] == 1
+
+
+def test_index_project_evidence_units_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        [
+            "index-project-evidence-units",
+            "--index",
+            "local_evidence_units",
+            "--project-id",
+            "sample_project",
+        ]
+    )
+
+    assert args.index == "local_evidence_units"
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.evidence_units is None
+    assert args.batch_size == 500
+    assert args.reset is False
+    assert args.settings_profile == EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE
+
+
+def test_cmd_index_project_evidence_units_forwards_inputs(monkeypatch, capsys) -> None:
+    calls = {}
+    fake_client = object()
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_index_project_evidence_units(client, **kwargs):
+        calls["client"] = client
+        calls["index_kwargs"] = kwargs
+        return {
+            "settings_profile": kwargs["settings_profile"],
+            "indexed_documents": 2,
+        }
+
+    monkeypatch.setattr("oarag.cli.client_from_args", lambda args: fake_client)
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr(
+        "oarag.cli.index_project_evidence_units",
+        fake_index_project_evidence_units,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "index-project-evidence-units",
+            "--index",
+            "local_evidence_units",
+            "--project-dir",
+            str(project_dir),
+            "--evidence-units",
+            "segments/evidence_units.jsonl",
+            "--batch-size",
+            "100",
+            "--reset",
+        ]
+    )
+
+    cmd_index_project_evidence_units(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["client"] is fake_client
+    assert calls["index_kwargs"]["index_uid"] == "local_evidence_units"
+    assert calls["index_kwargs"]["project_dir"] == Path("/tmp/project")
+    assert calls["index_kwargs"]["evidence_units"].as_posix() == "segments/evidence_units.jsonl"
+    assert calls["index_kwargs"]["batch_size"] == 100
+    assert calls["index_kwargs"]["reset"] is True
+    assert json.loads(capsys.readouterr().out)["indexed_documents"] == 2
 
 
 def test_index_project_windows_cli_defaults() -> None:
@@ -862,6 +936,76 @@ def test_query_project_cli_accepts_window_index_kind() -> None:
 
     assert args.index == "sample_windows"
     assert args.index_kind == "window"
+
+
+def test_query_project_evidence_units_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        [
+            "query-project-evidence-units",
+            "--index",
+            "sample_evidence_units",
+            "--project-id",
+            "sample_project",
+            "--query",
+            "gradient arrow",
+        ]
+    )
+
+    assert args.index == "sample_evidence_units"
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.query == "gradient arrow"
+    assert args.limit == 5
+    assert args.evidence_units is None
+    assert args.output is None
+
+
+def test_cmd_query_project_evidence_units_forwards_inputs(monkeypatch, capsys) -> None:
+    calls = {}
+    fake_client = object()
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_query_project_evidence_units(**kwargs):
+        calls["query_kwargs"] = kwargs
+        return {"query": kwargs["query"], "candidates": []}
+
+    monkeypatch.setattr("oarag.cli.client_from_args", lambda args: fake_client)
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr(
+        "oarag.cli.query_project_evidence_units",
+        fake_query_project_evidence_units,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "query-project-evidence-units",
+            "--index",
+            "sample_evidence_units",
+            "--project-dir",
+            str(project_dir),
+            "--query",
+            "gradient arrow",
+            "--limit",
+            "3",
+            "--evidence-units",
+            "segments/evidence_units.jsonl",
+        ]
+    )
+
+    cmd_query_project_evidence_units(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["query_kwargs"]["client"] is fake_client
+    assert calls["query_kwargs"]["index_uid"] == "sample_evidence_units"
+    assert calls["query_kwargs"]["project_dir"] == Path("/tmp/project")
+    assert calls["query_kwargs"]["query"] == "gradient arrow"
+    assert calls["query_kwargs"]["limit"] == 3
+    assert calls["query_kwargs"]["evidence_units"].as_posix() == "segments/evidence_units.jsonl"
+    assert json.loads(capsys.readouterr().out)["query"] == "gradient arrow"
 
 
 def test_ask_project_cli_defaults() -> None:

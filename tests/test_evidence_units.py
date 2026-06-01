@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
+from oarag.retrieval.evidence_unit_index import query_project_evidence_units
 from oarag.retrieval.evidence_units import build_project_evidence_units
+from oarag.retrieval.project_index import index_project_evidence_units
 
 
 def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback(
@@ -131,6 +133,139 @@ def test_build_project_evidence_units_supports_transcript_only_project(tmp_path:
     assert rows[0]["visual_entity_ids"] == []
 
 
+def test_index_project_evidence_units_indexes_artifact_and_preserves_fallback_status(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
+    _write_jsonl(
+        project_dir / "segments" / "evidence_units.jsonl",
+        [
+            {
+                "evidence_unit_id": "evu_seg_1",
+                "project_id": "sample_project",
+                "video_id": "sample_video",
+                "target_segment_id": "seg_1",
+                "source_segment_ids": ["seg_1"],
+                "start_time": 10.0,
+                "end_time": 14.0,
+                "transcript_window_text": "This gradient arrow shows descent.",
+                "visual_state_ids": ["vstate_1"],
+                "visual_entity_ids": ["ent_gradient_arrow"],
+                "verified_entity_link_ids": [],
+                "candidate_entity_link_ids": ["link_timestamp"],
+                "candidate_entity_link_statuses": {
+                    "link_timestamp": "timestamp_fallback",
+                },
+                "alignment_status": "candidate",
+                "source_quality": {
+                    "has_visual_state": True,
+                    "has_visual_entity": True,
+                    "has_vlm_entity": False,
+                    "has_verified_link": False,
+                    "has_timestamp_fallback_link": True,
+                },
+                "evidence_text": "Transcript: This gradient arrow shows descent.",
+                "semantic_text": "gradient arrow descent",
+            }
+        ],
+    )
+    client = _FakeMeiliClient()
+
+    summary = index_project_evidence_units(
+        client,
+        index_uid="sample_evidence_units",
+        project_dir=project_dir,
+        reset=True,
+    )
+
+    assert client.created_indexes == [("sample_evidence_units", "evidence_unit_id")]
+    assert client.deleted_indexes == ["sample_evidence_units"]
+    assert client.settings["searchableAttributes"][:2] == ["semantic_text", "evidence_text"]
+    assert summary["indexed_documents"] == 1
+    assert summary["alignment_status_counts"] == {"candidate": 1}
+    indexed = client.documents[0]
+    assert indexed["evidence_unit_id"] == "evu_seg_1"
+    assert indexed["candidate_entity_link_statuses"] == {
+        "link_timestamp": "timestamp_fallback"
+    }
+    assert indexed["verified_entity_link_ids"] == []
+
+
+def test_query_project_evidence_units_returns_required_fields(tmp_path: Path) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
+    _write_jsonl(
+        project_dir / "segments" / "evidence_units.jsonl",
+        [
+            {
+                "evidence_unit_id": "evu_seg_1",
+                "project_id": "sample_project",
+            }
+        ],
+    )
+    hit = {
+        "evidence_unit_id": "evu_seg_1",
+        "project_id": "sample_project",
+        "video_id": "sample_video",
+        "target_segment_id": "seg_1",
+        "source_segment_ids": ["seg_1"],
+        "start_time": 10.0,
+        "end_time": 14.0,
+        "visual_state_ids": ["vstate_1"],
+        "visual_entity_ids": ["ent_gradient_arrow"],
+        "verified_entity_link_ids": [],
+        "candidate_entity_link_ids": ["link_timestamp"],
+        "candidate_entity_link_statuses": {
+            "link_timestamp": "timestamp_fallback",
+        },
+        "alignment_status": "candidate",
+        "source_quality": {
+            "has_verified_link": False,
+            "timestamp_fallback_link_count": 1,
+        },
+        "evidence_text": "Transcript: gradient arrow",
+        "semantic_text": "gradient arrow",
+        "_rankingScore": 0.9,
+    }
+    client = _FakeMeiliClient(search_hits=[hit])
+
+    response = query_project_evidence_units(
+        client=client,
+        index_uid="sample_evidence_units",
+        project_dir=project_dir,
+        query="gradient arrow",
+        limit=1,
+    )
+
+    assert client.search_calls == [
+        {
+            "index_uid": "sample_evidence_units",
+            "query": "gradient arrow",
+            "limit": 1,
+            "filter": 'project_id = "sample_project"',
+        }
+    ]
+    candidate = response["candidates"][0]
+    required_fields = {
+        "evidence_unit_id",
+        "project_id",
+        "video_id",
+        "target_segment_id",
+        "source_segment_ids",
+        "start_time",
+        "end_time",
+        "visual_state_ids",
+        "visual_entity_ids",
+        "candidate_entity_link_ids",
+        "candidate_entity_link_statuses",
+        "alignment_status",
+        "source_quality",
+    }
+    assert required_fields <= set(candidate)
+    assert candidate["verified_entity_link_ids"] == []
+    assert candidate["candidate_entity_link_statuses"]["link_timestamp"] == "timestamp_fallback"
+    assert candidate["source_quality"]["has_verified_link"] is False
+
+
 def test_explicit_verified_link_is_not_downgraded_to_timestamp_fallback(
     tmp_path: Path,
 ) -> None:
@@ -253,3 +388,43 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+class _FakeMeiliClient:
+    def __init__(self, search_hits: list[dict] | None = None) -> None:
+        self.search_hits = search_hits or []
+        self.created_indexes: list[tuple[str, str]] = []
+        self.deleted_indexes: list[str] = []
+        self.settings: dict = {}
+        self.documents: list[dict] = []
+        self.search_calls: list[dict] = []
+
+    def delete_index(self, index_uid: str):
+        self.deleted_indexes.append(index_uid)
+        return {"taskUid": 1}
+
+    def create_index(self, index_uid: str, primary_key: str):
+        self.created_indexes.append((index_uid, primary_key))
+        return {"taskUid": 2}
+
+    def update_settings(self, index_uid: str, settings: dict):
+        self.settings = settings
+        return {"taskUid": 3}
+
+    def add_documents(self, index_uid: str, documents: list[dict]):
+        self.documents.extend(documents)
+        return {"taskUid": 4}
+
+    def search(self, index_uid: str, query: str, *, limit: int, filter: str):
+        self.search_calls.append(
+            {
+                "index_uid": index_uid,
+                "query": query,
+                "limit": limit,
+                "filter": filter,
+            }
+        )
+        return {"hits": self.search_hits[:limit], "processingTimeMs": 1}
+
+    def wait_task(self, task, ignored_error_codes=None):
+        return task
