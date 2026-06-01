@@ -17,7 +17,12 @@ from oarag.core.schemas import (
     VLM_FRAME_CANDIDATES_ARTIFACT,
     VLM_VISUAL_OBSERVATIONS_ARTIFACT,
 )
-from oarag.vision.vlm import DEFAULT_VLM_BACKEND, make_vlm_backend, run_vlm
+from oarag.vision.vlm import (
+    DEFAULT_VLM_BACKEND,
+    make_vlm_backend,
+    preflight_vlm_backend,
+    run_vlm,
+)
 from oarag.vision.vlm_frame_candidates import (
     VLMFrameCandidateConfig,
     generate_vlm_frame_candidates,
@@ -70,6 +75,14 @@ def run_vlm_alignment_pipeline(config: VLMAlignmentPipelineConfig) -> dict[str, 
         raise FileNotFoundError(f"Project directory not found: {project_dir}")
 
     _validate_vlm_execution(backend=config.vlm_backend, model=config.vlm_model)
+    if not config.dry_run:
+        preflight_vlm_backend(
+            project_dir=project_dir,
+            backend=config.vlm_backend,
+            model=config.vlm_model,
+            device=config.vlm_device,
+            options=config.vlm_options,
+        )
     paths = _resolve_pipeline_paths(project_dir=project_dir, config=config)
     manifest = _read_json_object(paths.project_manifest) if paths.project_manifest.exists() else {}
     project_id = _optional_str(manifest.get("project_id")) or paths.project_dir.name

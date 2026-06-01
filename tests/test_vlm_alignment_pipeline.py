@@ -40,6 +40,39 @@ def test_run_vlm_alignment_pipeline_dry_run_does_not_write_artifacts(tmp_path: P
     assert not (project_dir / "manifests" / "audio_visual_consistency.jsonl").exists()
 
 
+def test_run_vlm_alignment_pipeline_dry_run_skips_command_preflight(
+    tmp_path: Path,
+) -> None:
+    project_dir = _make_project(tmp_path)
+
+    summary = run_vlm_alignment_pipeline(
+        VLMAlignmentPipelineConfig(
+            project_dir=project_dir,
+            vlm_backend="command",
+            vlm_model="real-vlm-placeholder",
+            vlm_options={
+                "command": ["will-not-run"],
+                "input_mode": "json-stdin",
+                "preflight_command": [
+                    "will-not-run",
+                    "--model",
+                    "{model}",
+                ],
+            },
+            candidate_config=VLMFrameCandidateConfig(
+                max_candidates=1,
+                max_per_segment=1,
+                min_time_gap_seconds=0.0,
+            ),
+            dry_run=True,
+        )
+    )
+
+    assert summary["status"] == "planned"
+    assert summary["stages"][PIPELINE_STAGE_VISUAL_OBSERVATIONS]["status"] == "would_run"
+    assert not (project_dir / "manifests" / "vlm_frame_candidates.jsonl").exists()
+
+
 def test_run_vlm_alignment_pipeline_generates_all_artifacts(tmp_path: Path) -> None:
     project_dir = _make_project(tmp_path)
 

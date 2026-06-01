@@ -37,7 +37,14 @@ VLM_ALLOWED_ROW_STATUSES = {
     VLM_PARSE_FAILURE_STATUS,
 }
 _SENSITIVE_OPTION_PARTS = ("api_key", "apikey", "token", "secret", "password", "credential")
-_CONFIGURED_OPTION_KEYS = {"command", "jsonl_path", "input_path", "path", "input"}
+_CONFIGURED_OPTION_KEYS = {
+    "command",
+    "preflight_command",
+    "jsonl_path",
+    "input_path",
+    "path",
+    "input",
+}
 _JSONL_BACKEND_PATH_OPTION_KEYS = ("jsonl_path", "input_path", "path", "input")
 _COMMAND_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -333,6 +340,13 @@ def run_vlm(
         device=_optional_str(device),
         options=resolved_options,
     )
+    preflight_vlm_backend(
+        project_dir=resolved_project_dir,
+        backend=runner.backend,
+        model=resolved_model,
+        device=config.device,
+        options=resolved_options,
+    )
 
     started_at = time.perf_counter()
     existing_observations = (
@@ -448,6 +462,33 @@ def run_vlm(
         "elapsed_seconds": elapsed_seconds,
         "average_frame_latency_seconds": average_frame_latency_seconds,
     }
+
+
+def preflight_vlm_backend(
+    *,
+    project_dir: Path,
+    backend: str,
+    model: str | None,
+    device: str | None = None,
+    options: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run backend-level checks that can fail before frame processing starts."""
+    runner = make_vlm_backend(backend)
+    resolved_model = _validate_model(model)
+    resolved_options = _resolve_vlm_backend_options(
+        project_dir=project_dir.expanduser().resolve(),
+        backend=runner.backend,
+        options=dict(options or {}),
+    )
+    config = VLMRunConfig(
+        backend=runner.backend,
+        model=resolved_model,
+        device=_optional_str(device),
+        options=resolved_options,
+    )
+    if runner.backend != "command":
+        return {"status": "not_required", "backend": runner.backend}
+    return _preflight_command_backend(config=config)
 
 
 def _validate_model(model: str | None) -> str:
@@ -787,6 +828,120 @@ def _format_command(
             resolved_part = resolved_part.replace(f"{{{key}}}", value)
         formatted.append(resolved_part)
     return formatted
+
+
+def _preflight_command_backend(*, config: VLMRunConfig) -> dict[str, Any]:
+    raw_command = config.options.get("preflight_command")
+    if raw_command is None:
+        return {"status": "not_configured", "backend": "command"}
+
+    command = _format_preflight_command(raw_command, config=config)
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise ValueError(
+            "VLM command preflight failed before frame processing: "
+            f"command not found: {_command_executable_name(command)}"
+        ) from exc
+
+    payload = _parse_preflight_payload(result.stdout)
+    if result.returncode != 0:
+        raise ValueError(_preflight_failure_message(command=command, payload=payload, result=result))
+    if payload.get("ok") is False:
+        raise ValueError(_preflight_failure_message(command=command, payload=payload, result=result))
+
+    return {
+        "status": "passed",
+        "backend": "command",
+        "command": "<configured>",
+        "details": _public_preflight_payload(payload),
+    }
+
+
+def _format_preflight_command(raw_command: Any, *, config: VLMRunConfig) -> list[str]:
+    if isinstance(raw_command, str):
+        parts = shlex.split(raw_command)
+    elif isinstance(raw_command, list):
+        parts = [str(part) for part in raw_command]
+    else:
+        raise ValueError("vlm_options.preflight_command must be a string or list")
+    if not parts:
+        raise ValueError("vlm_options.preflight_command must not be empty")
+
+    values = {
+        "model": config.model,
+        "device": config.device or "",
+        "run_id": config.run_id,
+    }
+    formatted: list[str] = []
+    for part in parts:
+        unknown_placeholders = [
+            match.group(1)
+            for match in _COMMAND_PLACEHOLDER_RE.finditer(part)
+            if match.group(1) not in values
+        ]
+        if unknown_placeholders:
+            raise ValueError(
+                f"Unknown VLM preflight command placeholder: {unknown_placeholders[0]}"
+            )
+        resolved_part = part
+        for key, value in values.items():
+            resolved_part = resolved_part.replace(f"{{{key}}}", value)
+        formatted.append(resolved_part)
+    return formatted
+
+
+def _parse_preflight_payload(stdout: str) -> dict[str, Any]:
+    stripped = stdout.strip()
+    if not stripped:
+        return {}
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return {"message": "preflight command returned non-JSON stdout"}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _preflight_failure_message(
+    *,
+    command: list[str],
+    payload: Mapping[str, Any],
+    result: subprocess.CompletedProcess[str],
+) -> str:
+    details = _public_preflight_payload(payload)
+    message = _optional_str(details.get("message")) or "configuration blocker"
+    missing = details.get("missing")
+    if isinstance(missing, list) and missing:
+        missing_text = ", ".join(str(item) for item in missing)
+        message = f"{message}; missing: {missing_text}"
+    return (
+        "VLM command preflight failed before frame processing: "
+        f"{message} ({_command_executable_name(command)} exited with {result.returncode})"
+    )
+
+
+def _public_preflight_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    public: dict[str, Any] = {}
+    for key, value in payload.items():
+        normalized_key = str(key)
+        lowered = normalized_key.lower().replace("-", "_")
+        if any(part in lowered for part in _SENSITIVE_OPTION_PARTS):
+            public[normalized_key] = "<redacted>"
+        elif isinstance(value, Mapping):
+            public[normalized_key] = _public_preflight_payload(value)
+        elif isinstance(value, list):
+            public[normalized_key] = [
+                _public_preflight_payload(item) if isinstance(item, Mapping) else item
+                for item in value
+            ]
+        else:
+            public[normalized_key] = value
+    return public
 
 
 def _run_command(
