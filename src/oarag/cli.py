@@ -1527,6 +1527,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate manifest/output wiring without building artifacts or contacting Meilisearch.",
     )
+    evidence_unit_smoke.add_argument(
+        "--quality-rerank",
+        action="store_true",
+        help="Add smoke-only deterministic quality-aware rerank diagnostics to public outputs.",
+    )
     evidence_unit_smoke.set_defaults(func=cmd_evidence_unit_smoke)
 
     return parser
@@ -2652,6 +2657,7 @@ def cmd_evidence_unit_smoke(args: argparse.Namespace) -> None:
         output_dir=args.output_dir,
         repo_root=default_paths().repo_root,
         dry_run=args.dry_run,
+        quality_rerank=args.quality_rerank,
     )
     print(
         json.dumps(

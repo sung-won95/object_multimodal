@@ -1,0 +1,283 @@
+{
+  "schema_version": "evidence-unit-retrieval-smoke-public-v1",
+  "run_id": "issue_190_quality_rerank_baseline",
+  "manifest_ref": "a64bca5234ca",
+  "privacy": {
+    "raw_query_text": "redacted",
+    "transcript_excerpt": "redacted",
+    "semantic_text": "redacted",
+    "local_paths": "redacted",
+    "raw_ids": "hashed_refs",
+    "raw_response_in_public_output": false
+  },
+  "dry_run": false,
+  "meilisearch": {
+    "available": true,
+    "status": "available",
+    "skip_reason": null
+  },
+  "suite_count": 2,
+  "query_count": 4,
+  "query_status_counts": {
+    "queried": 4
+  },
+  "suites": [
+    {
+      "schema_version": "evidence-unit-retrieval-smoke-public-v1",
+      "suite_id": "mit_lec01",
+      "project_ref": "8116c0dc4b4a",
+      "query_count": 2,
+      "build": {
+        "status": "built",
+        "counts": {
+          "segments_total": 1023,
+          "frames_total": 35,
+          "visual_entities_total": 499,
+          "entity_links_total": 710,
+          "evidence_units_total": 1023
+        },
+        "alignment_status_counts": {
+          "transcript_only": 12,
+          "candidate": 1011
+        },
+        "source_quality_counts": {
+          "units_with_visual_state": 1011,
+          "units_with_visual_entity": 774,
+          "units_with_vlm_entity": 0,
+          "units_with_verified_link": 0
+        },
+        "link_counts": {
+          "candidate_links": 126,
+          "verified_links": 0,
+          "timestamp_fallback_links": 1946
+        },
+        "verified_alignment_note": "timestamp fallback links present, but verified object alignment count is zero"
+      },
+      "meilisearch": {
+        "available": true,
+        "status": "available"
+      },
+      "index": {
+        "ref": "index:786c9fccba20",
+        "status": "indexed",
+        "indexed_documents": 1023,
+        "indexed_batches": 3,
+        "alignment_status_counts": {
+          "transcript_only": 12,
+          "candidate": 1011
+        },
+        "source_quality_counts": {
+          "has_visual_state": 1011,
+          "has_visual_entity": 774,
+          "has_vlm_entity": 0,
+          "has_verified_link": 0,
+          "has_timestamp_fallback_link": 88
+        },
+        "settings_profile": "evidence_units_default_v1",
+        "settings_hash": "83fe22992f0aac66cf4ff7918bbfd047b25c6c2b549b363fad481bfff5cdb43a"
+      },
+      "rag_input_inspection": {
+        "query_count": 2,
+        "queried_count": 2,
+        "inspectable_top_hit_count": 2,
+        "top_hits_with_visual_state_count": 2,
+        "artifact_evidence_units_total": 1023,
+        "public_note": "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/semantic_text availability flags; text content remains redacted from this report."
+      },
+      "target_rank_diagnostics": {
+        "target_configured_count": 2,
+        "target_found_in_top_k_count": 1,
+        "rank_bucket_counts": {
+          "top50": 1,
+          "not_found": 1
+        },
+        "found_target_quality_counts": {
+          "has_visual_state": 1,
+          "has_visual_entity": 1
+        },
+        "quality_delta_flag_counts": {
+          "target_has_more_visual_entities": 1
+        },
+        "public_note": "Target rank diagnostics use only configured expected segment IDs and hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
+      },
+      "rerank_diagnostics": {
+        "enabled_query_count": 2,
+        "computed_query_count": 2,
+        "top_changed_count": 0,
+        "base_top_match_count": 0,
+        "reranked_top_match_count": 0,
+        "base_target_rank_bucket_counts": {
+          "top50": 1,
+          "not_found": 1
+        },
+        "reranked_target_rank_bucket_counts": {
+          "top5": 1,
+          "not_found": 1
+        },
+        "reranked_top_score_component_presence_counts": {
+          "rank_preservation": 2,
+          "meili_score": 2,
+          "evidence_text_available": 2,
+          "semantic_text_available": 2,
+          "visual_state_count": 2,
+          "visual_entity_count": 2
+        },
+        "public_note": "Rerank diagnostics compare base and deterministic quality-aware ordering using only candidate metadata. Expected targets are evaluation-only labels."
+      }
+    },
+    {
+      "schema_version": "evidence-unit-retrieval-smoke-public-v1",
+      "suite_id": "mit_lec04",
+      "project_ref": "2aa7e0837dba",
+      "query_count": 2,
+      "build": {
+        "status": "built",
+        "counts": {
+          "segments_total": 1451,
+          "frames_total": 37,
+          "visual_entities_total": 386,
+          "entity_links_total": 800,
+          "evidence_units_total": 1451
+        },
+        "alignment_status_counts": {
+          "transcript_only": 20,
+          "candidate": 1431
+        },
+        "source_quality_counts": {
+          "units_with_visual_state": 1431,
+          "units_with_visual_entity": 831,
+          "units_with_vlm_entity": 0,
+          "units_with_verified_link": 0
+        },
+        "link_counts": {
+          "candidate_links": 144,
+          "verified_links": 0,
+          "timestamp_fallback_links": 2256
+        },
+        "verified_alignment_note": "timestamp fallback links present, but verified object alignment count is zero"
+      },
+      "meilisearch": {
+        "available": true,
+        "status": "available"
+      },
+      "index": {
+        "ref": "index:d39ef2926c4f",
+        "status": "indexed",
+        "indexed_documents": 1451,
+        "indexed_batches": 3,
+        "alignment_status_counts": {
+          "transcript_only": 20,
+          "candidate": 1431
+        },
+        "source_quality_counts": {
+          "has_visual_state": 1431,
+          "has_visual_entity": 831,
+          "has_vlm_entity": 0,
+          "has_verified_link": 0,
+          "has_timestamp_fallback_link": 84
+        },
+        "settings_profile": "evidence_units_default_v1",
+        "settings_hash": "83fe22992f0aac66cf4ff7918bbfd047b25c6c2b549b363fad481bfff5cdb43a"
+      },
+      "rag_input_inspection": {
+        "query_count": 2,
+        "queried_count": 2,
+        "inspectable_top_hit_count": 2,
+        "top_hits_with_visual_state_count": 2,
+        "artifact_evidence_units_total": 1451,
+        "public_note": "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/semantic_text availability flags; text content remains redacted from this report."
+      },
+      "target_rank_diagnostics": {
+        "target_configured_count": 2,
+        "target_found_in_top_k_count": 1,
+        "rank_bucket_counts": {
+          "top10": 1,
+          "not_found": 1
+        },
+        "found_target_quality_counts": {
+          "has_visual_state": 1,
+          "has_visual_entity": 1
+        },
+        "quality_delta_flag_counts": {},
+        "public_note": "Target rank diagnostics use only configured expected segment IDs and hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
+      },
+      "rerank_diagnostics": {
+        "enabled_query_count": 2,
+        "computed_query_count": 2,
+        "top_changed_count": 0,
+        "base_top_match_count": 0,
+        "reranked_top_match_count": 0,
+        "base_target_rank_bucket_counts": {
+          "top10": 1,
+          "not_found": 1
+        },
+        "reranked_target_rank_bucket_counts": {
+          "top10": 1,
+          "not_found": 1
+        },
+        "reranked_top_score_component_presence_counts": {
+          "rank_preservation": 2,
+          "meili_score": 2,
+          "evidence_text_available": 2,
+          "semantic_text_available": 2,
+          "visual_state_count": 2,
+          "visual_entity_count": 2
+        },
+        "public_note": "Rerank diagnostics compare base and deterministic quality-aware ordering using only candidate metadata. Expected targets are evaluation-only labels."
+      }
+    }
+  ],
+  "rag_input_inspection": {
+    "query_count": 4,
+    "queried_count": 4,
+    "inspectable_top_hit_count": 4,
+    "top_hits_with_visual_state_count": 4,
+    "artifact_evidence_units_total": null,
+    "public_note": "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/semantic_text availability flags; text content remains redacted from this report."
+  },
+  "target_rank_diagnostics": {
+    "target_configured_count": 4,
+    "target_found_in_top_k_count": 2,
+    "rank_bucket_counts": {
+      "top50": 1,
+      "not_found": 2,
+      "top10": 1
+    },
+    "found_target_quality_counts": {
+      "has_visual_state": 2,
+      "has_visual_entity": 2
+    },
+    "quality_delta_flag_counts": {
+      "target_has_more_visual_entities": 1
+    },
+    "public_note": "Target rank diagnostics use only configured expected segment IDs and hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
+  },
+  "rerank_diagnostics": {
+    "enabled_query_count": 4,
+    "computed_query_count": 4,
+    "top_changed_count": 0,
+    "base_top_match_count": 0,
+    "reranked_top_match_count": 0,
+    "base_target_rank_bucket_counts": {
+      "top50": 1,
+      "not_found": 2,
+      "top10": 1
+    },
+    "reranked_target_rank_bucket_counts": {
+      "top5": 1,
+      "not_found": 2,
+      "top10": 1
+    },
+    "reranked_top_score_component_presence_counts": {
+      "rank_preservation": 4,
+      "meili_score": 4,
+      "evidence_text_available": 4,
+      "semantic_text_available": 4,
+      "visual_state_count": 4,
+      "visual_entity_count": 4
+    },
+    "public_note": "Rerank diagnostics compare base and deterministic quality-aware ordering using only candidate metadata. Expected targets are evaluation-only labels."
+  },
+  "quality_rerank_requested": true,
+  "object_alignment_note": "timestamp-only overlap is reported as candidate/fallback evidence only; it is not counted as verified object alignment"
+}
