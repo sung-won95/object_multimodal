@@ -175,6 +175,15 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert rows[0]["top_evidence_unit"]["alignment_status"] == "candidate"
     assert rows[0]["top_evidence_unit"]["source_quality"]["has_verified_link"] is False
     assert rows[0]["top_evidence_unit"]["source_quality"]["has_timestamp_fallback_link"] is False
+    assert rows[0]["top_evidence_unit"]["content_coverage"]["semantic_text_char_count"] > 0
+    assert rows[0]["top_evidence_unit"]["query_term_coverage"]["query_term_count"] > 0
+    assert rows[0]["top_evidence_unit"]["query_term_coverage"]["combined_match_bucket"] in {
+        "none",
+        "low",
+        "medium",
+        "high",
+        "very_high",
+    }
     assert rows[0]["top_hit_memo"]["top_expected_match"] is False
     assert rows[0]["target_diagnostics"]["target_configured"] is True
     assert rows[0]["target_diagnostics"]["target_found_in_top_k"] is True
@@ -182,8 +191,12 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert rows[0]["target_diagnostics"]["target_rank_bucket"] == "top5"
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_verified_link"] is False
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_timestamp_fallback_link"] is True
+    assert rows[0]["target_diagnostics"]["target_content_coverage"]["semantic_text_char_count"] > 0
+    assert rows[0]["target_diagnostics"]["target_query_term_coverage"]["query_term_count"] > 0
     assert rows[0]["target_diagnostics"]["top_vs_target_quality_delta"]["status"] == "available"
     assert rows[0]["target_diagnostics"]["top_vs_target_quality_delta"]["same_evidence_unit"] is False
+    assert rows[0]["target_diagnostics"]["top_vs_target_content_delta"]["status"] == "available"
+    assert "combined_query_term_match_count_delta" in rows[0]["target_diagnostics"]["top_vs_target_content_delta"]
     assert rows[0]["target_diagnostics"]["top_vs_target_quality_delta"]["verified_alignment_note"].startswith(
         "has_verified_link only reflects explicit verified links"
     )
@@ -192,6 +205,7 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert payload["target_rank_diagnostics"]["target_configured_count"] == 1
     assert payload["target_rank_diagnostics"]["target_found_in_top_k_count"] == 1
     assert payload["target_rank_diagnostics"]["rank_bucket_counts"] == {"top5": 1}
+    assert "found_target_query_term_bucket_counts" in payload["target_rank_diagnostics"]
     assert suite["target_rank_diagnostics"]["rank_bucket_counts"] == {"top5": 1}
 
     public_text = _public_text(run)
@@ -205,6 +219,7 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
         "seg_private_1",
         "evu_seg_private_1",
         "video_private",
+        "RAW QUERY TEXT",
     ]:
         assert sensitive not in public_text
     assert "Timestamp-only overlap is not counted" in run.summary_path.read_text(encoding="utf-8")

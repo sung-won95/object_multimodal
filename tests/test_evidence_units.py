@@ -21,7 +21,12 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     _write_jsonl(
         project_dir / "manifests" / "frames_manifest.jsonl",
         [
-            {"frame_id": "frame_gradient", "timestamp": 12.0, "frame_path": "frames/gradient.jpg"},
+            {
+                "frame_id": "frame_gradient",
+                "timestamp": 12.0,
+                "frame_path": "frames/gradient.jpg",
+                "detected_text": ["Gradient Descent"],
+            },
             {"frame_id": "frame_loss", "timestamp": 22.0, "frame_path": "frames/loss.jpg"},
         ],
     )
@@ -40,6 +45,7 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
                 "confidence": 0.91,
                 "source": "vlm",
                 "visual_description": "Arrow indicating the descent direction.",
+                "detected_text": ["descent"],
             },
             {
                 "entity_id": "ent_loss_ocr",
@@ -108,6 +114,15 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert target["source_quality"]["has_vlm_entity"] is True
     assert target["source_quality"]["has_verified_link"] is False
     assert target["source_quality"]["has_timestamp_fallback_link"] is True
+    assert target["source_quality"]["has_detected_text"] is True
+    assert target["source_quality"]["has_visual_description"] is True
+    assert target["source_quality"]["visual_state_detected_text_count"] == 1
+    assert target["source_quality"]["visual_entity_detected_text_count"] == 1
+    assert target["source_quality"]["visual_description_count"] == 1
+    assert target["visual_states"][0]["detected_text"] == ["Gradient Descent"]
+    assert target["visual_entities"][0]["detected_text"] == ["descent"]
+    assert summary["counts"]["units_with_detected_text"] >= 1
+    assert summary["counts"]["units_with_visual_description"] >= 1
     assert "gradient arrow" in target["semantic_text"]
 
     manifest = json.loads((project_dir / "manifests" / "project_manifest.json").read_text())

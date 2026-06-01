@@ -95,6 +95,10 @@ def build_project_evidence_units(
         "units_with_visual_entity": sum(1 for document in documents if document["source_quality"]["has_visual_entity"]),
         "units_with_vlm_entity": sum(1 for document in documents if document["source_quality"]["has_vlm_entity"]),
         "units_with_verified_link": sum(1 for document in documents if document["source_quality"]["has_verified_link"]),
+        "units_with_detected_text": sum(1 for document in documents if document["source_quality"]["has_detected_text"]),
+        "units_with_visual_description": sum(
+            1 for document in documents if document["source_quality"]["has_visual_description"]
+        ),
         "timestamp_fallback_links": sum(
             document["source_quality"]["timestamp_fallback_link_count"] for document in documents
         ),
@@ -461,12 +465,26 @@ def _source_quality(
     link_statuses: dict[str, str],
 ) -> dict[str, Any]:
     has_vlm_entity = any(_is_vlm_entity(entity) for entity in visual_entities)
+    visual_state_detected_text_count = sum(
+        1 for state in visual_states if _text_values([state.get("detected_text")])
+    )
+    visual_entity_detected_text_count = sum(
+        1 for entity in visual_entities if _text_values([entity.get("detected_text")])
+    )
+    visual_description_count = sum(
+        1 for entity in visual_entities if _text(entity.get("visual_description"))
+    )
     return {
         "has_visual_state": bool(visual_states),
         "has_visual_entity": bool(visual_entities),
         "has_vlm_entity": has_vlm_entity,
         "has_verified_link": any(status == "verified" for status in link_statuses.values()),
         "uses_ocr_only": bool(visual_entities) and not has_vlm_entity,
+        "has_detected_text": bool(visual_state_detected_text_count or visual_entity_detected_text_count),
+        "has_visual_description": bool(visual_description_count),
+        "visual_state_detected_text_count": visual_state_detected_text_count,
+        "visual_entity_detected_text_count": visual_entity_detected_text_count,
+        "visual_description_count": visual_description_count,
         "has_timestamp_fallback_link": any(
             status == "timestamp_fallback" for status in link_statuses.values()
         ),
@@ -519,12 +537,17 @@ def _is_vlm_entity(entity: dict[str, Any]) -> bool:
 
 def _visual_state_context(state: dict[str, Any]) -> dict[str, Any]:
     return {
-        "visual_state_id": state.get("visual_state_id"),
-        "representative_frame_id": state.get("representative_frame_id"),
-        "frame_ids": state.get("frame_ids", []),
-        "valid_start_time": state.get("valid_start_time"),
-        "valid_end_time": state.get("valid_end_time"),
-        "state_summary": state.get("state_summary", ""),
+        key: value
+        for key, value in {
+            "visual_state_id": state.get("visual_state_id"),
+            "representative_frame_id": state.get("representative_frame_id"),
+            "frame_ids": state.get("frame_ids", []),
+            "valid_start_time": state.get("valid_start_time"),
+            "valid_end_time": state.get("valid_end_time"),
+            "state_summary": state.get("state_summary", ""),
+            "detected_text": state.get("detected_text", []),
+        }.items()
+        if value not in (None, "", [])
     }
 
 
@@ -540,6 +563,7 @@ def _visual_entity_context(entity: dict[str, Any]) -> dict[str, Any]:
             "visual_description": entity.get("visual_description"),
             "position": entity.get("position"),
             "relations": entity.get("relations"),
+            "detected_text": entity.get("detected_text"),
             "confidence": entity.get("confidence"),
             "source": entity.get("source"),
             "source_model": entity.get("source_model"),
