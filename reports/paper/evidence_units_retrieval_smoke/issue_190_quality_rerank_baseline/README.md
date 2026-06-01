@@ -33,44 +33,45 @@ signals:
 | transcript_only_penalty | penalty for transcript-only evidence units |
 | timestamp_fallback_penalty | fallback flag penalty; not a verified boost |
 
+## MIT Quality-Rerank Smoke
+
+The runner was also applied to the same two MIT lecture smoke artifacts used in
+Issue 188, with Meilisearch available and `--quality-rerank` enabled. The private
+manifest and copied lecture artifacts stayed outside the repository; the committed
+outputs are public-safe.
+
+| Metric | Value |
+| --- | ---: |
+| suites | 2 |
+| queries | 4 |
+| queried | 4 |
+| skipped | 0 |
+| indexed evidence units | 2474 |
+| rerank-enabled queries | 4 |
+| base top-hit target matches | 0 |
+| reranked top-hit target matches | 0 |
+| reranked top result changed | 0 |
+
+## Base vs Reranked Target Rank
+
+| Suite | base top10 | base top50 | base not_found | reranked top5 | reranked top10 | reranked not_found |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| mit_lec01 | 0 | 1 | 1 | 1 | 0 | 1 |
+| mit_lec04 | 1 | 0 | 1 | 0 | 1 | 1 |
+| total | 1 | 1 | 2 | 1 | 1 | 2 |
+
+The quality-aware baseline improved one query from `top50` to `top5`, but did not
+turn any query into a top-hit match. The top result also did not change for any of
+the four queries. On this slice, the deterministic metadata-only rerank helps
+target rank slightly but is not enough to solve retrieval quality.
+
 ## Public Fixture Smoke
 
 The committed test fixture exercises the base-vs-reranked diagnostics with a
-public-safe fake Meilisearch client:
-
-| Metric | Base | Reranked |
-| --- | ---: | ---: |
-| configured queries | 1 | 1 |
-| top-hit target match | 0 | 1 |
-| target rank bucket top1 | 0 | 1 |
-| target rank bucket top5 | 1 | 0 |
-| top result changed | 0 | 1 |
-
-The reranked top hit in the fixture has VLM-entity presence and candidate visual
-support. It also carries a timestamp-fallback flag, which contributes only a penalty
-and is not counted as verified alignment. `verified_link_presence` remains zero.
-
-## MIT Carry-Forward From Issue 188
-
-The latest committed 1-2 lecture MIT smoke report remains
-`reports/paper/evidence_units_retrieval_smoke/issue_188_mit_target_rank/`.
-Those base target-rank buckets are carried forward here for comparison context:
-
-| Suite | configured | found top-k | base top1 | base top5 | base top10 | base top50 | base not_found |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| mit_lec01 | 2 | 1 | 0 | 0 | 0 | 1 | 1 |
-| mit_lec04 | 2 | 1 | 0 | 0 | 1 | 0 | 1 |
-| total | 4 | 2 | 0 | 0 | 1 | 1 | 2 |
-
-The private MIT artifacts are not committed, so this PR does not fabricate reranked
-MIT bucket counts. After rerunning the private manifest with `--quality-rerank`, the
-runner will emit:
-
-- per-query `rerank_diagnostics.base_target_rank_bucket`
-- per-query `rerank_diagnostics.reranked_target_rank_bucket`
-- per-query base vs reranked top-hit match flags
-- public-safe rerank score components for the reranked top hit
-- suite/global base and reranked target-rank bucket counts
+public-safe fake Meilisearch client and confirms that the reranker can change the
+top result when the metadata strongly favors the target. In that fixture,
+`verified_link_presence` remains zero and timestamp fallback contributes only a
+penalty/flag.
 
 ## Verification
 
@@ -78,7 +79,17 @@ Commands used in this PR:
 
 ```bash
 python3 -m pytest tests/test_evidence_unit_smoke.py tests/test_cli.py -q
+python3 -m pytest tests/test_evidence_unit_smoke.py tests/test_evidence_units.py tests/test_cli.py -q
+python3 -m pytest -q
 ```
 
 The fixture confirms that target labels are used only after scoring for diagnostics,
 not in the rerank score itself.
+
+## Artifacts
+
+- `metrics.json`: public-safe aggregate metrics, suite summaries, and rerank
+  diagnostics.
+- `query_results.jsonl`: one sanitized row per query with base and reranked
+  diagnostics.
+- `summary.md`: runner-generated public summary.
