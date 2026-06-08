@@ -19,6 +19,7 @@ ANSWER_SCHEMA_VERSION = "grounded-answer-v1"
 NO_ANSWER_POLICY_VERSION = "deterministic-no-answer-v1"
 GROUNDED_ANSWER = "grounded_answer"
 CANDIDATE_EVIDENCE_ONLY = "candidate_evidence_only"
+EVIDENCE_UNIT_HIT_SOURCE = "evidence_unit"
 VALID_ANSWER_TYPES = {GROUNDED_ANSWER, CANDIDATE_EVIDENCE_ONLY}
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_가-힣]+")
@@ -281,6 +282,10 @@ def _answer_type_from_signals(
     score = _optional_float(signals.get("search_score"))
     if score is not None and score < policy.min_search_score:
         return CANDIDATE_EVIDENCE_ONLY, "search_score_below_threshold"
+    if signals.get("evidence_unit_timestamp_fallback_only") is True:
+        return CANDIDATE_EVIDENCE_ONLY, "timestamp_fallback_evidence_only"
+    if signals.get("evidence_unit_candidate_only_visual_evidence") is True:
+        return CANDIDATE_EVIDENCE_ONLY, "candidate_visual_evidence_only"
     if not signals["has_textual_claim_source"] and not signals["has_visual_claim_source"]:
         return CANDIDATE_EVIDENCE_ONLY, "no_claim_source_in_candidate"
     if signals["query_overlap_ratio"] >= policy.min_query_overlap:
@@ -303,7 +308,7 @@ def _claims_for_bundle(bundle: dict[str, Any], *, citation_id: str) -> list[dict
             }
         )
 
-    visual_labels = _visual_labels(bundle)
+    visual_labels = _visual_labels(bundle) if _visual_claim_allowed(bundle) else []
     if visual_labels:
         claims.append(
             {
@@ -415,6 +420,9 @@ def _answer_bundle_retrieval_metadata(
         "retrieval_index_kind": str(retrieval_response.get("index_kind") or ""),
         "retrieval_sources": _retrieval_sources(bundle),
     }
+    evidence_unit = _evidence_unit_metadata(bundle)
+    if evidence_unit:
+        metadata["evidence_unit"] = evidence_unit
     context = retrieval_response.get("retrieval_context")
     context = context if isinstance(context, dict) else {}
     hybrid = context.get("hybrid_retrieval")
@@ -447,11 +455,25 @@ def _support_signals(
     frame_count = len(_frame_refs(_evidence_window(bundle)))
     linked_entity_count = len(_list_of_dicts(bundle.get("linked_entities")))
     visual_entity_count = len(_list_of_dicts(bundle.get("visual_entities")))
+    evidence_unit_support = _evidence_unit_support(candidate)
     visual_source_hit = candidate.get("source") == VISUAL_ENTITY_HIT_SOURCE or any(
         source.get("source") == VISUAL_ENTITY_HIT_SOURCE
         for source in _list_of_dicts(bundle.get("retrieval_sources"))
     )
     query_overlap_ratio = len(matched_terms) / len(query_terms) if query_terms else 0.0
+    evidence_unit_visual_support = (
+        evidence_unit_support["is_evidence_unit"]
+        and evidence_unit_support["has_candidate_visual_evidence"]
+    )
+    evidence_unit_verified_visual = (
+        evidence_unit_support["is_evidence_unit"]
+        and evidence_unit_support["has_verified_visual_evidence"]
+    )
+    evidence_unit_candidate_only_visual = bool(
+        evidence_unit_visual_support
+        and not evidence_unit_verified_visual
+        and not _transcript_text(bundle).strip()
+    )
     return {
         "query_term_count": len(query_terms),
         "support_query_count": len(support_queries),
@@ -464,8 +486,20 @@ def _support_signals(
         "visual_source_hit": visual_source_hit,
         "has_textual_claim_source": bool(_transcript_text(bundle).strip()),
         "has_visual_claim_source": bool(
-            visual_entity_count or linked_entity_count or visual_source_hit
+            visual_entity_count
+            or linked_entity_count
+            or visual_source_hit
+            or evidence_unit_verified_visual
         ),
+        "evidence_unit": evidence_unit_support["is_evidence_unit"],
+        "evidence_unit_visual_support_level": evidence_unit_support["visual_support_level"],
+        "evidence_unit_verified_visual_evidence": evidence_unit_verified_visual,
+        "evidence_unit_candidate_only_visual_evidence": evidence_unit_candidate_only_visual,
+        "evidence_unit_timestamp_fallback_only": bool(
+            evidence_unit_support["visual_support_level"] == "timestamp_fallback"
+            and not _transcript_text(bundle).strip()
+        ),
+        "evidence_unit_link_status_counts": evidence_unit_support["link_status_counts"],
     }
 
 
@@ -482,6 +516,16 @@ def _empty_signals(support_queries: list[str]) -> dict[str, Any]:
         "visual_source_hit": False,
         "has_textual_claim_source": False,
         "has_visual_claim_source": False,
+        "evidence_unit": False,
+        "evidence_unit_visual_support_level": "none",
+        "evidence_unit_verified_visual_evidence": False,
+        "evidence_unit_candidate_only_visual_evidence": False,
+        "evidence_unit_timestamp_fallback_only": False,
+        "evidence_unit_link_status_counts": {
+            "verified": 0,
+            "candidate": 0,
+            "timestamp_fallback": 0,
+        },
     }
 
 
@@ -496,6 +540,7 @@ def _transcript_text(bundle: dict[str, Any]) -> str:
     candidate = _candidate(bundle)
     return str(
         target.get("transcript_text")
+        or candidate.get("transcript_window_text")
         or candidate.get("transcript_excerpt")
         or ""
     ).strip()
@@ -517,6 +562,11 @@ def _visual_text_parts(bundle: dict[str, Any]) -> list[str]:
         parts.extend(str(item) for item in link.get("lexical_match") or [])
         parts.extend(str(item) for item in link.get("mention_candidate") or [])
     candidate = _candidate(bundle)
+    if _is_evidence_unit_candidate(candidate):
+        parts.extend(
+            str(candidate.get(key) or "").strip()
+            for key in ("evidence_text", "semantic_text")
+        )
     parts.extend(
         str(candidate.get(key) or "").strip()
         for key in ("visual_entity_text", "visual_description")
@@ -543,6 +593,10 @@ def _visual_labels(bundle: dict[str, Any]) -> list[str]:
             seen.add(label)
             labels.append(label)
     candidate = _candidate(bundle)
+    if _is_evidence_unit_candidate(candidate) and not _evidence_unit_support(candidate)[
+        "has_verified_visual_evidence"
+    ]:
+        return labels
     for key in ("visual_entity_text", "visual_description"):
         label = _compact(str(candidate.get(key) or ""))
         if not label or label in seen:
@@ -580,6 +634,12 @@ def _retrieval_sources(bundle: dict[str, Any]) -> list[dict[str, Any]]:
                     "timestamp",
                     "visual_entity_text",
                     "target_resolution",
+                    "evidence_unit_id",
+                    "visual_state_ids",
+                    "visual_entity_ids",
+                    "verified_entity_link_ids",
+                    "candidate_entity_link_ids",
+                    "candidate_entity_link_statuses",
                 )
                 if key in source
             }
@@ -596,6 +656,7 @@ def _modalities_for_bundle(bundle: dict[str, Any]) -> list[str]:
         or _list_of_dicts(bundle.get("visual_entities"))
         or _list_of_dicts(bundle.get("linked_entities"))
         or _candidate(bundle).get("source") == VISUAL_ENTITY_HIT_SOURCE
+        or _evidence_unit_support(_candidate(bundle))["has_candidate_visual_evidence"]
     ):
         modalities.append("visual")
     return modalities
@@ -626,15 +687,163 @@ def _visual_entity_ids(bundle: dict[str, Any]) -> list[str]:
     candidate_entity_id = _candidate(bundle).get("entity_id")
     if candidate_entity_id:
         entity_ids.add(str(candidate_entity_id))
+    entity_ids.update(_string_list(_candidate(bundle).get("visual_entity_ids")))
     return sorted(entity_ids)
 
 
 def _entity_link_ids(bundle: dict[str, Any]) -> list[str]:
-    return sorted(
+    link_ids = {
         str(link["link_id"])
         for link in _list_of_dicts(bundle.get("linked_entities"))
         if link.get("link_id")
+    }
+    candidate = _candidate(bundle)
+    link_ids.update(_string_list(candidate.get("verified_entity_link_ids")))
+    link_ids.update(_string_list(candidate.get("candidate_entity_link_ids")))
+    return sorted(link_ids)
+
+
+def _visual_claim_allowed(bundle: dict[str, Any]) -> bool:
+    candidate = _candidate(bundle)
+    if not _is_evidence_unit_candidate(candidate):
+        return True
+    return _evidence_unit_support(candidate)["has_verified_visual_evidence"]
+
+
+def _evidence_unit_metadata(bundle: dict[str, Any]) -> dict[str, Any]:
+    candidate = _candidate(bundle)
+    if not _is_evidence_unit_candidate(candidate):
+        return {}
+    support = _evidence_unit_support(candidate)
+    target_segment_id = str(candidate.get("target_segment_id") or candidate.get("segment_id") or "")
+    source_segment_ids = _string_list(candidate.get("source_segment_ids"))
+    visual_state_ids = _string_list(candidate.get("visual_state_ids"))
+    visual_entity_ids = _string_list(candidate.get("visual_entity_ids"))
+    verified_link_ids = _string_list(candidate.get("verified_entity_link_ids"))
+    candidate_link_ids = _string_list(candidate.get("candidate_entity_link_ids"))
+    return {
+        "evidence_unit_id": str(candidate.get("evidence_unit_id") or ""),
+        "target_segment_id": target_segment_id,
+        "transcript_window_ref": {
+            "target_segment_id": target_segment_id,
+            "source_segment_ids": source_segment_ids,
+            "source_segment_count": len(source_segment_ids),
+        },
+        "visual_state_refs": [{"visual_state_id": item} for item in visual_state_ids],
+        "visual_state_count": len(visual_state_ids),
+        "visual_entity_refs": [{"visual_entity_id": item} for item in visual_entity_ids],
+        "visual_entity_count": len(visual_entity_ids),
+        "verified_entity_link_ids": verified_link_ids,
+        "candidate_entity_link_ids": candidate_link_ids,
+        "timestamp_fallback_entity_link_ids": support["timestamp_fallback_entity_link_ids"],
+        "entity_link_status_counts": support["link_status_counts"],
+        "visual_support_level": support["visual_support_level"],
+        "has_verified_visual_evidence": support["has_verified_visual_evidence"],
+        "has_candidate_visual_evidence": support["has_candidate_visual_evidence"],
+        "has_timestamp_fallback_evidence": support["timestamp_fallback_link_count"] > 0,
+        "paper_claim_eligible": support["has_verified_visual_evidence"],
+        "public_note": (
+            "candidate and timestamp_fallback visual support are not verified visual citations"
+        ),
+    }
+
+
+def _is_evidence_unit_candidate(candidate: dict[str, Any]) -> bool:
+    return bool(
+        candidate.get("source") == EVIDENCE_UNIT_HIT_SOURCE
+        or candidate.get("retrieval_mode") == EVIDENCE_UNIT_HIT_SOURCE
+        or candidate.get("evidence_unit_id")
     )
+
+
+def _evidence_unit_support(candidate: dict[str, Any]) -> dict[str, Any]:
+    if not _is_evidence_unit_candidate(candidate):
+        return {
+            "is_evidence_unit": False,
+            "visual_support_level": "none",
+            "has_candidate_visual_evidence": False,
+            "has_verified_visual_evidence": False,
+            "candidate_link_count": 0,
+            "verified_link_count": 0,
+            "timestamp_fallback_link_count": 0,
+            "timestamp_fallback_entity_link_ids": [],
+            "link_status_counts": {"verified": 0, "candidate": 0, "timestamp_fallback": 0},
+        }
+
+    source_quality = _mapping(candidate.get("source_quality"))
+    statuses = {
+        str(key): str(value).strip().casefold()
+        for key, value in _mapping(candidate.get("candidate_entity_link_statuses")).items()
+        if str(key).strip()
+    }
+    verified_from_status = sum(1 for status in statuses.values() if status == "verified")
+    fallback_from_status = sum(
+        1 for status in statuses.values() if status == "timestamp_fallback"
+    )
+    candidate_from_status = sum(1 for status in statuses.values() if status == "candidate")
+    verified_link_ids = _string_list(candidate.get("verified_entity_link_ids"))
+    candidate_link_ids = _string_list(candidate.get("candidate_entity_link_ids"))
+    timestamp_fallback_ids = sorted(
+        link_id for link_id, status in statuses.items() if status == "timestamp_fallback"
+    )
+    verified_link_count = max(
+        int(source_quality.get("verified_link_count") or 0),
+        len(verified_link_ids),
+        verified_from_status,
+        1 if source_quality.get("has_verified_link") is True else 0,
+    )
+    timestamp_fallback_link_count = max(
+        int(source_quality.get("timestamp_fallback_link_count") or 0),
+        fallback_from_status,
+        1 if source_quality.get("has_timestamp_fallback_link") is True else 0,
+    )
+    candidate_link_count = max(
+        int(source_quality.get("candidate_link_count") or 0),
+        candidate_from_status,
+        max(0, len(candidate_link_ids) - verified_from_status - fallback_from_status),
+    )
+    visual_state_count = max(
+        int(source_quality.get("visual_state_count") or 0),
+        len(_string_list(candidate.get("visual_state_ids"))),
+        1 if source_quality.get("has_visual_state") is True else 0,
+    )
+    visual_entity_count = max(
+        int(source_quality.get("visual_entity_count") or 0),
+        len(_string_list(candidate.get("visual_entity_ids"))),
+        1 if source_quality.get("has_visual_entity") is True else 0,
+    )
+    has_visual_evidence = bool(
+        visual_state_count
+        or visual_entity_count
+        or candidate_link_count
+        or verified_link_count
+        or timestamp_fallback_link_count
+        or source_quality.get("has_vlm_entity") is True
+    )
+    has_verified_visual = verified_link_count > 0
+    if has_verified_visual:
+        visual_support_level = "verified"
+    elif timestamp_fallback_link_count and not candidate_link_count:
+        visual_support_level = "timestamp_fallback"
+    elif has_visual_evidence:
+        visual_support_level = "candidate"
+    else:
+        visual_support_level = "none"
+    return {
+        "is_evidence_unit": True,
+        "visual_support_level": visual_support_level,
+        "has_candidate_visual_evidence": has_visual_evidence,
+        "has_verified_visual_evidence": has_verified_visual,
+        "candidate_link_count": candidate_link_count,
+        "verified_link_count": verified_link_count,
+        "timestamp_fallback_link_count": timestamp_fallback_link_count,
+        "timestamp_fallback_entity_link_ids": timestamp_fallback_ids,
+        "link_status_counts": {
+            "verified": verified_link_count,
+            "candidate": candidate_link_count,
+            "timestamp_fallback": timestamp_fallback_link_count,
+        },
+    }
 
 
 def _candidate(bundle: dict[str, Any]) -> dict[str, Any]:
@@ -741,6 +950,18 @@ def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        value = [value]
+    return [str(item) for item in value if str(item or "").strip()]
 
 
 def _first_nonempty(*values: Any) -> Any:

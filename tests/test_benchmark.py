@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from oarag.benchmark import parse_time_hint, run_benchmark
+from oarag.evaluation.benchmark import _answer_grounding_metrics, _public_answer_summary
 from oarag.evaluation.quality_gate import evaluate_retrieval_quality_gate
 
 
@@ -419,6 +420,74 @@ MIT_PAPER_MATRIX_VARIANTS = [
 
 def test_parse_time_hint_extracts_multiple_ranges() -> None:
     assert parse_time_hint("95-102s or 126-131s") == [(95.0, 102.0), (126.0, 131.0)]
+
+
+def test_answer_visual_citation_metrics_count_only_claim_references() -> None:
+    answer = {
+        "schema_version": "grounded-answer-v1",
+        "answer_type": "grounded_answer",
+        "claims": [{"claim_id": "claim_1", "text": "Candidate citation.", "citation_ids": ["c1"]}],
+        "citations": [
+            {
+                "citation_id": "c1",
+                "segment_id": "seg_candidate",
+                "evidence_unit": {
+                    "has_candidate_visual_evidence": True,
+                    "has_verified_visual_evidence": False,
+                    "has_timestamp_fallback_evidence": False,
+                },
+            },
+            {
+                "citation_id": "c2",
+                "segment_id": "seg_verified",
+                "evidence_unit": {
+                    "has_candidate_visual_evidence": True,
+                    "has_verified_visual_evidence": True,
+                    "has_timestamp_fallback_evidence": False,
+                },
+            },
+        ],
+        "candidate_evidence": [],
+        "no_answer_policy": {"reason": "query_terms_grounded_in_candidate"},
+        "llm": {"enabled": False},
+    }
+
+    summary = _public_answer_summary(answer)
+    grounding = _answer_grounding_metrics(
+        answer=answer,
+        expected_segment_ids=["seg_candidate"],
+        expected_window_ids=[],
+        expected_ranges=[],
+    )
+
+    assert summary["citation_count"] == 2
+    assert summary["candidate_only_visual_citation_count"] == 1
+    assert summary["verified_visual_citation_count"] == 0
+    assert grounding["candidate_only_visual_citation_count"] == 1
+    assert grounding["verified_visual_citation_count"] == 0
+    assert grounding["answer_uses_verified_visual_evidence"] is False
+
+    abstained_answer = {
+        **answer,
+        "answer_type": "candidate_evidence_only",
+        "claims": [],
+        "no_answer_policy": {"reason": "candidate_visual_evidence_only"},
+    }
+
+    abstained_summary = _public_answer_summary(abstained_answer)
+    abstained_grounding = _answer_grounding_metrics(
+        answer=abstained_answer,
+        expected_segment_ids=["seg_candidate"],
+        expected_window_ids=[],
+        expected_ranges=[],
+    )
+
+    assert abstained_summary["candidate_only_visual_citation_count"] == 0
+    assert abstained_summary["verified_visual_citation_count"] == 0
+    assert abstained_grounding["candidate_only_visual_citation_count"] == 0
+    assert abstained_grounding["verified_visual_citation_count"] == 0
+    assert abstained_grounding["answer_uses_candidate_only_visual_evidence"] is False
+    assert abstained_grounding["answer_uses_verified_visual_evidence"] is False
 
 
 def test_mit_deep_learning_matrix_manifest_schema_smoke() -> None:
@@ -865,6 +934,24 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
         "modality_aware_rerank"
     ]["score_component_presence_counts"]["verified_link"] == 1
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "answer_uses_candidate_only_visual_evidence_count"
+    ] == 1
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "answer_uses_verified_visual_evidence_count"
+    ] == 0
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "answer_uses_verified_visual_evidence_count"
+    ] == 1
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "answer_uses_candidate_only_visual_evidence_count"
+    ] == 0
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
+        "answer_uses_verified_visual_evidence_ratio"
+    ] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
+        "answer_uses_candidate_only_visual_evidence_count"
+    ] == 0
     assert suite["variant_metrics"]["evidence_unit_candidate"]["skipped_count"] == 0
     assert suite["variant_metrics"]["evidence_unit_candidate"][
         "candidate_link_signal_counts"
@@ -950,6 +1037,12 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     )
     assert evidence_candidate_row["status"] == "queried"
     assert evidence_candidate_row["top_candidate"]["source"] == "evidence_unit"
+    assert evidence_candidate_row["top_candidate"]["evidence_unit_citation"][
+        "candidate_only_visual_citation"
+    ] is True
+    assert evidence_candidate_row["top_candidate"]["evidence_unit_citation"][
+        "verified_visual_citation"
+    ] is False
     assert evidence_candidate_row["verified_object_alignment"]["verified_link_count"] == 0
     assert evidence_candidate_row["candidate_visual_support"]["candidate_link_signal_counts"][
         "temporal_overlap"
@@ -958,7 +1051,21 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         "visual_text_overlap"
     ] == 1
     assert evidence_candidate_row["target_rank_bucket"] == "top5"
+    assert evidence_candidate_row["answer"]["candidate_only_visual_citation_count"] == 1
+    assert evidence_candidate_row["answer"]["verified_visual_citation_count"] == 0
+    assert evidence_candidate_row["answer_grounding"][
+        "candidate_only_visual_citation_count"
+    ] == 1
+    assert evidence_candidate_row["answer_grounding"][
+        "verified_visual_citation_count"
+    ] == 0
+    assert evidence_candidate_row["answer_grounding"][
+        "answer_uses_verified_visual_evidence"
+    ] is False
     assert evidence_verified_row["verified_object_alignment"]["verified_link_count"] == 1
+    assert evidence_verified_row["top_candidate"]["evidence_unit_citation"][
+        "verified_visual_citation"
+    ] is True
     assert evidence_verified_row["candidate_visual_support"]["candidate_link_signal_counts"][
         "vlm_object_visual_description_overlap"
     ] == 1
@@ -970,6 +1077,11 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     ] == 1
     assert evidence_verified_row["target_rank_bucket"] == "top1"
     assert evidence_verified_row["object_evidence_coverage"]["has_vlm_entity"] is True
+    assert evidence_verified_row["answer"]["verified_visual_citation_count"] == 1
+    assert evidence_verified_row["answer_grounding"]["answer_uses_verified_visual_evidence"] is True
+    assert evidence_verified_row["answer_grounding"][
+        "candidate_only_visual_citation_count"
+    ] == 0
     assert evidence_quality_row["config"]["evidence_unit_rerank"] == "modality_aware"
     assert evidence_quality_row["modality_aware_rerank"]["enabled"] is True
     assert evidence_quality_row["modality_aware_rerank"]["strategy"] == "modality_aware"
@@ -984,6 +1096,8 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     metrics_csv = run.metrics_csv_path.read_text(encoding="utf-8")
     assert "variant,segment_lexical" in metrics_csv
     assert "answer_citation_precision" in metrics_csv
+    assert "answer_uses_verified_visual_evidence_count" in metrics_csv
+    assert "answer_uses_candidate_only_visual_evidence_count" in metrics_csv
     assert "verified_object_alignment_ratio" in metrics_csv
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "Retrieval/Answer Matrix" in summary
