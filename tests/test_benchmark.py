@@ -854,6 +854,24 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["evidence_unit_verified"]["vlm_entity_coverage_ratio"] == 1.0
     assert suite["variant_metrics"]["evidence_unit_candidate"]["ocr_only_coverage_ratio"] == 1.0
     assert suite["variant_metrics"]["evidence_unit_candidate"]["skipped_count"] == 0
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "candidate_link_signal_counts"
+    ]["temporal_overlap"] == 1
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "candidate_link_signal_counts"
+    ]["lexical_overlap"] == 1
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "candidate_link_signal_counts"
+    ]["visual_text_overlap"] == 1
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "candidate_link_signal_counts"
+    ]["vlm_object_visual_description_overlap"] == 1
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "verified_link_source_counts"
+    ]["explicit_verified_flag"] == 1
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "verified_link_source_counts"
+    ]["vlm_verifier"] == 1
     assert suite["variant_metrics"]["rerank"]["grounded_answer_ratio"] == 1.0
     assert suite["variant_metrics"]["window"]["answer_citation_precision"] == 1.0
     assert suite["variant_metrics"]["window"]["answer_citation_recall"] == 1.0
@@ -918,8 +936,23 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert evidence_candidate_row["status"] == "queried"
     assert evidence_candidate_row["top_candidate"]["source"] == "evidence_unit"
     assert evidence_candidate_row["verified_object_alignment"]["verified_link_count"] == 0
+    assert evidence_candidate_row["candidate_visual_support"]["candidate_link_signal_counts"][
+        "temporal_overlap"
+    ] == 1
+    assert evidence_candidate_row["candidate_visual_support"]["candidate_link_signal_counts"][
+        "visual_text_overlap"
+    ] == 1
     assert evidence_candidate_row["target_rank_bucket"] == "top5"
     assert evidence_verified_row["verified_object_alignment"]["verified_link_count"] == 1
+    assert evidence_verified_row["candidate_visual_support"]["candidate_link_signal_counts"][
+        "vlm_object_visual_description_overlap"
+    ] == 1
+    assert evidence_verified_row["verified_object_alignment"]["verified_link_source_counts"][
+        "explicit_verified_flag"
+    ] == 1
+    assert evidence_verified_row["verified_object_alignment"]["verified_link_source_counts"][
+        "vlm_verifier"
+    ] == 1
     assert evidence_verified_row["target_rank_bucket"] == "top1"
     assert evidence_verified_row["object_evidence_coverage"]["has_vlm_entity"] is True
 

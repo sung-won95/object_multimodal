@@ -3001,12 +3001,16 @@ def _matrix_object_link_diagnostics_from_source_quality(
 ) -> dict[str, Any]:
     nested_candidate = _mapping(source_quality.get("candidate_visual_support"))
     nested_verified = _mapping(source_quality.get("verified_object_alignment"))
-    candidate_signal_counts = _zero_count_map(CANDIDATE_LINK_SIGNAL_KEYS)
-    _add_counts(candidate_signal_counts, _mapping(source_quality.get("candidate_link_signal_counts")))
-    _add_counts(candidate_signal_counts, _mapping(nested_candidate.get("candidate_link_signal_counts")))
-    verified_source_counts = _zero_count_map(VERIFIED_LINK_SOURCE_KEYS)
-    _add_counts(verified_source_counts, _mapping(source_quality.get("verified_link_source_counts")))
-    _add_counts(verified_source_counts, _mapping(nested_verified.get("verified_link_source_counts")))
+    candidate_signal_counts = _authoritative_count_map(
+        primary=source_quality.get("candidate_link_signal_counts"),
+        fallback=nested_candidate.get("candidate_link_signal_counts"),
+        count_keys=CANDIDATE_LINK_SIGNAL_KEYS,
+    )
+    verified_source_counts = _authoritative_count_map(
+        primary=source_quality.get("verified_link_source_counts"),
+        fallback=nested_verified.get("verified_link_source_counts"),
+        count_keys=VERIFIED_LINK_SOURCE_KEYS,
+    )
 
     status_values = [str(value).casefold() for value in candidate_entity_link_statuses.values()]
     fallback_from_status = sum(1 for value in status_values if value == "timestamp_fallback")
@@ -3063,6 +3067,19 @@ def _matrix_object_link_diagnostics_from_source_quality(
         ),
         "public_note": MATRIX_LINK_DIAGNOSTICS_PUBLIC_NOTE,
     }
+
+
+def _authoritative_count_map(
+    *,
+    primary: Any,
+    fallback: Any,
+    count_keys: tuple[str, ...],
+) -> dict[str, int]:
+    primary_counts = _mapping(primary)
+    selected = primary_counts if primary_counts else _mapping(fallback)
+    counts = _zero_count_map(count_keys)
+    _add_counts(counts, selected)
+    return counts
 
 
 def _matrix_candidate_visual_support(
