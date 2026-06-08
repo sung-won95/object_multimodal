@@ -7,7 +7,7 @@ full privacy-checked `run-paper-bundle` execution.
 
 | baseline | compared variants | suite count | status |
 | --- | --- | ---: | --- |
-| `segment_lexical` | `domain_lexicon`, `hybrid`, `window`, `window_hybrid`, `rerank` | 24 | pending full run |
+| `segment_lexical` | `domain_lexicon`, `hybrid`, `window`, `window_hybrid`, `rerank`, `evidence_unit_candidate`, `evidence_unit_verified`, `evidence_unit_quality_rerank` | 24 | pending full run |
 
 ## Artifact Status
 

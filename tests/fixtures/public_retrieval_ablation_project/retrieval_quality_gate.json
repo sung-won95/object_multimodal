@@ -13,7 +13,10 @@
         "hybrid",
         "window",
         "window_hybrid",
-        "rerank"
+        "rerank",
+        "evidence_unit_candidate",
+        "evidence_unit_verified",
+        "evidence_unit_quality_rerank"
       ],
       "thresholds": {
         "hit_at_10s": 1.0,

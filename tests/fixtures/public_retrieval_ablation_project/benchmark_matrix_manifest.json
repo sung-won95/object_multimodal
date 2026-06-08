@@ -11,6 +11,7 @@
       "index": "public_segments",
       "window_index": "public_windows",
       "visual_index": "public_visual_entities",
+      "evidence_unit_index": "public_evidence_units",
       "domain_lexicon": "domain_lexicon.json",
       "limit": 3,
       "neighbor_count": 0,
