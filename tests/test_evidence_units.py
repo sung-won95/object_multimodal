@@ -130,6 +130,157 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert manifest["counts"]["evidence_units"] == 3
 
 
+def test_build_project_evidence_units_reports_link_signal_and_verified_source_aggregates(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "link_diagnostics_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_target", 10.0, 14.0, "This diagram shows the matrix rule here."),
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_target", "timestamp": 12.0}],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "ent_matrix",
+                "project_id": "sample_project",
+                "frame_id": "frame_target",
+                "timestamp": 12.0,
+                "text": "matrix diagram",
+                "entity_type": "diagram_component",
+                "confidence": 0.95,
+                "source": "vlm",
+                "source_model": "real-vlm",
+                "visual_description": "Matrix rule diagram with highlighted position.",
+                "position": "upper left",
+                "relations": [{"type": "points_to", "target": "rule"}],
+            },
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "entity_links.jsonl",
+        [
+            {
+                "link_id": "link_candidate_visual",
+                "project_id": "sample_project",
+                "segment_id": "seg_target",
+                "entity_id": "ent_matrix",
+                "frame_id": "frame_target",
+                "link_type": "time_overlap+lexical_match+mention_candidate",
+                "score": 0.8,
+                "evidence": [
+                    "time_overlap",
+                    "lexical_match",
+                    "mention_candidate",
+                    "visual_text_match",
+                    "visual_description_match",
+                    "position_match",
+                    "semantic_hint",
+                    "domain_lexicon_match",
+                ],
+                "time_overlap": True,
+                "lexical_match": ["matrix"],
+                "mention_candidate": ["this"],
+            },
+            {
+                "link_id": "link_timestamp_only",
+                "project_id": "sample_project",
+                "segment_id": "seg_target",
+                "entity_id": "ent_matrix",
+                "frame_id": "frame_target",
+                "link_type": "time_overlap",
+                "score": 0.2,
+                "evidence": ["time_overlap", "timestamp_fallback"],
+                "time_overlap": True,
+            },
+            {
+                "link_id": "link_verified_human",
+                "project_id": "sample_project",
+                "segment_id": "seg_target",
+                "entity_id": "ent_matrix",
+                "frame_id": "frame_target",
+                "link_type": "time_overlap+lexical_match",
+                "score": 0.95,
+                "evidence": ["time_overlap", "lexical_match"],
+                "time_overlap": True,
+                "lexical_match": ["matrix"],
+                "verified": True,
+                "verified_by": "human_gold",
+            },
+            {
+                "link_id": "link_verified_vlm",
+                "project_id": "sample_project",
+                "segment_id": "seg_target",
+                "entity_id": "ent_matrix",
+                "frame_id": "frame_target",
+                "link_type": "time_overlap+visual_description_match",
+                "score": 0.94,
+                "evidence": ["time_overlap", "visual_description_match"],
+                "time_overlap": True,
+                "verification_status": "verified",
+                "verifier": "vlm_verifier",
+            },
+            {
+                "link_id": "link_verified_strict",
+                "project_id": "sample_project",
+                "segment_id": "seg_target",
+                "entity_id": "ent_matrix",
+                "frame_id": "frame_target",
+                "link_type": "time_overlap+domain_lexicon_match",
+                "score": 0.93,
+                "evidence": ["time_overlap", "domain_lexicon_match"],
+                "time_overlap": True,
+                "status": "verified",
+                "verification_source": "strict_deterministic_rule",
+            },
+        ],
+    )
+
+    summary = build_project_evidence_units(
+        project_dir=project_dir,
+        previous_neighbor_count=0,
+        next_neighbor_count=0,
+    )
+
+    unit = _read_jsonl(project_dir / "segments" / "evidence_units.jsonl")[0]
+    candidate_counts = unit["source_quality"]["candidate_link_signal_counts"]
+    verified_sources = unit["source_quality"]["verified_link_source_counts"]
+    assert unit["source_quality"]["candidate_link_count"] == 1
+    assert unit["source_quality"]["timestamp_fallback_link_count"] == 1
+    assert unit["source_quality"]["verified_link_count"] == 3
+    assert candidate_counts["temporal_overlap"] == 2
+    assert candidate_counts["lexical_overlap"] == 1
+    assert candidate_counts["mention_deictic_hook"] == 1
+    assert candidate_counts["spatial_position"] == 1
+    assert candidate_counts["visual_text_overlap"] == 1
+    assert candidate_counts["vlm_object_visual_description_overlap"] == 1
+    assert candidate_counts["semantic_domain_hint"] == 1
+    assert candidate_counts["timestamp_fallback"] == 1
+    assert verified_sources["explicit_verified_flag"] == 1
+    assert verified_sources["explicit_verified_status"] == 2
+    assert verified_sources["human_gold"] == 1
+    assert verified_sources["vlm_verifier"] == 1
+    assert verified_sources["strict_deterministic_rule"] == 1
+    assert unit["source_quality"]["candidate_visual_support"]["paper_claim_eligible"] is False
+    assert unit["source_quality"]["verified_object_alignment"]["paper_claim_eligible"] is True
+
+    diagnostics = summary["link_diagnostics"]
+    assert diagnostics["candidate_visual_support"]["units_with_candidate_link"] == 1
+    assert diagnostics["candidate_visual_support"]["units_with_timestamp_fallback_link"] == 1
+    assert diagnostics["verified_object_alignment"]["units_with_verified_object_alignment"] == 1
+    assert diagnostics["verified_object_alignment"]["verified_links"] == 3
+    assert diagnostics["verified_object_alignment"]["timestamp_fallback_counted_as_verified"] is False
+    assert summary["counts"]["units_with_candidate_link"] == 1
+    assert summary["counts"]["units_with_timestamp_fallback_link"] == 1
+    assert summary["counts"]["units_with_verified_object_alignment"] == 1
+
+
 def test_build_project_visual_states_writes_public_safe_artifact_and_manifest(
     tmp_path: Path,
 ) -> None:

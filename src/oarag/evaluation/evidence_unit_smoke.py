@@ -13,7 +13,13 @@ from oarag.core.config import default_paths
 from oarag.core.io import write_json, write_jsonl
 from oarag.integrations.meili import EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE
 from oarag.retrieval.evidence_unit_index import query_project_evidence_units
-from oarag.retrieval.evidence_units import build_project_evidence_units
+from oarag.retrieval.evidence_units import (
+    CANDIDATE_LINK_SIGNAL_KEYS,
+    LINK_DIAGNOSTICS_PUBLIC_NOTE,
+    LINK_DIAGNOSTICS_SCHEMA_VERSION,
+    VERIFIED_LINK_SOURCE_KEYS,
+    build_project_evidence_units,
+)
 from oarag.retrieval.project_index import index_project_evidence_units, iter_jsonl_documents
 from oarag.vision.vlm_evidence_validator import validate_vlm_object_evidence
 
@@ -477,6 +483,7 @@ def _artifact_summary(
             "alignment_status_counts": {},
             "source_quality_counts": {},
             "link_counts": {},
+            "link_diagnostics": _empty_public_link_diagnostics(),
             "visual_state_coverage": {},
             "vlm_object_evidence_coverage": {
                 "status": "dry_run",
@@ -497,7 +504,17 @@ def _artifact_summary(
                 "units_with_visual_state": int(counts.get("units_with_visual_state") or 0),
                 "units_with_visual_entity": int(counts.get("units_with_visual_entity") or 0),
                 "units_with_vlm_entity": int(counts.get("units_with_vlm_entity") or 0),
+                "units_with_candidate_link": int(counts.get("units_with_candidate_link") or 0),
                 "units_with_verified_link": int(counts.get("units_with_verified_link") or 0),
+                "units_with_timestamp_fallback_link": int(
+                    counts.get("units_with_timestamp_fallback_link") or 0
+                ),
+                "units_with_candidate_visual_support": int(
+                    counts.get("units_with_candidate_visual_support") or 0
+                ),
+                "units_with_verified_object_alignment": int(
+                    counts.get("units_with_verified_object_alignment") or 0
+                ),
                 "units_with_detected_text": int(counts.get("units_with_detected_text") or 0),
                 "units_with_visual_description": int(counts.get("units_with_visual_description") or 0),
             },
@@ -506,6 +523,9 @@ def _artifact_summary(
                 "verified_links": int(counts.get("verified_links") or 0),
                 "timestamp_fallback_links": int(counts.get("timestamp_fallback_links") or 0),
             },
+            "link_diagnostics": _public_link_diagnostics(
+                build_summary.get("link_diagnostics")
+            ),
             "visual_state_coverage": _public_visual_state_coverage(
                 build_summary.get("visual_state_coverage")
             ),
@@ -525,10 +545,19 @@ def _artifact_summary(
         for key in ("has_detected_text", "has_visual_description"):
             if quality.get(key) is True:
                 source_quality[key] += 1
+        if int(quality.get("candidate_link_count") or 0) > 0:
+            source_quality["units_with_candidate_link"] += 1
+        if int(quality.get("timestamp_fallback_link_count") or 0) > 0:
+            source_quality["units_with_timestamp_fallback_link"] += 1
+        if _mapping(quality.get("candidate_visual_support")).get("has_candidate_visual_support") is True:
+            source_quality["units_with_candidate_visual_support"] += 1
+        if _mapping(quality.get("verified_object_alignment")).get("has_verified_object_alignment") is True:
+            source_quality["units_with_verified_object_alignment"] += 1
         source_quality["candidate_links"] += int(quality.get("candidate_link_count") or 0)
         source_quality["verified_links"] += int(quality.get("verified_link_count") or 0)
         source_quality["timestamp_fallback_links"] += int(quality.get("timestamp_fallback_link_count") or 0)
     visual_state_rows = _visual_state_rows(project_dir=project_dir, visual_states=visual_states)
+    link_diagnostics = _link_diagnostics_from_rows(rows)
     return {
         "status": "loaded_existing",
         "counts": {"evidence_units_total": len(rows)},
@@ -537,7 +566,15 @@ def _artifact_summary(
             "units_with_visual_state": source_quality["has_visual_state"],
             "units_with_visual_entity": source_quality["has_visual_entity"],
             "units_with_vlm_entity": source_quality["has_vlm_entity"],
+            "units_with_candidate_link": source_quality["units_with_candidate_link"],
             "units_with_verified_link": source_quality["has_verified_link"],
+            "units_with_timestamp_fallback_link": source_quality["units_with_timestamp_fallback_link"],
+            "units_with_candidate_visual_support": source_quality[
+                "units_with_candidate_visual_support"
+            ],
+            "units_with_verified_object_alignment": source_quality[
+                "units_with_verified_object_alignment"
+            ],
             "units_with_detected_text": source_quality["has_detected_text"],
             "units_with_visual_description": source_quality["has_visual_description"],
         },
@@ -546,6 +583,7 @@ def _artifact_summary(
             "verified_links": source_quality["verified_links"],
             "timestamp_fallback_links": source_quality["timestamp_fallback_links"],
         },
+        "link_diagnostics": link_diagnostics,
         "visual_state_coverage": _loaded_visual_state_coverage(
             evidence_units=rows,
             visual_states=visual_state_rows,
@@ -578,10 +616,23 @@ def _public_candidate(candidate: dict[str, Any], *, query_text: str | None = Non
             "has_timestamp_fallback_link": bool(source_quality.get("has_timestamp_fallback_link")),
             "has_detected_text": bool(source_quality.get("has_detected_text")),
             "has_visual_description": bool(source_quality.get("has_visual_description")),
+            "candidate_link_count": int(source_quality.get("candidate_link_count") or 0),
+            "timestamp_fallback_link_count": int(source_quality.get("timestamp_fallback_link_count") or 0),
+            "verified_link_count": int(source_quality.get("verified_link_count") or 0),
             "visual_state_detected_text_count": int(source_quality.get("visual_state_detected_text_count") or 0),
             "visual_entity_detected_text_count": int(source_quality.get("visual_entity_detected_text_count") or 0),
             "visual_description_count": int(source_quality.get("visual_description_count") or 0),
+            "candidate_link_signal_counts": _public_count_map(
+                source_quality.get("candidate_link_signal_counts"),
+                CANDIDATE_LINK_SIGNAL_KEYS,
+            ),
+            "verified_link_source_counts": _public_count_map(
+                source_quality.get("verified_link_source_counts"),
+                VERIFIED_LINK_SOURCE_KEYS,
+            ),
         },
+        "candidate_visual_support": _public_candidate_visual_support(candidate),
+        "verified_object_alignment": _public_verified_object_alignment(candidate),
         "rag_fields": {
             "evidence_text_available": bool(candidate.get("evidence_text")),
             "semantic_text_available": bool(candidate.get("semantic_text")),
@@ -591,6 +642,63 @@ def _public_candidate(candidate: dict[str, Any], *, query_text: str | None = Non
             query_text=query_text or "",
             candidate=candidate,
         ),
+    }
+
+
+def _public_candidate_visual_support(candidate: dict[str, Any]) -> dict[str, Any]:
+    source_quality = _mapping(candidate.get("source_quality"))
+    nested = _mapping(source_quality.get("candidate_visual_support"))
+    visual_state_count = len(_string_list(candidate.get("visual_state_ids")))
+    visual_entity_count = len(_string_list(candidate.get("visual_entity_ids")))
+    candidate_link_count = int(source_quality.get("candidate_link_count") or 0)
+    if not candidate_link_count:
+        candidate_link_count = len(_string_list(candidate.get("candidate_entity_link_ids")))
+    timestamp_fallback_link_count = int(source_quality.get("timestamp_fallback_link_count") or 0)
+    has_support = bool(
+        nested.get("has_candidate_visual_support")
+        or source_quality.get("has_visual_state")
+        or source_quality.get("has_visual_entity")
+        or visual_state_count
+        or visual_entity_count
+        or candidate_link_count
+        or timestamp_fallback_link_count
+    )
+    return {
+        "has_candidate_visual_support": has_support,
+        "visual_state_count": int(nested.get("visual_state_count") or visual_state_count),
+        "visual_entity_count": int(nested.get("visual_entity_count") or visual_entity_count),
+        "candidate_link_count": candidate_link_count,
+        "timestamp_fallback_link_count": timestamp_fallback_link_count,
+        "candidate_link_signal_counts": _public_count_map(
+            source_quality.get("candidate_link_signal_counts")
+            or nested.get("candidate_link_signal_counts"),
+            CANDIDATE_LINK_SIGNAL_KEYS,
+        ),
+        "paper_claim_eligible": False,
+    }
+
+
+def _public_verified_object_alignment(candidate: dict[str, Any]) -> dict[str, Any]:
+    source_quality = _mapping(candidate.get("source_quality"))
+    nested = _mapping(source_quality.get("verified_object_alignment"))
+    verified_link_count = int(source_quality.get("verified_link_count") or 0)
+    if not verified_link_count:
+        verified_link_count = len(_string_list(candidate.get("verified_entity_link_ids")))
+    has_verified = bool(
+        nested.get("has_verified_object_alignment")
+        or source_quality.get("has_verified_link")
+        or verified_link_count
+    )
+    return {
+        "has_verified_object_alignment": has_verified,
+        "verified_link_count": verified_link_count,
+        "verified_link_source_counts": _public_count_map(
+            source_quality.get("verified_link_source_counts")
+            or nested.get("verified_link_source_counts"),
+            VERIFIED_LINK_SOURCE_KEYS,
+        ),
+        "timestamp_fallback_counted_as_verified": False,
+        "paper_claim_eligible": has_verified,
     }
 
 
@@ -675,6 +783,8 @@ def _candidate_quality_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         "has_vlm_entity": bool(source_quality.get("has_vlm_entity")),
         "has_verified_link": bool(source_quality.get("has_verified_link")),
         "has_timestamp_fallback_link": bool(source_quality.get("has_timestamp_fallback_link")),
+        "candidate_visual_support": _public_candidate_visual_support(candidate),
+        "verified_object_alignment": _public_verified_object_alignment(candidate),
         "rag_fields": {
             "evidence_text_available": bool(candidate.get("evidence_text")),
             "semantic_text_available": bool(candidate.get("semantic_text")),
@@ -1018,6 +1128,9 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
     for suite in payload.get("suites", []):
         build = suite.get("build", {})
         index = suite.get("index", {})
+        link_diagnostics = _mapping(build.get("link_diagnostics"))
+        candidate_support = _mapping(link_diagnostics.get("candidate_visual_support"))
+        verified_alignment = _mapping(link_diagnostics.get("verified_object_alignment"))
         vlm_coverage = _mapping(build.get("vlm_object_evidence_coverage"))
         entity_coverage = _mapping(vlm_coverage.get("visual_entity_coverage"))
         unit_coverage = _mapping(vlm_coverage.get("evidence_unit_coverage"))
@@ -1031,6 +1144,8 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- evidence units: `{_mapping(build.get('counts')).get('evidence_units_total', 0)}`",
                 f"- alignment statuses: `{json.dumps(build.get('alignment_status_counts', {}), sort_keys=True)}`",
                 f"- link counts: `{json.dumps(build.get('link_counts', {}), sort_keys=True)}`",
+                f"- candidate visual support: `{json.dumps(candidate_support, sort_keys=True)}`",
+                f"- verified object alignment: `{json.dumps(verified_alignment, sort_keys=True)}`",
                 f"- visual state source: `{visual_coverage.get('source') or 'unknown'}`",
                 f"- visual state coverage: `{visual_coverage.get('evidence_units_with_visual_state', 0)}`/`{visual_coverage.get('evidence_units_total', 0)}`",
                 f"- visual state duration buckets: `{json.dumps(interval_summary.get('buckets', {}), sort_keys=True)}`",
@@ -1039,6 +1154,8 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- RAG input inspectable top hits: `{suite.get('rag_input_inspection', {}).get('inspectable_top_hit_count', 0)}`",
                 f"- target rank buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('rank_bucket_counts', {}), sort_keys=True)}`",
                 f"- found target query-term buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('found_target_query_term_bucket_counts', {}), sort_keys=True)}`",
+                f"- found target candidate link signals: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('found_target_candidate_link_signal_counts', {}), sort_keys=True)}`",
+                f"- found target verified link sources: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('found_target_verified_link_source_counts', {}), sort_keys=True)}`",
                 f"- top-vs-target coverage flags: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('quality_delta_flag_counts', {}), sort_keys=True)}`",
                 f"- reranked target rank buckets: `{json.dumps(suite.get('rerank_diagnostics', {}).get('reranked_target_rank_bucket_counts', {}), sort_keys=True)}`",
                 f"- reranked top-hit matches: `{suite.get('rerank_diagnostics', {}).get('reranked_top_match_count', 0)}`",
@@ -1084,6 +1201,8 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
         for diag in configured
     )
     target_quality = Counter()
+    target_candidate_signal_counts = Counter()
+    target_verified_source_counts = Counter()
     top_better_counts = Counter()
     for diag in found:
         quality = _mapping(diag.get("target_evidence_unit_quality"))
@@ -1095,6 +1214,22 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
             target_quality["has_vlm_entity"] += 1
         if quality.get("has_verified_link") is True:
             target_quality["has_verified_link"] += 1
+        candidate_support = _mapping(quality.get("candidate_visual_support"))
+        verified_alignment = _mapping(quality.get("verified_object_alignment"))
+        if candidate_support.get("has_candidate_visual_support") is True:
+            target_quality["has_candidate_visual_support"] += 1
+        if verified_alignment.get("has_verified_object_alignment") is True:
+            target_quality["has_verified_object_alignment"] += 1
+        for key, value in _public_count_map(
+            candidate_support.get("candidate_link_signal_counts"),
+            CANDIDATE_LINK_SIGNAL_KEYS,
+        ).items():
+            target_candidate_signal_counts[key] += value
+        for key, value in _public_count_map(
+            verified_alignment.get("verified_link_source_counts"),
+            VERIFIED_LINK_SOURCE_KEYS,
+        ).items():
+            target_verified_source_counts[key] += value
         delta = _mapping(diag.get("top_vs_target_quality_delta"))
         for key in (
             "top_has_more_visual_entities",
@@ -1120,6 +1255,8 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
         "target_found_in_top_k_count": len(found),
         "rank_bucket_counts": dict(buckets),
         "found_target_quality_counts": dict(target_quality),
+        "found_target_candidate_link_signal_counts": dict(target_candidate_signal_counts),
+        "found_target_verified_link_source_counts": dict(target_verified_source_counts),
         "quality_delta_flag_counts": dict(top_better_counts),
         "found_target_query_term_bucket_counts": dict(query_term_buckets),
         "public_note": (
@@ -1211,6 +1348,149 @@ def _public_build_counts(counts: dict[str, Any]) -> dict[str, int]:
         "evidence_units_total",
     ]
     return {key: int(counts.get(key) or 0) for key in keys}
+
+
+def _public_link_diagnostics(value: Any) -> dict[str, Any]:
+    diagnostics = _mapping(value)
+    candidate_support = _mapping(diagnostics.get("candidate_visual_support"))
+    verified_alignment = _mapping(diagnostics.get("verified_object_alignment"))
+    return {
+        "schema_version": diagnostics.get("schema_version") or LINK_DIAGNOSTICS_SCHEMA_VERSION,
+        "evidence_units_total": int(diagnostics.get("evidence_units_total") or 0),
+        "candidate_visual_support": {
+            "units_with_candidate_visual_support": int(
+                candidate_support.get("units_with_candidate_visual_support") or 0
+            ),
+            "units_with_candidate_link": int(candidate_support.get("units_with_candidate_link") or 0),
+            "units_with_timestamp_fallback_link": int(
+                candidate_support.get("units_with_timestamp_fallback_link") or 0
+            ),
+            "candidate_links": int(candidate_support.get("candidate_links") or 0),
+            "timestamp_fallback_links": int(candidate_support.get("timestamp_fallback_links") or 0),
+            "candidate_link_signal_counts": _public_count_map(
+                candidate_support.get("candidate_link_signal_counts")
+                or diagnostics.get("candidate_link_signal_counts"),
+                CANDIDATE_LINK_SIGNAL_KEYS,
+            ),
+            "paper_claim_eligible": False,
+        },
+        "verified_object_alignment": {
+            "units_with_verified_object_alignment": int(
+                verified_alignment.get("units_with_verified_object_alignment") or 0
+            ),
+            "verified_links": int(verified_alignment.get("verified_links") or 0),
+            "verified_link_source_counts": _public_count_map(
+                verified_alignment.get("verified_link_source_counts")
+                or diagnostics.get("verified_link_source_counts"),
+                VERIFIED_LINK_SOURCE_KEYS,
+            ),
+            "timestamp_fallback_counted_as_verified": False,
+            "paper_claim_eligible_units": int(
+                verified_alignment.get("paper_claim_eligible_units") or 0
+            ),
+        },
+        "candidate_link_signal_counts": _public_count_map(
+            diagnostics.get("candidate_link_signal_counts")
+            or candidate_support.get("candidate_link_signal_counts"),
+            CANDIDATE_LINK_SIGNAL_KEYS,
+        ),
+        "verified_link_source_counts": _public_count_map(
+            diagnostics.get("verified_link_source_counts")
+            or verified_alignment.get("verified_link_source_counts"),
+            VERIFIED_LINK_SOURCE_KEYS,
+        ),
+        "public_note": diagnostics.get("public_note") or LINK_DIAGNOSTICS_PUBLIC_NOTE,
+    }
+
+
+def _empty_public_link_diagnostics() -> dict[str, Any]:
+    return _public_link_diagnostics(
+        {
+            "schema_version": LINK_DIAGNOSTICS_SCHEMA_VERSION,
+            "candidate_visual_support": {},
+            "verified_object_alignment": {},
+        }
+    )
+
+
+def _link_diagnostics_from_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    candidate_signal_counts = Counter()
+    verified_source_counts = Counter()
+    units_with_candidate_visual_support = 0
+    units_with_candidate_link = 0
+    units_with_timestamp_fallback_link = 0
+    units_with_verified_object_alignment = 0
+    candidate_links = 0
+    timestamp_fallback_links = 0
+    verified_links = 0
+    for row in rows:
+        source_quality = _mapping(row.get("source_quality"))
+        candidate_count = int(source_quality.get("candidate_link_count") or 0)
+        timestamp_count = int(source_quality.get("timestamp_fallback_link_count") or 0)
+        verified_count = int(source_quality.get("verified_link_count") or 0)
+        if not candidate_count:
+            statuses = _mapping(row.get("candidate_entity_link_statuses"))
+            candidate_count = sum(1 for status in statuses.values() if str(status) == "candidate")
+        if not timestamp_count:
+            statuses = _mapping(row.get("candidate_entity_link_statuses"))
+            timestamp_count = sum(1 for status in statuses.values() if str(status) == "timestamp_fallback")
+        if not verified_count:
+            verified_count = len(_string_list(row.get("verified_entity_link_ids")))
+        candidate_links += candidate_count
+        timestamp_fallback_links += timestamp_count
+        verified_links += verified_count
+        if candidate_count:
+            units_with_candidate_link += 1
+        if timestamp_count:
+            units_with_timestamp_fallback_link += 1
+
+        support = _mapping(source_quality.get("candidate_visual_support"))
+        if (
+            support.get("has_candidate_visual_support") is True
+            or source_quality.get("has_visual_state") is True
+            or source_quality.get("has_visual_entity") is True
+            or candidate_count
+            or timestamp_count
+        ):
+            units_with_candidate_visual_support += 1
+        verified = _mapping(source_quality.get("verified_object_alignment"))
+        if verified.get("has_verified_object_alignment") is True or verified_count:
+            units_with_verified_object_alignment += 1
+        for key, value in _public_count_map(
+            source_quality.get("candidate_link_signal_counts"),
+            CANDIDATE_LINK_SIGNAL_KEYS,
+        ).items():
+            candidate_signal_counts[key] += value
+        for key, value in _public_count_map(
+            source_quality.get("verified_link_source_counts"),
+            VERIFIED_LINK_SOURCE_KEYS,
+        ).items():
+            verified_source_counts[key] += value
+    return _public_link_diagnostics(
+        {
+            "schema_version": LINK_DIAGNOSTICS_SCHEMA_VERSION,
+            "evidence_units_total": len(rows),
+            "candidate_visual_support": {
+                "units_with_candidate_visual_support": units_with_candidate_visual_support,
+                "units_with_candidate_link": units_with_candidate_link,
+                "units_with_timestamp_fallback_link": units_with_timestamp_fallback_link,
+                "candidate_links": candidate_links,
+                "timestamp_fallback_links": timestamp_fallback_links,
+                "candidate_link_signal_counts": dict(candidate_signal_counts),
+            },
+            "verified_object_alignment": {
+                "units_with_verified_object_alignment": units_with_verified_object_alignment,
+                "verified_links": verified_links,
+                "verified_link_source_counts": dict(verified_source_counts),
+                "paper_claim_eligible_units": units_with_verified_object_alignment,
+            },
+        }
+    )
+
+
+def _public_count_map(value: Any, keys: tuple[str, ...]) -> dict[str, int]:
+    mapping = _mapping(value)
+    return {key: int(mapping.get(key) or 0) for key in keys}
 
 
 def _public_visual_state_coverage(value: Any) -> dict[str, Any]:

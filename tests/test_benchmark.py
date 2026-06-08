@@ -198,6 +198,50 @@ class FakeMatrixClient:
         return {"hits": [], "processingTimeMs": 1, "indexUid": index_uid}
 
 
+class TimestampFallbackMatrixClient:
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        hybrid: dict | None = None,
+        vector: list[float] | None = None,
+        filter: str | list[str] | None = None,
+    ) -> dict:
+        if index_uid == "fallback_segments":
+            return {
+                "hits": [
+                    {
+                        "segment_id": "seg_fallback",
+                        "sample_id": "seg_fallback",
+                        "video_id": "fallback_video",
+                        "start_time": 10.0,
+                        "end_time": 14.0,
+                        "timestamp_center": 12.0,
+                        "transcript_text": "SECRET fallback transcript",
+                        "_rankingScore": 0.9,
+                    }
+                ][:limit],
+                "processingTimeMs": 3,
+                "indexUid": index_uid,
+            }
+        if index_uid == "fallback_visual":
+            return {
+                "hits": [
+                    {
+                        "entity_id": "ent_fallback",
+                        "frame_id": "frame_fallback",
+                        "timestamp": 12.0,
+                        "text": "SECRET visual label",
+                        "_rankingScore": 0.8,
+                    }
+                ][:limit],
+                "processingTimeMs": 2,
+                "indexUid": index_uid,
+            }
+        return {"hits": [], "processingTimeMs": 1, "indexUid": index_uid}
+
+
 MIT_PAPER_MATRIX_VARIANTS = [
     "segment_lexical",
     "domain_lexicon",
@@ -625,6 +669,15 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["window"]["answer_citation_recall"] == 1.0
     assert suite["variant_metrics"]["window"]["expected_citation_hit_ratio"] == 1.0
     assert suite["variant_metrics"]["window"]["mean_unsupported_claim_count"] == 0.0
+    assert suite["variant_metrics"]["window"]["candidate_visual_support_ratio"] == 1.0
+    assert suite["variant_metrics"]["window"]["verified_object_alignment_ratio"] == 0.0
+    assert suite["variant_metrics"]["window"]["timestamp_fallback_counted_as_verified_count"] == 0
+    assert "vlm_object_visual_description_overlap" in suite["variant_metrics"]["window"][
+        "candidate_link_signal_counts"
+    ]
+    assert "explicit_verified_flag" in suite["variant_metrics"]["window"][
+        "verified_link_source_counts"
+    ]
     assert suite["variant_metrics"]["rerank"]["mean_unsupported_claim_count"] == 2.0
     assert suite["variant_metrics"]["window"]["answer_grounding_gap_counts"] == {
         "grounded_expected_citation": 1
@@ -656,6 +709,14 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert all(row["answer_grounding"]["expected_citation_hit"] is True for row in rows)
     assert all(row["answer_grounding"]["citation_recall"] is not None for row in rows)
     assert all(row["config"]["index_ref"].startswith("index:") for row in rows)
+    assert all("candidate_visual_support" in row for row in rows)
+    assert all("verified_object_alignment" in row for row in rows)
+    assert all(
+        row["verified_object_alignment"]["timestamp_fallback_counted_as_verified"] is False
+        for row in rows
+    )
+    assert all("candidate_visual_support" in row["top_candidate"] for row in rows)
+    assert all("verified_object_alignment" in row["top_candidate"] for row in rows)
     rerank_row = next(row for row in rows if row["variant_id"] == "rerank")
     assert rerank_row["config"]["candidate_pool_limit"] == 30
 
@@ -664,6 +725,8 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert "answer_citation_precision" in metrics_csv
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "Retrieval/Answer Matrix" in summary
+    assert "candidate support" in summary
+    assert "verified align" in summary
     assert "deterministic expected hint overlap" in summary
 
     gate_config = json.loads(
@@ -697,6 +760,137 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         assert sensitive not in public_text
     assert "raw_candidate_ids" in public_text
     assert "hashed" in public_text
+
+
+def test_retrieval_answer_matrix_reports_timestamp_fallback_as_candidate_not_verified(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "fallback_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            {
+                "segment_id": "seg_fallback",
+                "project_id": "fallback_project",
+                "video_id": "fallback_video",
+                "sample_id": "seg_fallback",
+                "sample_index": 0,
+                "start_time": 10.0,
+                "end_time": 14.0,
+                "timestamp_center": 12.0,
+                "transcript_text": "SECRET fallback transcript",
+                "frame_refs": ["frame_fallback"],
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [{"frame_id": "frame_fallback", "timestamp": 12.0, "frame_path": "/private/frame.jpg"}],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_entities.jsonl",
+        [
+            {
+                "entity_id": "ent_fallback",
+                "project_id": "fallback_project",
+                "frame_id": "frame_fallback",
+                "timestamp": 12.0,
+                "text": "SECRET visual label",
+                "source": "ocr",
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "entity_links.jsonl",
+        [
+            {
+                "link_id": "link_timestamp_fallback",
+                "project_id": "fallback_project",
+                "segment_id": "seg_fallback",
+                "entity_id": "ent_fallback",
+                "frame_id": "frame_fallback",
+                "link_type": "time_overlap",
+                "score": 0.2,
+                "evidence": ["time_overlap", "timestamp_fallback"],
+                "time_overlap": True,
+            }
+        ],
+    )
+    manifest_path = tmp_path / "benchmark_matrix_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "fallback_matrix",
+                "deltas": [5, 10],
+                "suites": [
+                    {
+                        "suite_id": "fallback_matrix",
+                        "type": "retrieval_answer_matrix",
+                        "domain": "public_synthetic",
+                        "project_dir": str(project_dir),
+                        "queries": [
+                            {
+                                "query_id": "q_fallback",
+                                "public_label": "fallback concept",
+                                "query_text": "SECRET raw fallback query",
+                                "expected_time_hint": "10-14s",
+                                "expected_segment_id": "seg_fallback",
+                            }
+                        ],
+                        "index": "fallback_segments",
+                        "visual_index": "fallback_visual",
+                        "limit": 1,
+                        "neighbor_count": 0,
+                        "include_answer": False,
+                        "variants": [
+                            {
+                                "variant_id": "segment_lexical",
+                                "label": "Segment lexical baseline",
+                                "index_kind": "segment",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = run_benchmark(
+        client=TimestampFallbackMatrixClient(),
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "matrix",
+        repo_root=tmp_path,
+    )
+
+    suite = run.metrics["suites"][0]
+    variant = suite["variant_metrics"]["segment_lexical"]
+    assert variant["candidate_visual_support_ratio"] == 1.0
+    assert variant["verified_object_alignment_ratio"] == 0.0
+    assert variant["timestamp_fallback_link_ratio"] == 1.0
+    assert variant["timestamp_fallback_counted_as_verified_count"] == 0
+    assert variant["candidate_link_signal_counts"]["timestamp_fallback"] == 1
+    assert variant["verified_link_source_counts"]["explicit_verified_flag"] == 0
+
+    row = json.loads(run.query_results_path.read_text(encoding="utf-8").splitlines()[0])
+    assert row["candidate_visual_support"]["timestamp_fallback_link_count"] == 1
+    assert row["candidate_visual_support"]["candidate_link_signal_counts"]["timestamp_fallback"] == 1
+    assert row["verified_object_alignment"]["has_verified_object_alignment"] is False
+    assert row["verified_object_alignment"]["verified_link_count"] == 0
+    assert row["verified_object_alignment"]["timestamp_fallback_counted_as_verified"] is False
+    assert row["top_candidate"]["verified_object_alignment"]["verified_link_count"] == 0
+
+    public_text = "\n".join(
+        [
+            run.metrics_path.read_text(encoding="utf-8"),
+            run.query_results_path.read_text(encoding="utf-8"),
+            run.summary_path.read_text(encoding="utf-8"),
+        ]
+    )
+    assert "SECRET fallback transcript" not in public_text
+    assert "SECRET visual label" not in public_text
+    assert "SECRET raw fallback query" not in public_text
+    assert "/private/frame.jpg" not in public_text
 
 
 def test_retrieval_answer_matrix_resolves_domain_lexicon_relative_to_manifest(

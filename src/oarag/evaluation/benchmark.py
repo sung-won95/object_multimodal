@@ -51,6 +51,7 @@ DEFAULT_ABLATION_MODES = [
     "object-aligned",
 ]
 MATRIX_SCHEMA_VERSION = "retrieval-answer-ablation-matrix-v1"
+MATRIX_LINK_DIAGNOSTICS_SCHEMA_VERSION = "retrieval-answer-object-link-diagnostics-public-v1"
 SEMANTIC_SMOKE_SCHEMA_VERSION = "semantic-live-smoke-aggregate-v1"
 LOCAL_HASH_BENCHMARK_WARNING = (
     "local_hash_v1 vectors are deterministic smoke fallback; benchmark semantic "
@@ -59,6 +60,29 @@ LOCAL_HASH_BENCHMARK_WARNING = (
 UNDECLARED_BENCHMARK_WARNING = (
     "Hybrid semantic retrieval ran without provider-backed embedding metadata; "
     "semantic quality claims are disabled for this benchmark output."
+)
+MATRIX_LINK_DIAGNOSTICS_PUBLIC_NOTE = (
+    "candidate_visual_support is candidate/fallback visual evidence for retrieval "
+    "inspection. verified_object_alignment requires explicit verified link metadata; "
+    "timestamp fallback is not counted as verified object alignment."
+)
+CANDIDATE_LINK_SIGNAL_KEYS = (
+    "temporal_overlap",
+    "lexical_overlap",
+    "mention_deictic_hook",
+    "spatial_position",
+    "visual_text_overlap",
+    "vlm_object_visual_description_overlap",
+    "semantic_domain_hint",
+    "timestamp_fallback",
+)
+VERIFIED_LINK_SOURCE_KEYS = (
+    "explicit_verified_flag",
+    "explicit_verified_status",
+    "human_gold",
+    "vlm_verifier",
+    "strict_deterministic_rule",
+    "unspecified_verified",
 )
 DEFAULT_MATRIX_VARIANTS = [
     {
@@ -1322,6 +1346,7 @@ def _run_matrix_query(
         if isinstance(top_bundle, dict) and isinstance(top_bundle.get("candidate"), dict)
         else None
     )
+    object_link_diagnostics = _matrix_object_link_diagnostics(top_bundle)
 
     return {
         "schema_version": MATRIX_SCHEMA_VERSION,
@@ -1359,6 +1384,9 @@ def _run_matrix_query(
         "evidence_covered": bool(bundles),
         "frame_backed": _bundles_have_frames(bundles),
         "linked_entity_backed": _bundles_have_linked_entities(bundles),
+        "candidate_visual_support": object_link_diagnostics["candidate_visual_support"],
+        "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
+        "object_link_diagnostics": object_link_diagnostics,
         "query_expansion": _public_query_expansion(response.get("query_expansion")),
         "semantic_retrieval": _public_semantic_retrieval(
             response.get("retrieval_context")
@@ -1394,6 +1422,43 @@ def _matrix_variant_metrics(
         "evidence_coverage_ratio": _ratio(rows, "evidence_covered"),
         "frame_backed_ratio": _ratio(rows, "frame_backed"),
         "linked_entity_backed_ratio": _ratio(rows, "linked_entity_backed"),
+        "candidate_visual_support_ratio": _nested_bool_ratio(
+            rows,
+            "candidate_visual_support",
+            "has_candidate_visual_support",
+        ),
+        "verified_object_alignment_ratio": _nested_bool_ratio(
+            rows,
+            "verified_object_alignment",
+            "has_verified_object_alignment",
+        ),
+        "candidate_link_signal_counts": _nested_count_totals(
+            rows,
+            "candidate_visual_support",
+            "candidate_link_signal_counts",
+            CANDIDATE_LINK_SIGNAL_KEYS,
+        ),
+        "verified_link_source_counts": _nested_count_totals(
+            rows,
+            "verified_object_alignment",
+            "verified_link_source_counts",
+            VERIFIED_LINK_SOURCE_KEYS,
+        ),
+        "timestamp_fallback_link_ratio": _nested_positive_ratio(
+            rows,
+            "candidate_visual_support",
+            "timestamp_fallback_link_count",
+        ),
+        "timestamp_fallback_counted_as_verified_count": sum(
+            1
+            for row in rows
+            if (
+                _mapping(row.get("verified_object_alignment")).get(
+                    "timestamp_fallback_counted_as_verified"
+                )
+                is True
+            )
+        ),
         "top1_expected_segment_match_ratio": _ratio(rows, "top1_expected_segment_match"),
         "grounded_answer_ratio": _answer_ratio(rows, "grounded_answer"),
         "candidate_evidence_only_ratio": _answer_ratio(rows, "candidate_evidence_only"),
@@ -1816,6 +1881,7 @@ def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | 
     frame_refs = []
     if isinstance(evidence_window, dict):
         frame_refs = _list_of_dicts(evidence_window.get("frame_refs"))
+    object_link_diagnostics = _matrix_object_link_diagnostics(bundle)
     return {
         "ref": f"{source}:{_short_hash(candidate_id)}",
         "source": source,
@@ -1833,6 +1899,8 @@ def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | 
         "source_count": (bundle.get("merge") or {}).get("source_count")
         if isinstance(bundle.get("merge"), dict)
         else None,
+        "candidate_visual_support": object_link_diagnostics["candidate_visual_support"],
+        "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
     }
 
 
@@ -2093,6 +2161,209 @@ def _bundles_have_linked_entities(bundles: list[dict[str, Any]]) -> bool:
     return any(bool(bundle.get("linked_entities")) for bundle in bundles)
 
 
+def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(bundle, dict):
+        return {
+            "schema_version": MATRIX_LINK_DIAGNOSTICS_SCHEMA_VERSION,
+            "candidate_visual_support": _matrix_candidate_visual_support(
+                frame_backed=False,
+                visual_entity_count=0,
+                candidate_link_count=0,
+                timestamp_fallback_link_count=0,
+                candidate_link_signal_counts=_zero_count_map(CANDIDATE_LINK_SIGNAL_KEYS),
+            ),
+            "verified_object_alignment": _matrix_verified_object_alignment(
+                verified_link_count=0,
+                verified_link_source_counts=_zero_count_map(VERIFIED_LINK_SOURCE_KEYS),
+            ),
+            "public_note": MATRIX_LINK_DIAGNOSTICS_PUBLIC_NOTE,
+        }
+
+    evidence_window = _mapping(bundle.get("evidence_window"))
+    frame_refs = _list_of_dicts(evidence_window.get("frame_refs"))
+    visual_entities = _list_of_dicts(bundle.get("visual_entities"))
+    linked_entities = _list_of_dicts(bundle.get("linked_entities"))
+    candidate_signal_counts = _zero_count_map(CANDIDATE_LINK_SIGNAL_KEYS)
+    verified_source_counts = _zero_count_map(VERIFIED_LINK_SOURCE_KEYS)
+    candidate_link_count = 0
+    timestamp_fallback_link_count = 0
+    verified_link_count = 0
+    for linked in linked_entities:
+        status = _matrix_link_status(linked)
+        if status == "verified":
+            verified_link_count += 1
+            _add_counts(verified_source_counts, _matrix_verified_link_source_counts(linked))
+        else:
+            if status == "timestamp_fallback":
+                timestamp_fallback_link_count += 1
+            else:
+                candidate_link_count += 1
+            _add_counts(candidate_signal_counts, _matrix_candidate_link_signal_counts(linked, status=status))
+    frame_backed = bool(frame_refs)
+    return {
+        "schema_version": MATRIX_LINK_DIAGNOSTICS_SCHEMA_VERSION,
+        "candidate_visual_support": _matrix_candidate_visual_support(
+            frame_backed=frame_backed,
+            visual_entity_count=len(visual_entities),
+            candidate_link_count=candidate_link_count,
+            timestamp_fallback_link_count=timestamp_fallback_link_count,
+            candidate_link_signal_counts=candidate_signal_counts,
+        ),
+        "verified_object_alignment": _matrix_verified_object_alignment(
+            verified_link_count=verified_link_count,
+            verified_link_source_counts=verified_source_counts,
+        ),
+        "public_note": MATRIX_LINK_DIAGNOSTICS_PUBLIC_NOTE,
+    }
+
+
+def _matrix_candidate_visual_support(
+    *,
+    frame_backed: bool,
+    visual_entity_count: int,
+    candidate_link_count: int,
+    timestamp_fallback_link_count: int,
+    candidate_link_signal_counts: dict[str, int],
+) -> dict[str, Any]:
+    has_support = bool(
+        frame_backed
+        or visual_entity_count
+        or candidate_link_count
+        or timestamp_fallback_link_count
+    )
+    return {
+        "has_candidate_visual_support": has_support,
+        "frame_backed": frame_backed,
+        "visual_entity_count": visual_entity_count,
+        "candidate_link_count": candidate_link_count,
+        "timestamp_fallback_link_count": timestamp_fallback_link_count,
+        "candidate_link_signal_counts": _public_count_map(
+            candidate_link_signal_counts,
+            CANDIDATE_LINK_SIGNAL_KEYS,
+        ),
+        "paper_claim_eligible": False,
+    }
+
+
+def _matrix_verified_object_alignment(
+    *,
+    verified_link_count: int,
+    verified_link_source_counts: dict[str, int],
+) -> dict[str, Any]:
+    has_verified = verified_link_count > 0
+    return {
+        "has_verified_object_alignment": has_verified,
+        "verified_link_count": verified_link_count,
+        "verified_link_source_counts": _public_count_map(
+            verified_link_source_counts,
+            VERIFIED_LINK_SOURCE_KEYS,
+        ),
+        "timestamp_fallback_counted_as_verified": False,
+        "paper_claim_eligible": has_verified,
+    }
+
+
+def _matrix_link_status(link: dict[str, Any]) -> str:
+    explicit_status = str(
+        link.get("alignment_status")
+        or link.get("verification_status")
+        or link.get("status")
+        or ""
+    ).casefold()
+    if explicit_status == "verified" or link.get("verified") is True:
+        return "verified"
+    if _matrix_timestamp_fallback_link(link):
+        return "timestamp_fallback"
+    return "candidate"
+
+
+def _matrix_timestamp_fallback_link(link: dict[str, Any]) -> bool:
+    evidence = _matrix_link_evidence(link)
+    link_type = str(link.get("link_type") or "").casefold()
+    reason_summary = str(_mapping(link.get("reason_metadata")).get("summary") or "").casefold()
+    has_strong_signal = bool(evidence - {"time_overlap", "timestamp_fallback"})
+    return (
+        not has_strong_signal
+        or link_type == "time_overlap"
+        or reason_summary == "timestamp_fallback_only"
+    )
+
+
+def _matrix_candidate_link_signal_counts(link: dict[str, Any], *, status: str) -> dict[str, int]:
+    counts = _zero_count_map(CANDIDATE_LINK_SIGNAL_KEYS)
+    evidence = _matrix_link_evidence(link)
+    if link.get("time_overlap") is True or "time_overlap" in evidence:
+        counts["temporal_overlap"] += 1
+    if _string_list(link.get("lexical_match")) or evidence & {"lexical_match", "visual_text_match"}:
+        counts["lexical_overlap"] += 1
+    if _string_list(link.get("mention_candidate")) or evidence & {"mention_candidate", "reference_cue"}:
+        counts["mention_deictic_hook"] += 1
+    if evidence & {"position_match", "relations_match"}:
+        counts["spatial_position"] += 1
+    if "visual_text_match" in evidence:
+        counts["visual_text_overlap"] += 1
+    if evidence & {"visual_description_match", "entity_type_match"}:
+        counts["vlm_object_visual_description_overlap"] += 1
+    if evidence & {"semantic_hint", "domain_lexicon_match"}:
+        counts["semantic_domain_hint"] += 1
+    if status == "timestamp_fallback" or "timestamp_fallback" in evidence:
+        counts["timestamp_fallback"] += 1
+    return counts
+
+
+def _matrix_verified_link_source_counts(link: dict[str, Any]) -> dict[str, int]:
+    counts = _zero_count_map(VERIFIED_LINK_SOURCE_KEYS)
+    matched = False
+    explicit_status = str(
+        link.get("alignment_status")
+        or link.get("verification_status")
+        or link.get("status")
+        or ""
+    ).casefold()
+    if link.get("verified") is True:
+        counts["explicit_verified_flag"] += 1
+        matched = True
+    if explicit_status == "verified":
+        counts["explicit_verified_status"] += 1
+        matched = True
+    source_text = _matrix_verified_source_text(link)
+    if any(token in source_text for token in ("human", "gold", "annotator", "annotation")):
+        counts["human_gold"] += 1
+        matched = True
+    if any(token in source_text for token in ("vlm", "vision", "verifier", "validator", "model")):
+        counts["vlm_verifier"] += 1
+        matched = True
+    if any(token in source_text for token in ("strict", "deterministic", "rule")):
+        counts["strict_deterministic_rule"] += 1
+        matched = True
+    if not matched:
+        counts["unspecified_verified"] += 1
+    return counts
+
+
+def _matrix_verified_source_text(link: dict[str, Any]) -> str:
+    metadata = _mapping(link.get("reason_metadata"))
+    values = [
+        link.get("verification_source"),
+        link.get("verified_source"),
+        link.get("verified_by"),
+        link.get("verifier"),
+        link.get("source"),
+        link.get("source_model"),
+        metadata.get("verification_source"),
+        metadata.get("verified_by"),
+        metadata.get("verifier"),
+        metadata.get("source"),
+        metadata.get("source_model"),
+        metadata.get("summary"),
+    ]
+    return " ".join(str(value).strip() for value in values if str(value or "").strip()).casefold()
+
+
+def _matrix_link_evidence(link: dict[str, Any]) -> set[str]:
+    return {str(item).casefold() for item in link.get("evidence") or [] if str(item).strip()}
+
+
 def _answer_ratio(rows: list[dict[str, Any]], answer_type: str) -> float | None:
     answer_rows = [row for row in rows if isinstance(row.get("answer"), dict)]
     if not answer_rows:
@@ -2197,6 +2468,8 @@ def _matrix_privacy_payload() -> dict[str, Any]:
         "transcript_excerpt": "redacted",
         "local_paths": "redacted",
         "raw_candidate_ids": "hashed",
+        "candidate_visual_support": "aggregate_counts_only",
+        "verified_object_alignment": "aggregate_counts_only",
         "raw_response_in_public_output": False,
         "grounding_proxy_metrics": "deterministic_expected_hint_overlap_not_full_llm_quality",
     }
@@ -2468,6 +2741,43 @@ def _ratio(rows: list[dict[str, Any]], key: str) -> float | None:
     return round(sum(1.0 if row.get(key) else 0.0 for row in rows) / len(rows), 4)
 
 
+def _nested_bool_ratio(rows: list[dict[str, Any]], section: str, key: str) -> float | None:
+    if not rows:
+        return None
+    return round(
+        sum(1.0 if _mapping(row.get(section)).get(key) is True else 0.0 for row in rows)
+        / len(rows),
+        4,
+    )
+
+
+def _nested_positive_ratio(rows: list[dict[str, Any]], section: str, key: str) -> float | None:
+    if not rows:
+        return None
+    return round(
+        sum(
+            1.0
+            if (_optional_float(_mapping(row.get(section)).get(key)) or 0.0) > 0
+            else 0.0
+            for row in rows
+        )
+        / len(rows),
+        4,
+    )
+
+
+def _nested_count_totals(
+    rows: list[dict[str, Any]],
+    section: str,
+    key: str,
+    count_keys: tuple[str, ...],
+) -> dict[str, int]:
+    totals = _zero_count_map(count_keys)
+    for row in rows:
+        _add_counts(totals, _mapping(_mapping(row.get(section)).get(key)))
+    return totals
+
+
 def _ratio_hit(rows: list[dict[str, Any]], delta: str) -> float | None:
     if not rows:
         return None
@@ -2510,6 +2820,24 @@ def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _zero_count_map(keys: tuple[str, ...]) -> dict[str, int]:
+    return {key: 0 for key in keys}
+
+
+def _public_count_map(value: Any, keys: tuple[str, ...]) -> dict[str, int]:
+    mapping = _mapping(value)
+    return {key: int(mapping.get(key) or 0) for key in keys}
+
+
+def _add_counts(target: dict[str, int], source: dict[str, Any]) -> None:
+    for key in target:
+        target[key] += int(source.get(key) or 0)
 
 
 def _string_list(value: Any) -> list[str]:
@@ -2788,14 +3116,15 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 "Grounding gap counts separate answer policy decisions from retrieval localization "
                 "misses in the JSON metrics.",
                 "",
-                "| suite | variant | queries | pool | Hit@10s | MRR | frame-backed | linked-backed | grounded | cite P | cite R | expected hit | unsupported | latency ms |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                "| suite | variant | queries | pool | Hit@10s | MRR | frame-backed | linked-backed | candidate support | verified align | grounded | cite P | cite R | expected hit | unsupported | latency ms |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for suite, variant in matrix_variants:
             lines.append(
                 "| {suite_id} | {variant_id} | {query_count} | {pool} | {hit10} | {mrr} | "
-                "{frame} | {linked} | {grounded} | {precision} | {recall} | {hit} | "
+                "{frame} | {linked} | {candidate_support} | {verified_align} | "
+                "{grounded} | {precision} | {recall} | {hit} | "
                 "{unsupported} | {latency} |".format(
                     suite_id=suite.get("suite_id"),
                     variant_id=variant.get("variant_id"),
@@ -2805,6 +3134,8 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                     mrr=_format_metric(variant.get("mrr_at_max_delta")),
                     frame=_format_metric(variant.get("frame_backed_ratio")),
                     linked=_format_metric(variant.get("linked_entity_backed_ratio")),
+                    candidate_support=_format_metric(variant.get("candidate_visual_support_ratio")),
+                    verified_align=_format_metric(variant.get("verified_object_alignment_ratio")),
                     grounded=_format_metric(variant.get("grounded_answer_ratio")),
                     precision=_format_metric(variant.get("answer_citation_precision")),
                     recall=_format_metric(variant.get("answer_citation_recall")),
