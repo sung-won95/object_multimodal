@@ -26,6 +26,35 @@
     "claims": "<supported|needs_evidence|blocked|unknown>",
     "robustness": "<passed|failed|missing|unknown>"
   },
+  "dynamic_concept_graph": {
+    "variants": [
+      "meili_only",
+      "graph_only",
+      "meili_graph",
+      "graph_aware_rerank"
+    ],
+    "claim_scope": [
+      "dynamic_concept_graph_guided_candidate_recall",
+      "source_contribution_diagnostics",
+      "graph_aware_deterministic_rerank",
+      "public_safe_smoke_report"
+    ],
+    "allowed_public_result_fields": [
+      "query_id",
+      "hashed_refs",
+      "source_types",
+      "ranks",
+      "counts",
+      "recall_buckets",
+      "rerank_deltas",
+      "skip_reasons"
+    ],
+    "not_claimed": [
+      "graph_db_availability_as_verified_object_alignment",
+      "timestamp_only_overlap_as_verified_object_alignment",
+      "final_answer_quality_gain_without_public_safe_aggregate_evidence"
+    ]
+  },
   "privacy": {
     "payload": "run_id_commit_artifact_filenames_and_statuses_only",
     "raw_queries": "excluded",

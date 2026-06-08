@@ -20,6 +20,22 @@ MIT_PAPER_MATRIX_VARIANTS = [
     "evidence_unit_verified",
     "evidence_unit_quality_rerank",
 ]
+GRAPH_CONCEPT_MATRIX_VARIANTS = [
+    "meili_only",
+    "graph_only",
+    "meili_graph",
+    "graph_aware_rerank",
+]
+GRAPH_CONCEPT_ALLOWED_PUBLIC_FIELDS = [
+    "query_id",
+    "hashed_refs",
+    "source_types",
+    "ranks",
+    "counts",
+    "recall_buckets",
+    "rerank_deltas",
+    "skip_reasons",
+]
 
 
 class FakePaperBundleClient:
@@ -434,12 +450,24 @@ def test_mit_paper_bundle_manifest_and_skeleton_contract_are_private_safe() -> N
         for suite in gate["suites"]
     )
 
+    expected_artifacts_path = Path(
+        "reports/mit_deep_learning_eval/paper_matrix_v1/expected_artifacts.json"
+    )
+    expected_artifacts = json.loads(expected_artifacts_path.read_text(encoding="utf-8"))
+    assert expected_artifacts["required_variants"] == MIT_PAPER_MATRIX_VARIANTS
+    assert expected_artifacts["dynamic_concept_graph_variants"] == (
+        GRAPH_CONCEPT_MATRIX_VARIANTS
+    )
+    assert expected_artifacts["allowed_public_result_fields"] == (
+        GRAPH_CONCEPT_ALLOWED_PUBLIC_FIELDS
+    )
+
     skeleton_text = "\n".join(
         path.read_text(encoding="utf-8")
         for path in [
             Path("reports/mit_deep_learning_eval/README.md"),
             Path("reports/mit_deep_learning_eval/paper_matrix_v1/README.md"),
-            Path("reports/mit_deep_learning_eval/paper_matrix_v1/expected_artifacts.json"),
+            expected_artifacts_path,
             Path("reports/mit_deep_learning_eval/paper_matrix_v1/paper_report_skeleton.md"),
             gate_path,
             manifest_path,
@@ -455,3 +483,12 @@ def test_mit_paper_bundle_manifest_and_skeleton_contract_are_private_safe() -> N
         assert sensitive not in skeleton_text
     assert "candidate_evidence_text" in skeleton_text
     assert "local_paths" in skeleton_text
+    for variant in GRAPH_CONCEPT_MATRIX_VARIANTS:
+        assert variant in skeleton_text
+    for issue_ref in ["#213", "#214", "#217", "#219", "#220", "#221", "#222"]:
+        assert issue_ref in skeleton_text
+    for field in GRAPH_CONCEPT_ALLOWED_PUBLIC_FIELDS:
+        assert field in skeleton_text
+    lowered_skeleton = skeleton_text.lower()
+    assert "timestamp-only overlap" in lowered_skeleton
+    assert "candidate/fallback evidence" in lowered_skeleton

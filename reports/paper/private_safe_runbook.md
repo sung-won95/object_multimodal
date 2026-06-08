@@ -58,6 +58,45 @@ smoke completion; it is not semantic quality evidence. Public artifacts must kee
 only aggregate/sanitized metadata such as `purpose: local_reproducibility_smoke_fallback`
 and `quality_claim: none`, never raw query vectors.
 
+## Dynamic Concept Graph Smoke
+
+Use the cross-lecture smoke when the paper question is source contribution or
+dynamic concept graph candidate recall rather than final answer quality:
+
+```bash
+PYTHONPATH=src python3 -m oarag cross-lecture-retrieval-smoke \
+  --manifest <cross_lecture_smoke_manifest.json> \
+  --output-dir <cross_lecture_output_dir>
+```
+
+The public-safe graph matrix variants are:
+
+- `meili_only`: Meilisearch candidates only.
+- `graph_only`: graph traversal candidates only.
+- `meili_graph`: combined Meili and graph candidate pool.
+- `graph_aware_rerank`: combined pool plus deterministic graph-aware rerank.
+
+This smoke supports claims about dynamic concept graph guided candidate recall,
+source contribution diagnostics, graph-aware deterministic rerank diagnostics, and
+public-safe smoke/report generation. It does not by itself support a claim that
+Graph DB availability proves verified object alignment or final answer quality.
+
+Public cross-lecture result tables and reports may expose only:
+
+- `query_id`
+- hashed refs
+- source types
+- ranks
+- counts
+- recall buckets
+- rerank deltas
+- skip reasons
+
+They must not expose raw query text, answer text, transcript content, candidate
+evidence text, private eval values, raw vectors, local absolute paths, or raw private
+identifiers. Timestamp-only overlap is a candidate/fallback signal; it must stay
+separate from verified object alignment in every table and narrative.
+
 ## Advanced / Fallback Manual Flow
 
 Use the manual flow only for debugging, partial reruns, or comparing an individual
@@ -127,6 +166,9 @@ artifact builder.
 - `paper_artifact_registry.json`: run id, commit sha, artifact filenames, and coarse statuses only.
 - `paper_bundle_result.json`: bundle stage statuses, artifact filenames, registry statuses,
   and failure stage metadata only.
+- `cross-lecture-retrieval-smoke` artifacts: public-safe `metrics.json`,
+  `query_results.jsonl`, and `summary.md` with query ids, hashed refs, source types,
+  ranks, counts, recall buckets, rerank deltas, and skip reasons only.
 
 The artifact registry links the quality gate, readiness audit, claim matrix, and robustness
 interval status by filename and coarse status. Treat small-sample, missing-baseline, or
@@ -141,6 +183,12 @@ missing-paired-delta caveats as `needs_evidence`, not as a passing robustness cl
   the VLM-first path, with mock/jsonl/command backends available for reproducible tests.
 - Frame coverage, timestamp-only link ratio, and VLM/OCR comparisons are held claims
   until regenerated aggregate artifacts demonstrate them for the target suite.
+- Dynamic concept graph claims are limited to candidate recall, source contribution
+  diagnostics, deterministic graph-aware rerank diagnostics, and public-safe smoke/report
+  readiness until a final privacy-checked run supports a stronger claim.
+- Graph DB availability must not be interpreted as verified object alignment.
+  Timestamp-only overlap remains candidate/fallback evidence and is never counted as
+  verified object alignment.
 
 ## Review Gate
 
