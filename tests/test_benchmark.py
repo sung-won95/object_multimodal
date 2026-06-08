@@ -135,6 +135,9 @@ class FakeMatrixClient:
     ) -> dict:
         mode = "semantic" if hybrid else "lexical"
         self.searches.append((index_uid, query, mode, vector))
+        if index_uid == "public_evidence_units":
+            hits = _public_evidence_unit_hits()
+            return {"hits": hits[:limit], "processingTimeMs": 6, "indexUid": index_uid}
         if index_uid == "public_windows":
             hits = [
                 {
@@ -242,6 +245,165 @@ class TimestampFallbackMatrixClient:
         return {"hits": [], "processingTimeMs": 1, "indexUid": index_uid}
 
 
+def _public_evidence_unit_hits() -> list[dict]:
+    candidate_signal_counts = {
+        "temporal_overlap": 1,
+        "lexical_overlap": 1,
+        "mention_deictic_hook": 0,
+        "spatial_position": 0,
+        "visual_text_overlap": 1,
+        "vlm_object_visual_description_overlap": 0,
+        "semantic_domain_hint": 1,
+        "timestamp_fallback": 0,
+    }
+    verified_signal_counts = {
+        "temporal_overlap": 1,
+        "lexical_overlap": 1,
+        "mention_deictic_hook": 1,
+        "spatial_position": 1,
+        "visual_text_overlap": 1,
+        "vlm_object_visual_description_overlap": 1,
+        "semantic_domain_hint": 1,
+        "timestamp_fallback": 0,
+    }
+    empty_verified_sources = {
+        "explicit_verified_flag": 0,
+        "explicit_verified_status": 0,
+        "human_gold": 0,
+        "vlm_verifier": 0,
+        "strict_deterministic_rule": 0,
+        "unspecified_verified": 0,
+    }
+    verified_sources = {
+        "explicit_verified_flag": 1,
+        "explicit_verified_status": 1,
+        "human_gold": 0,
+        "vlm_verifier": 1,
+        "strict_deterministic_rule": 0,
+        "unspecified_verified": 0,
+    }
+    return [
+        {
+            "evidence_unit_id": "evu_wrap_candidate_public",
+            "project_id": "public_retrieval_ablation",
+            "video_id": "public_demo_video",
+            "target_segment_id": "seg_wrap_public",
+            "source_segment_ids": ["seg_wrap_public"],
+            "start_time": 30.0,
+            "end_time": 34.0,
+            "visual_state_ids": ["state_wrap_public"],
+            "visual_entity_ids": ["ent_wrap_public"],
+            "verified_entity_link_ids": [],
+            "candidate_entity_link_ids": ["link_wrap_candidate_public"],
+            "candidate_entity_link_statuses": {"link_wrap_candidate_public": "candidate"},
+            "alignment_status": "candidate",
+            "source_quality": {
+                "has_visual_state": True,
+                "has_visual_entity": True,
+                "has_vlm_entity": False,
+                "has_verified_link": False,
+                "uses_ocr_only": True,
+                "has_detected_text": True,
+                "has_visual_description": False,
+                "visual_state_detected_text_count": 1,
+                "visual_entity_detected_text_count": 1,
+                "visual_description_count": 0,
+                "has_timestamp_fallback_link": False,
+                "candidate_link_count": 1,
+                "timestamp_fallback_link_count": 0,
+                "verified_link_count": 0,
+                "candidate_link_signal_counts": candidate_signal_counts,
+                "verified_link_source_counts": empty_verified_sources,
+                "candidate_visual_support": {
+                    "has_candidate_visual_support": True,
+                    "visual_state_count": 1,
+                    "visual_entity_count": 1,
+                    "candidate_link_count": 1,
+                    "timestamp_fallback_link_count": 0,
+                    "candidate_link_signal_counts": candidate_signal_counts,
+                    "paper_claim_eligible": False,
+                },
+                "verified_object_alignment": {
+                    "has_verified_object_alignment": False,
+                    "verified_link_count": 0,
+                    "verified_link_source_counts": empty_verified_sources,
+                    "timestamp_fallback_counted_as_verified": False,
+                    "paper_claim_eligible": False,
+                },
+            },
+            "evidence_text": "PUBLIC SYNTHETIC wrap evidence mentions loss curve slope but must not leak",
+            "semantic_text": "PUBLIC SYNTHETIC wrap semantic mentions loss curve slope but must not leak",
+            "transcript_window_text": (
+                "PUBLIC SYNTHETIC wrap evidence-unit transcript mentions loss curve slope "
+                "but must not leak"
+            ),
+            "_rankingScore": 0.93,
+        },
+        {
+            "evidence_unit_id": "evu_loss_verified_public",
+            "project_id": "public_retrieval_ablation",
+            "video_id": "public_demo_video",
+            "target_segment_id": "seg_loss_public",
+            "source_segment_ids": ["seg_intro_public", "seg_loss_public", "seg_wrap_public"],
+            "start_time": 10.0,
+            "end_time": 14.0,
+            "visual_state_ids": ["state_loss_public"],
+            "visual_entity_ids": ["ent_loss_public"],
+            "verified_entity_link_ids": ["link_loss_verified_public"],
+            "candidate_entity_link_ids": ["link_loss_verified_public"],
+            "candidate_entity_link_statuses": {"link_loss_verified_public": "verified"},
+            "alignment_status": "verified",
+            "source_quality": {
+                "has_visual_state": True,
+                "has_visual_entity": True,
+                "has_vlm_entity": True,
+                "has_verified_link": True,
+                "uses_ocr_only": False,
+                "has_detected_text": True,
+                "has_visual_description": True,
+                "visual_state_detected_text_count": 1,
+                "visual_entity_detected_text_count": 1,
+                "visual_description_count": 1,
+                "has_timestamp_fallback_link": False,
+                "candidate_link_count": 0,
+                "timestamp_fallback_link_count": 0,
+                "verified_link_count": 1,
+                "candidate_link_signal_counts": verified_signal_counts,
+                "verified_link_source_counts": verified_sources,
+                "candidate_visual_support": {
+                    "has_candidate_visual_support": True,
+                    "visual_state_count": 1,
+                    "visual_entity_count": 1,
+                    "candidate_link_count": 0,
+                    "timestamp_fallback_link_count": 0,
+                    "candidate_link_signal_counts": verified_signal_counts,
+                    "paper_claim_eligible": False,
+                },
+                "verified_object_alignment": {
+                    "has_verified_object_alignment": True,
+                    "verified_link_count": 1,
+                    "verified_link_source_counts": verified_sources,
+                    "timestamp_fallback_counted_as_verified": False,
+                    "paper_claim_eligible": True,
+                },
+            },
+            "evidence_text": (
+                "PUBLIC SYNTHETIC loss verified evidence mentions loss curve slope "
+                "but must not leak"
+            ),
+            "semantic_text": (
+                "PUBLIC SYNTHETIC loss verified semantic mentions loss curve slope "
+                "but must not leak"
+            ),
+            "transcript_window_text": (
+                "PUBLIC SYNTHETIC loss evidence-unit transcript mentions loss curve slope "
+                "but must not leak"
+            ),
+            "_rankingScore": 0.91,
+        },
+    ]
+
+
 MIT_PAPER_MATRIX_VARIANTS = [
     "segment_lexical",
     "domain_lexicon",
@@ -249,6 +411,9 @@ MIT_PAPER_MATRIX_VARIANTS = [
     "window",
     "window_hybrid",
     "rerank",
+    "evidence_unit_candidate",
+    "evidence_unit_verified",
+    "evidence_unit_quality_rerank",
 ]
 
 
@@ -273,6 +438,9 @@ def test_mit_deep_learning_matrix_manifest_schema_smoke() -> None:
     assert {suite["index"] for suite in suites} == {"mit_deep_learning_stt_segments"}
     assert {suite["visual_index"] for suite in suites} == {
         "mit_deep_learning_stt_visual_entities"
+    }
+    assert {suite["evidence_unit_index"] for suite in suites} == {
+        "mit_deep_learning_stt_evidence_units"
     }
 
     for suite in suites:
@@ -642,19 +810,12 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert run.query_results_path.exists()
     assert run.summary_path.exists()
     assert run.semantic_smoke_path.exists()
-    assert run.metrics["query_count"] == 6
+    assert run.metrics["query_count"] == 9
     suite = run.metrics["suites"][0]
     assert suite["schema_version"] == "retrieval-answer-ablation-matrix-v1"
     assert suite["query_count"] == 1
-    assert suite["variant_count"] == 6
-    assert set(suite["variant_metrics"]) == {
-        "segment_lexical",
-        "domain_lexicon",
-        "hybrid",
-        "window",
-        "window_hybrid",
-        "rerank",
-    }
+    assert suite["variant_count"] == 9
+    assert set(suite["variant_metrics"]) == set(MIT_PAPER_MATRIX_VARIANTS)
     assert suite["variant_metrics"]["segment_lexical"]["config"]["domain_lexicon"] is False
     assert suite["variant_metrics"]["domain_lexicon"]["config"]["domain_lexicon"] is True
     assert suite["variant_metrics"]["hybrid"]["config"]["hybrid_retrieval"] is True
@@ -662,8 +823,37 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["window_hybrid"]["config"]["hybrid_retrieval"] is True
     assert suite["variant_metrics"]["rerank"]["config"]["rerank"] is True
     assert suite["variant_metrics"]["rerank"]["config"]["candidate_pool_limit"] == 30
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["config"][
+        "evidence_unit_priority"
+    ] == "candidate"
+    assert suite["variant_metrics"]["evidence_unit_verified"]["config"][
+        "evidence_unit_priority"
+    ] == "verified"
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"]["config"][
+        "evidence_unit_priority"
+    ] == "quality"
     assert suite["variant_metrics"]["window"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["rerank"]["hit_at_10s"] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["hit_at_10s"] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["mrr_at_max_delta"] == 0.5
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["target_rank_bucket_counts"] == {
+        "top5": 1
+    }
+    assert suite["variant_metrics"]["evidence_unit_verified"]["target_rank_bucket_counts"] == {
+        "top1": 1
+    }
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "candidate_visual_support_ratio"
+    ] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "verified_object_alignment_ratio"
+    ] == 0.0
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "verified_object_alignment_ratio"
+    ] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_verified"]["vlm_entity_coverage_ratio"] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["ocr_only_coverage_ratio"] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["skipped_count"] == 0
     assert suite["variant_metrics"]["rerank"]["grounded_answer_ratio"] == 1.0
     assert suite["variant_metrics"]["window"]["answer_citation_precision"] == 1.0
     assert suite["variant_metrics"]["window"]["answer_citation_recall"] == 1.0
@@ -719,10 +909,24 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert all("verified_object_alignment" in row["top_candidate"] for row in rows)
     rerank_row = next(row for row in rows if row["variant_id"] == "rerank")
     assert rerank_row["config"]["candidate_pool_limit"] == 30
+    evidence_candidate_row = next(
+        row for row in rows if row["variant_id"] == "evidence_unit_candidate"
+    )
+    evidence_verified_row = next(
+        row for row in rows if row["variant_id"] == "evidence_unit_verified"
+    )
+    assert evidence_candidate_row["status"] == "queried"
+    assert evidence_candidate_row["top_candidate"]["source"] == "evidence_unit"
+    assert evidence_candidate_row["verified_object_alignment"]["verified_link_count"] == 0
+    assert evidence_candidate_row["target_rank_bucket"] == "top5"
+    assert evidence_verified_row["verified_object_alignment"]["verified_link_count"] == 1
+    assert evidence_verified_row["target_rank_bucket"] == "top1"
+    assert evidence_verified_row["object_evidence_coverage"]["has_vlm_entity"] is True
 
     metrics_csv = run.metrics_csv_path.read_text(encoding="utf-8")
     assert "variant,segment_lexical" in metrics_csv
     assert "answer_citation_precision" in metrics_csv
+    assert "verified_object_alignment_ratio" in metrics_csv
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "Retrieval/Answer Matrix" in summary
     assert "candidate support" in summary
@@ -760,6 +964,72 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         assert sensitive not in public_text
     assert "raw_candidate_ids" in public_text
     assert "hashed" in public_text
+
+
+def test_retrieval_answer_matrix_skips_evidence_unit_variant_without_index(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = Path("tests/fixtures/public_retrieval_ablation_project").resolve()
+    manifest_path = tmp_path / "benchmark_matrix_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "missing_evidence_unit_index_matrix",
+                "deltas": [5, 10],
+                "suites": [
+                    {
+                        "suite_id": "public_matrix_skip",
+                        "type": "retrieval_answer_matrix",
+                        "domain": "public_synthetic",
+                        "project_dir": str(fixture_dir),
+                        "queries": str(fixture_dir / "queries.jsonl"),
+                        "index": "public_segments",
+                        "window_index": "public_windows",
+                        "visual_index": "public_visual_entities",
+                        "variants": ["evidence_unit_candidate"],
+                        "include_answer": False,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = run_benchmark(
+        client=FakeMatrixClient(),
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "matrix",
+        repo_root=Path.cwd(),
+    )
+
+    suite = run.metrics["suites"][0]
+    variant = suite["variant_metrics"]["evidence_unit_candidate"]
+    assert variant["query_status_counts"] == {"skipped": 1}
+    assert variant["skip_reason_counts"] == {"missing_evidence_unit_index": 1}
+    assert variant["skipped_count"] == 1
+    assert variant["hit_at_10s"] == 0.0
+    assert variant["verified_object_alignment_ratio"] == 0.0
+    assert variant["candidate_visual_support_ratio"] == 0.0
+    assert suite["skip_reason_counts"] == {"missing_evidence_unit_index": 1}
+
+    row = json.loads(run.query_results_path.read_text(encoding="utf-8").splitlines()[0])
+    assert row["status"] == "skipped"
+    assert row["skip_reason"] == "missing_evidence_unit_index"
+    assert row["config"]["index_ref"] is None
+    assert row["verified_object_alignment"]["verified_link_count"] == 0
+    assert row["verified_object_alignment"]["timestamp_fallback_counted_as_verified"] is False
+    assert row["object_evidence_coverage"]["has_vlm_entity"] is False
+
+    public_text = "\n".join(
+        [
+            run.metrics_path.read_text(encoding="utf-8"),
+            run.query_results_path.read_text(encoding="utf-8"),
+            run.summary_path.read_text(encoding="utf-8"),
+        ]
+    )
+    assert "PUBLIC RAW QUERY" not in public_text
+    assert str(fixture_dir) not in public_text
+    assert "missing_evidence_unit_index" in public_text
 
 
 def test_retrieval_answer_matrix_reports_timestamp_fallback_as_candidate_not_verified(

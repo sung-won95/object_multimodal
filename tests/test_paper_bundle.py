@@ -16,6 +16,9 @@ MIT_PAPER_MATRIX_VARIANTS = [
     "window",
     "window_hybrid",
     "rerank",
+    "evidence_unit_candidate",
+    "evidence_unit_verified",
+    "evidence_unit_quality_rerank",
 ]
 
 
@@ -26,8 +29,14 @@ class FakePaperBundleClient:
         query: str,
         limit: int = 10,
         hybrid: dict | None = None,
+        vector: list[float] | None = None,
+        filter: str | list[str] | None = None,
     ) -> dict:
+        del vector, filter
         mode = "semantic" if hybrid else "lexical"
+        if index_uid == "public_evidence_units":
+            hits = _public_evidence_unit_hits()
+            return {"hits": hits[:limit], "processingTimeMs": 6, "indexUid": index_uid}
         if index_uid == "public_windows":
             return {
                 "hits": [
@@ -95,6 +104,155 @@ class FakePaperBundleClient:
                 hits = list(reversed(hits))
             return {"hits": hits[:limit], "processingTimeMs": 5, "indexUid": index_uid}
         return {"hits": [], "processingTimeMs": 1, "indexUid": index_uid}
+
+
+def _public_evidence_unit_hits() -> list[dict]:
+    candidate_signal_counts = {
+        "temporal_overlap": 1,
+        "lexical_overlap": 1,
+        "mention_deictic_hook": 0,
+        "spatial_position": 0,
+        "visual_text_overlap": 1,
+        "vlm_object_visual_description_overlap": 0,
+        "semantic_domain_hint": 1,
+        "timestamp_fallback": 0,
+    }
+    verified_signal_counts = {
+        "temporal_overlap": 1,
+        "lexical_overlap": 1,
+        "mention_deictic_hook": 1,
+        "spatial_position": 1,
+        "visual_text_overlap": 1,
+        "vlm_object_visual_description_overlap": 1,
+        "semantic_domain_hint": 1,
+        "timestamp_fallback": 0,
+    }
+    empty_verified_sources = {
+        "explicit_verified_flag": 0,
+        "explicit_verified_status": 0,
+        "human_gold": 0,
+        "vlm_verifier": 0,
+        "strict_deterministic_rule": 0,
+        "unspecified_verified": 0,
+    }
+    verified_sources = {
+        "explicit_verified_flag": 1,
+        "explicit_verified_status": 1,
+        "human_gold": 0,
+        "vlm_verifier": 1,
+        "strict_deterministic_rule": 0,
+        "unspecified_verified": 0,
+    }
+    return [
+        {
+            "evidence_unit_id": "evu_wrap_candidate_public",
+            "project_id": "public_retrieval_ablation",
+            "video_id": "public_demo_video",
+            "target_segment_id": "seg_wrap_public",
+            "source_segment_ids": ["seg_wrap_public"],
+            "start_time": 30.0,
+            "end_time": 34.0,
+            "visual_state_ids": ["state_wrap_public"],
+            "visual_entity_ids": ["ent_wrap_public"],
+            "verified_entity_link_ids": [],
+            "candidate_entity_link_ids": ["link_wrap_candidate_public"],
+            "candidate_entity_link_statuses": {"link_wrap_candidate_public": "candidate"},
+            "alignment_status": "candidate",
+            "source_quality": {
+                "has_visual_state": True,
+                "has_visual_entity": True,
+                "has_vlm_entity": False,
+                "has_verified_link": False,
+                "uses_ocr_only": True,
+                "has_detected_text": True,
+                "has_visual_description": False,
+                "visual_state_detected_text_count": 1,
+                "visual_entity_detected_text_count": 1,
+                "visual_description_count": 0,
+                "has_timestamp_fallback_link": False,
+                "candidate_link_count": 1,
+                "timestamp_fallback_link_count": 0,
+                "verified_link_count": 0,
+                "candidate_link_signal_counts": candidate_signal_counts,
+                "verified_link_source_counts": empty_verified_sources,
+                "candidate_visual_support": {
+                    "has_candidate_visual_support": True,
+                    "visual_state_count": 1,
+                    "visual_entity_count": 1,
+                    "candidate_link_count": 1,
+                    "timestamp_fallback_link_count": 0,
+                    "candidate_link_signal_counts": candidate_signal_counts,
+                    "paper_claim_eligible": False,
+                },
+                "verified_object_alignment": {
+                    "has_verified_object_alignment": False,
+                    "verified_link_count": 0,
+                    "verified_link_source_counts": empty_verified_sources,
+                    "timestamp_fallback_counted_as_verified": False,
+                    "paper_claim_eligible": False,
+                },
+            },
+            "transcript_window_text": (
+                "PUBLIC SYNTHETIC wrap evidence-unit transcript mentions loss curve slope "
+                "but must not leak"
+            ),
+            "_rankingScore": 0.93,
+        },
+        {
+            "evidence_unit_id": "evu_loss_verified_public",
+            "project_id": "public_retrieval_ablation",
+            "video_id": "public_demo_video",
+            "target_segment_id": "seg_loss_public",
+            "source_segment_ids": ["seg_intro_public", "seg_loss_public", "seg_wrap_public"],
+            "start_time": 10.0,
+            "end_time": 14.0,
+            "visual_state_ids": ["state_loss_public"],
+            "visual_entity_ids": ["ent_loss_public"],
+            "verified_entity_link_ids": ["link_loss_verified_public"],
+            "candidate_entity_link_ids": ["link_loss_verified_public"],
+            "candidate_entity_link_statuses": {"link_loss_verified_public": "verified"},
+            "alignment_status": "verified",
+            "source_quality": {
+                "has_visual_state": True,
+                "has_visual_entity": True,
+                "has_vlm_entity": True,
+                "has_verified_link": True,
+                "uses_ocr_only": False,
+                "has_detected_text": True,
+                "has_visual_description": True,
+                "visual_state_detected_text_count": 1,
+                "visual_entity_detected_text_count": 1,
+                "visual_description_count": 1,
+                "has_timestamp_fallback_link": False,
+                "candidate_link_count": 0,
+                "timestamp_fallback_link_count": 0,
+                "verified_link_count": 1,
+                "candidate_link_signal_counts": verified_signal_counts,
+                "verified_link_source_counts": verified_sources,
+                "candidate_visual_support": {
+                    "has_candidate_visual_support": True,
+                    "visual_state_count": 1,
+                    "visual_entity_count": 1,
+                    "candidate_link_count": 0,
+                    "timestamp_fallback_link_count": 0,
+                    "candidate_link_signal_counts": verified_signal_counts,
+                    "paper_claim_eligible": False,
+                },
+                "verified_object_alignment": {
+                    "has_verified_object_alignment": True,
+                    "verified_link_count": 1,
+                    "verified_link_source_counts": verified_sources,
+                    "timestamp_fallback_counted_as_verified": False,
+                    "paper_claim_eligible": True,
+                },
+            },
+            "transcript_window_text": (
+                "PUBLIC SYNTHETIC loss evidence-unit transcript mentions loss curve slope "
+                "but must not leak"
+            ),
+            "_rankingScore": 0.91,
+        },
+    ]
 
 
 def test_run_paper_bundle_public_fixture_writes_private_safe_bundle(
@@ -251,6 +409,7 @@ def test_mit_paper_bundle_manifest_and_skeleton_contract_are_private_safe() -> N
         assert suite["type"] == "retrieval_answer_matrix"
         assert suite["variants"] == MIT_PAPER_MATRIX_VARIANTS
         assert suite["domain_lexicon"] == "domain_lexicon.json"
+        assert suite["evidence_unit_index"] == "mit_deep_learning_stt_evidence_units"
         assert suite["include_answer"] is True
         assert not Path(suite["project_dir"]).is_absolute()
         assert not Path(suite["queries"]).is_absolute()

@@ -9,7 +9,10 @@
     "hybrid",
     "window",
     "window_hybrid",
-    "rerank"
+    "rerank",
+    "evidence_unit_candidate",
+    "evidence_unit_verified",
+    "evidence_unit_quality_rerank"
   ],
   "expected_outputs": [
     "metrics.json",

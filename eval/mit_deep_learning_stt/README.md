@@ -10,7 +10,7 @@
 - `suites/*.csv`: `benchmark-retrieval`이 강의별로 읽는 CSV
 - `benchmark_manifest.json`: 바로 실행 가능한 retrieval benchmark manifest
 - `domain_lexicon.json`: MIT Deep Learning 질의 확장을 위한 보수적 약어/동의어 seed
-- `benchmark_matrix_manifest.json`: 6-variant retrieval-answer matrix manifest
+- `benchmark_matrix_manifest.json`: 9-variant retrieval-answer matrix manifest
 - `paper_bundle_manifest.json`: `run-paper-bundle`용 MIT paper matrix manifest
 - `summary.json`: row count, split, modality 분포 요약
 
@@ -36,10 +36,11 @@ Matrix benchmark에서 lexicon variant를 쓰려면 manifest 또는 suite에 `"d
 
 ## Paper Matrix Use
 
-Matrix benchmark는 24개 lecture suite를 `segment_lexical`, `domain_lexicon`, `hybrid`, `window`, `window_hybrid`, `rerank` 변형으로 실행한다.
+Matrix benchmark는 24개 lecture suite를 `segment_lexical`, `domain_lexicon`, `hybrid`, `window`, `window_hybrid`, `rerank`, `evidence_unit_candidate`, `evidence_unit_verified`, `evidence_unit_quality_rerank` 변형으로 실행한다.
 실행 전 Meilisearch가 떠 있어야 하며, manifest가 가리키는 MIT project artifacts와 기존 segment/visual entity index가 준비되어 있어야 한다.
 `rerank` 변형은 최종 반환 `limit`과 별개로 더 깊은 후보 풀을 조회해 deterministic reranker가 rank 밖 후보를 재정렬할 수 있게 한다.
 `hybrid`와 `window_hybrid`는 Meilisearch vector store가 켜져 있고, segment/window/visual index에 `userProvided` embedder와 `_vectors.default`가 있어야 한다.
+`evidence_unit_*` 변형은 같은 query set에서 `segments/evidence_units.jsonl` 기반 object-aligned 후보를 비교한다. evidence-unit artifact 또는 `mit_deep_learning_stt_evidence_units` index가 준비되지 않은 suite는 variant row를 삭제하지 않고 `skipped_count`와 public-safe `skip_reason`으로 남기며, missing VLM/verified evidence는 0-count로 집계한다.
 로컬 paper docker에서는 먼저 다음처럼 vector store를 켠 뒤, segment/window/visual index를 `manual_user_provided_v1` profile로 다시 적재한다.
 
 ```bash

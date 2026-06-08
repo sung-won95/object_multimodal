@@ -15,8 +15,14 @@ class FakePaperExperimentClient:
         query: str,
         limit: int = 10,
         hybrid: dict | None = None,
+        vector: list[float] | None = None,
+        filter: str | list[str] | None = None,
     ) -> dict:
+        del vector, filter
         mode = "semantic" if hybrid else "lexical"
+        if index_uid == "public_evidence_units":
+            hits = _public_evidence_unit_hits()
+            return {"hits": hits[:limit], "processingTimeMs": 6, "indexUid": index_uid}
         if index_uid == "public_windows":
             hits = [
                 {
@@ -78,6 +84,114 @@ class FakePaperExperimentClient:
                 hits = list(reversed(hits))
             return {"hits": hits[:limit], "processingTimeMs": 5, "indexUid": index_uid}
         return {"hits": [], "processingTimeMs": 1, "indexUid": index_uid}
+
+
+def _public_evidence_unit_hits() -> list[dict]:
+    candidate_signal_counts = {
+        "temporal_overlap": 1,
+        "lexical_overlap": 1,
+        "mention_deictic_hook": 0,
+        "spatial_position": 0,
+        "visual_text_overlap": 1,
+        "vlm_object_visual_description_overlap": 0,
+        "semantic_domain_hint": 1,
+        "timestamp_fallback": 0,
+    }
+    verified_signal_counts = {
+        "temporal_overlap": 1,
+        "lexical_overlap": 1,
+        "mention_deictic_hook": 1,
+        "spatial_position": 1,
+        "visual_text_overlap": 1,
+        "vlm_object_visual_description_overlap": 1,
+        "semantic_domain_hint": 1,
+        "timestamp_fallback": 0,
+    }
+    empty_verified_sources = {
+        "explicit_verified_flag": 0,
+        "explicit_verified_status": 0,
+        "human_gold": 0,
+        "vlm_verifier": 0,
+        "strict_deterministic_rule": 0,
+        "unspecified_verified": 0,
+    }
+    verified_sources = {
+        "explicit_verified_flag": 1,
+        "explicit_verified_status": 1,
+        "human_gold": 0,
+        "vlm_verifier": 1,
+        "strict_deterministic_rule": 0,
+        "unspecified_verified": 0,
+    }
+    return [
+        {
+            "evidence_unit_id": "evu_wrap_candidate_public",
+            "project_id": "public_retrieval_ablation",
+            "video_id": "public_demo_video",
+            "target_segment_id": "seg_wrap_public",
+            "source_segment_ids": ["seg_wrap_public"],
+            "start_time": 30.0,
+            "end_time": 34.0,
+            "visual_state_ids": ["state_wrap_public"],
+            "visual_entity_ids": ["ent_wrap_public"],
+            "candidate_entity_link_ids": ["link_wrap_candidate_public"],
+            "candidate_entity_link_statuses": {"link_wrap_candidate_public": "candidate"},
+            "source_quality": {
+                "has_visual_state": True,
+                "has_visual_entity": True,
+                "has_vlm_entity": False,
+                "has_verified_link": False,
+                "uses_ocr_only": True,
+                "visual_state_detected_text_count": 1,
+                "visual_entity_detected_text_count": 1,
+                "visual_description_count": 0,
+                "candidate_link_count": 1,
+                "timestamp_fallback_link_count": 0,
+                "verified_link_count": 0,
+                "candidate_link_signal_counts": candidate_signal_counts,
+                "verified_link_source_counts": empty_verified_sources,
+            },
+            "transcript_window_text": (
+                "PUBLIC SYNTHETIC wrap evidence-unit transcript mentions loss curve slope "
+                "but must not leak"
+            ),
+            "_rankingScore": 0.93,
+        },
+        {
+            "evidence_unit_id": "evu_loss_verified_public",
+            "project_id": "public_retrieval_ablation",
+            "video_id": "public_demo_video",
+            "target_segment_id": "seg_loss_public",
+            "source_segment_ids": ["seg_intro_public", "seg_loss_public", "seg_wrap_public"],
+            "start_time": 10.0,
+            "end_time": 14.0,
+            "visual_state_ids": ["state_loss_public"],
+            "visual_entity_ids": ["ent_loss_public"],
+            "verified_entity_link_ids": ["link_loss_verified_public"],
+            "candidate_entity_link_ids": ["link_loss_verified_public"],
+            "candidate_entity_link_statuses": {"link_loss_verified_public": "verified"},
+            "source_quality": {
+                "has_visual_state": True,
+                "has_visual_entity": True,
+                "has_vlm_entity": True,
+                "has_verified_link": True,
+                "uses_ocr_only": False,
+                "visual_state_detected_text_count": 1,
+                "visual_entity_detected_text_count": 1,
+                "visual_description_count": 1,
+                "candidate_link_count": 0,
+                "timestamp_fallback_link_count": 0,
+                "verified_link_count": 1,
+                "candidate_link_signal_counts": verified_signal_counts,
+                "verified_link_source_counts": verified_sources,
+            },
+            "transcript_window_text": (
+                "PUBLIC SYNTHETIC loss evidence-unit transcript mentions loss curve slope "
+                "but must not leak"
+            ),
+            "_rankingScore": 0.91,
+        },
+    ]
 
 
 def test_run_paper_experiment_public_fixture_writes_end_to_end_artifacts(

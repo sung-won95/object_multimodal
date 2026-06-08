@@ -8,7 +8,7 @@ ratio claims.
 
 ## Matrix Contract
 
-The bundle manifest compares these six variants for every MIT lecture suite:
+The bundle manifest compares these nine variants for every MIT lecture suite:
 
 - `segment_lexical`
 - `domain_lexicon`
@@ -16,9 +16,17 @@ The bundle manifest compares these six variants for every MIT lecture suite:
 - `window`
 - `window_hybrid`
 - `rerank`
+- `evidence_unit_candidate`
+- `evidence_unit_verified`
+- `evidence_unit_quality_rerank`
 
 Every suite references the shared `eval/mit_deep_learning_stt/domain_lexicon.json`
 through the manifest-relative value `domain_lexicon.json`.
+Every suite also declares `evidence_unit_index=mit_deep_learning_stt_evidence_units`
+for the evidence-unit variants. If the local evidence-unit index or artifact is not
+ready, those variants remain in the matrix with `status=skipped`,
+`skipped_count>0`, zero hit/MRR, and a public-safe `skip_reason` instead of
+inflating object-alignment metrics.
 
 Issue #203 adds a public-safe object-link diagnostics contract for the generated
 `metrics.json` and `query_results.jsonl` files. Matrix rows expose:
@@ -35,12 +43,24 @@ Issue #203 adds a public-safe object-link diagnostics contract for the generated
 
 Variant metrics also aggregate `candidate_visual_support_ratio`,
 `verified_object_alignment_ratio`, `candidate_link_signal_counts`,
-`verified_link_source_counts`, and `timestamp_fallback_link_ratio`.
+`verified_link_source_counts`, `timestamp_fallback_link_ratio`,
+`visual_state_coverage_ratio`, `vlm_entity_coverage_ratio`,
+`verified_link_coverage_ratio`, `target_found_in_top_k_ratio`, status counts,
+and skip reason counts.
 
 Only `verified_object_alignment.paper_claim_eligible=true` supports a verified
 object-alignment paper claim. `candidate_visual_support` is useful for retrieval
 diagnostics and #204 matrix slices, but timestamp fallback and candidate support do
 not count as verified object alignment.
+
+Use the matrix to separate bottlenecks:
+
+- If `target_found_in_top_k_ratio` is high but Hit/MRR or top1 match is low, the
+  likely bottleneck is retrieval ranking/reranking.
+- If evidence-unit variants show low `candidate_visual_support_ratio`,
+  `vlm_entity_coverage_ratio`, or `verified_object_alignment_ratio`, or are mostly
+  skipped, the likely bottleneck is evidence coverage/index readiness rather than
+  ranking.
 
 ## Prerequisites
 
@@ -53,6 +73,8 @@ PYTHONPATH=src python3 scripts/index_mit_deep_learning_windows.py --index-only -
 
 For `window_hybrid`, pass the same hybrid embedder profile and dimensions used by
 the segment index when required by the local Meilisearch configuration.
+For the evidence-unit variants, build and index `segments/evidence_units.jsonl`
+into `mit_deep_learning_stt_evidence_units` before a full claim-bearing run.
 
 ## Full Bundle Command
 

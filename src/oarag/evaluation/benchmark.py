@@ -31,6 +31,7 @@ from oarag.retrieval.evidence import (
 )
 from oarag.retrieval.answer import compose_answer
 from oarag.retrieval.project_index import segment_artifact_path
+from oarag.retrieval.evidence_unit_index import query_project_evidence_units
 from oarag.retrieval.project_query import (
     DEFAULT_HYBRID_EMBEDDER,
     DEFAULT_HYBRID_SEMANTIC_RATIO,
@@ -84,6 +85,7 @@ VERIFIED_LINK_SOURCE_KEYS = (
     "strict_deterministic_rule",
     "unspecified_verified",
 )
+EVIDENCE_UNIT_HIT_SOURCE = "evidence_unit"
 DEFAULT_MATRIX_VARIANTS = [
     {
         "variant_id": "segment_lexical",
@@ -122,6 +124,29 @@ DEFAULT_MATRIX_VARIANTS = [
         "label": "Deterministic rerank",
         "index_kind": SEGMENT_HIT_SOURCE,
         "rerank": True,
+        "candidate_pool_limit": 30,
+        "use_domain_lexicon": False,
+    },
+    {
+        "variant_id": "evidence_unit_candidate",
+        "label": "Evidence-unit candidate support",
+        "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
+        "evidence_unit_priority": "candidate",
+        "use_domain_lexicon": False,
+    },
+    {
+        "variant_id": "evidence_unit_verified",
+        "label": "Evidence-unit verified alignment",
+        "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
+        "evidence_unit_priority": "verified",
+        "candidate_pool_limit": 30,
+        "use_domain_lexicon": False,
+    },
+    {
+        "variant_id": "evidence_unit_quality_rerank",
+        "label": "Evidence-unit quality rerank",
+        "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
+        "evidence_unit_priority": "quality",
         "candidate_pool_limit": 30,
         "use_domain_lexicon": False,
     },
@@ -536,6 +561,9 @@ def run_retrieval_answer_matrix_suite(
         ),
         "privacy": _matrix_privacy_payload(),
     }
+    metric["query_status_counts"] = _query_status_counts(rows)
+    metric["skip_reason_counts"] = _skip_reason_counts(rows)
+    metric["skipped_count"] = sum(1 for row in rows if row.get("status") == "skipped")
     for delta in deltas:
         metric[f"hit_at_{delta}s"] = _mean_or_none(
             item.get(f"hit_at_{delta}s") for item in variant_metrics
@@ -552,6 +580,16 @@ def run_retrieval_answer_matrix_suite(
         "expected_citation_hit_ratio",
         "mean_unsupported_claim_count",
         "unsupported_claim_ratio",
+        "candidate_visual_support_ratio",
+        "verified_object_alignment_ratio",
+        "visual_state_coverage_ratio",
+        "visual_entity_coverage_ratio",
+        "vlm_entity_coverage_ratio",
+        "ocr_only_coverage_ratio",
+        "candidate_link_coverage_ratio",
+        "verified_link_coverage_ratio",
+        "timestamp_fallback_coverage_ratio",
+        "target_found_in_top_k_ratio",
         "mean_processing_time_ms",
     ):
         metric[key] = _mean_or_none(item.get(key) for item in variant_metrics)
@@ -1250,6 +1288,25 @@ def _run_matrix_query(
 ) -> dict[str, Any]:
     started = time.perf_counter()
     index_kind = _normalize_index_kind(variant.get("index_kind", SEGMENT_HIT_SOURCE))
+    if index_kind == EVIDENCE_UNIT_HIT_SOURCE:
+        return _run_evidence_unit_matrix_query(
+            client=client,
+            suite=suite,
+            variant=variant,
+            project_dir=project_dir,
+            run_id=run_id,
+            suite_id=suite_id,
+            domain=domain,
+            query_id=query_id,
+            query_row=query_row,
+            query_text=query_text,
+            expected_ranges=expected_ranges,
+            expected_segment_ids=expected_segment_ids,
+            expected_window_ids=expected_window_ids,
+            include_answer=include_answer,
+            deltas=deltas,
+            started=started,
+        )
     index_uid = _matrix_index_uid(suite=suite, variant=variant, index_kind=index_kind)
     visual_index_uid = _optional_str(_variant_value(suite, variant, "visual_index"))
     use_domain_lexicon = _bool_config(variant, "use_domain_lexicon", default=False)
@@ -1347,9 +1404,15 @@ def _run_matrix_query(
         else None
     )
     object_link_diagnostics = _matrix_object_link_diagnostics(top_bundle)
+    target_rank_diagnostics = _matrix_target_rank_diagnostics(
+        bundles=bundles,
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+    )
 
     return {
         "schema_version": MATRIX_SCHEMA_VERSION,
+        "status": "queried",
         "run_id": run_id,
         "suite_id": suite_id,
         "suite_type": "retrieval_answer_matrix",
@@ -1379,6 +1442,9 @@ def _run_matrix_query(
             top_candidate=top_candidate,
             expected_segment_ids=expected_segment_ids,
         ),
+        "target_rank": target_rank_diagnostics["target_rank"],
+        "target_rank_bucket": target_rank_diagnostics["target_rank_bucket"],
+        "target_rank_diagnostics": target_rank_diagnostics,
         "hit_by_delta": hit_by_delta,
         "mrr": _reciprocal_rank(candidate_errors, deltas=max(deltas)),
         "evidence_covered": bool(bundles),
@@ -1387,6 +1453,7 @@ def _run_matrix_query(
         "candidate_visual_support": object_link_diagnostics["candidate_visual_support"],
         "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
         "object_link_diagnostics": object_link_diagnostics,
+        "object_evidence_coverage": _matrix_object_evidence_coverage(top_bundle),
         "query_expansion": _public_query_expansion(response.get("query_expansion")),
         "semantic_retrieval": _public_semantic_retrieval(
             response.get("retrieval_context")
@@ -1397,6 +1464,433 @@ def _run_matrix_query(
         "processing_time_ms": response.get("processing_time_ms"),
         "elapsed_time_ms": elapsed_ms,
         "warning_count": len(response.get("warnings") or []),
+    }
+
+
+def _run_evidence_unit_matrix_query(
+    *,
+    client: SearchClient,
+    suite: dict[str, Any],
+    variant: dict[str, Any],
+    project_dir: Path,
+    run_id: str,
+    suite_id: str,
+    domain: str,
+    query_id: str,
+    query_row: dict[str, Any],
+    query_text: str,
+    expected_ranges: list[tuple[float, float]],
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+    include_answer: bool,
+    deltas: list[int],
+    started: float,
+) -> dict[str, Any]:
+    index_uid = _matrix_evidence_unit_index_uid(suite=suite, variant=variant)
+    if index_uid is None:
+        return _skipped_matrix_row(
+            suite=suite,
+            variant=variant,
+            index_uid=None,
+            run_id=run_id,
+            suite_id=suite_id,
+            domain=domain,
+            query_id=query_id,
+            query_row=query_row,
+            expected_ranges=expected_ranges,
+            expected_segment_ids=expected_segment_ids,
+            expected_window_ids=expected_window_ids,
+            deltas=deltas,
+            started=started,
+            skip_reason="missing_evidence_unit_index",
+        )
+
+    limit = int(_variant_value(suite, variant, "limit") or 5)
+    candidate_pool_limit = _optional_int(_variant_value(suite, variant, "candidate_pool_limit"))
+    search_limit = max(limit, candidate_pool_limit or limit)
+    evidence_units_path = _optional_path(_variant_value(suite, variant, "evidence_units"))
+    try:
+        evidence_response = query_project_evidence_units(
+            client=client,  # type: ignore[arg-type]
+            index_uid=index_uid,
+            project_dir=project_dir,
+            query=query_text,
+            limit=search_limit,
+            evidence_units=evidence_units_path,
+        )
+    except FileNotFoundError:
+        return _skipped_matrix_row(
+            suite=suite,
+            variant=variant,
+            index_uid=index_uid,
+            run_id=run_id,
+            suite_id=suite_id,
+            domain=domain,
+            query_id=query_id,
+            query_row=query_row,
+            expected_ranges=expected_ranges,
+            expected_segment_ids=expected_segment_ids,
+            expected_window_ids=expected_window_ids,
+            deltas=deltas,
+            started=started,
+            skip_reason="missing_evidence_units_artifact",
+        )
+    except Exception as exc:
+        return _skipped_matrix_row(
+            suite=suite,
+            variant=variant,
+            index_uid=index_uid,
+            run_id=run_id,
+            suite_id=suite_id,
+            domain=domain,
+            query_id=query_id,
+            query_row=query_row,
+            expected_ranges=expected_ranges,
+            expected_segment_ids=expected_segment_ids,
+            expected_window_ids=expected_window_ids,
+            deltas=deltas,
+            started=started,
+            skip_reason=f"evidence_unit_query_failed:{type(exc).__name__}",
+        )
+
+    candidates = _list_of_dicts(evidence_response.get("candidates"))
+    priority = str(variant.get("evidence_unit_priority") or "candidate").strip().casefold()
+    ranked_candidates = sorted(
+        candidates,
+        key=lambda candidate: _evidence_unit_matrix_sort_key(candidate, priority=priority),
+    )
+    bundles = [
+        _evidence_unit_matrix_bundle(candidate=candidate, rank=rank)
+        for rank, candidate in enumerate(ranked_candidates[:limit], start=1)
+    ]
+    response = {
+        "query": query_text,
+        "index": index_uid,
+        "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
+        "project_id": evidence_response.get("project_id"),
+        "processing_time_ms": evidence_response.get("processing_time_ms"),
+        "counts": {
+            "search_hits": len(candidates),
+            "candidate_pool_limit": search_limit,
+            "bundles": len(bundles),
+        },
+        "bundles": bundles,
+        "retrieval_context": {
+            "evidence_unit": {
+                "enabled": True,
+                "priority": priority,
+                "candidate_pool_limit": search_limit,
+                "returned_limit": limit,
+            }
+        },
+        "warnings": [],
+    }
+    answer_enabled = _bool_config(variant, "include_answer", default=include_answer)
+    answer = compose_answer(response) if answer_enabled else None
+    answer_grounding = _answer_grounding_metrics(
+        answer=answer,
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges,
+    )
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 4)
+    candidate_errors = [
+        _local_candidate_error(
+            bundle.get("candidate") if isinstance(bundle.get("candidate"), dict) else None,
+            expected_ranges,
+        )
+        for bundle in bundles
+    ]
+    best_error = min((error for error in candidate_errors if error is not None), default=None)
+    top_error = candidate_errors[0] if candidate_errors else None
+    hit_by_delta = {
+        str(delta): best_error is not None and best_error <= delta for delta in deltas
+    }
+    top_bundle = bundles[0] if bundles else None
+    top_candidate = (
+        top_bundle.get("candidate")
+        if isinstance(top_bundle, dict) and isinstance(top_bundle.get("candidate"), dict)
+        else None
+    )
+    object_link_diagnostics = _matrix_object_link_diagnostics(top_bundle)
+    target_rank_diagnostics = _matrix_target_rank_diagnostics(
+        bundles=bundles,
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+    )
+
+    return {
+        "schema_version": MATRIX_SCHEMA_VERSION,
+        "status": "queried",
+        "run_id": run_id,
+        "suite_id": suite_id,
+        "suite_type": "retrieval_answer_matrix",
+        "domain": domain,
+        "variant_id": variant["variant_id"],
+        "variant_label": variant["label"],
+        "query_id": query_id,
+        "query_label": _optional_public_label(query_row),
+        "privacy": _matrix_privacy_payload(),
+        "config": _public_matrix_config(
+            suite=suite,
+            variant=variant,
+            index_uid=index_uid,
+            visual_index_uid=None,
+            index_kind=EVIDENCE_UNIT_HIT_SOURCE,
+            use_domain_lexicon=False,
+            query_vector_config={},
+        ),
+        "expected_time_available": bool(expected_ranges),
+        "expected_segment_available": bool(expected_segment_ids),
+        "expected_window_available": bool(expected_window_ids),
+        "search_hit_count": len(candidates),
+        "bundle_count": len(bundles),
+        "best_abs_error": best_error,
+        "top1_abs_error": top_error,
+        "top1_expected_segment_match": _top_candidate_matches(
+            top_candidate=top_candidate,
+            expected_segment_ids=expected_segment_ids,
+        ),
+        "target_rank": target_rank_diagnostics["target_rank"],
+        "target_rank_bucket": target_rank_diagnostics["target_rank_bucket"],
+        "target_rank_diagnostics": target_rank_diagnostics,
+        "hit_by_delta": hit_by_delta,
+        "mrr": _reciprocal_rank(candidate_errors, deltas=max(deltas)),
+        "evidence_covered": bool(bundles),
+        "frame_backed": _bundles_have_frames(bundles),
+        "linked_entity_backed": _bundles_have_linked_entities(bundles),
+        "candidate_visual_support": object_link_diagnostics["candidate_visual_support"],
+        "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
+        "object_link_diagnostics": object_link_diagnostics,
+        "object_evidence_coverage": _matrix_object_evidence_coverage(top_bundle),
+        "query_expansion": _public_query_expansion(None),
+        "semantic_retrieval": _public_semantic_retrieval(response.get("retrieval_context")),
+        "top_candidate": _public_matrix_candidate(top_bundle),
+        "answer": _public_answer_summary(answer),
+        "answer_grounding": answer_grounding,
+        "processing_time_ms": response.get("processing_time_ms"),
+        "elapsed_time_ms": elapsed_ms,
+        "warning_count": 0,
+    }
+
+
+def _matrix_evidence_unit_index_uid(
+    *,
+    suite: dict[str, Any],
+    variant: dict[str, Any],
+) -> str | None:
+    return (
+        _optional_str(variant.get("index"))
+        or _optional_str(variant.get("evidence_unit_index"))
+        or _optional_str(suite.get("evidence_unit_index"))
+    )
+
+
+def _skipped_matrix_row(
+    *,
+    suite: dict[str, Any],
+    variant: dict[str, Any],
+    index_uid: str | None,
+    run_id: str,
+    suite_id: str,
+    domain: str,
+    query_id: str,
+    query_row: dict[str, Any],
+    expected_ranges: list[tuple[float, float]],
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+    deltas: list[int],
+    started: float,
+    skip_reason: str,
+) -> dict[str, Any]:
+    object_link_diagnostics = _matrix_object_link_diagnostics(None)
+    target_rank_diagnostics = _matrix_target_rank_diagnostics(
+        bundles=[],
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+    )
+    return {
+        "schema_version": MATRIX_SCHEMA_VERSION,
+        "status": "skipped",
+        "skip_reason": skip_reason,
+        "run_id": run_id,
+        "suite_id": suite_id,
+        "suite_type": "retrieval_answer_matrix",
+        "domain": domain,
+        "variant_id": variant["variant_id"],
+        "variant_label": variant["label"],
+        "query_id": query_id,
+        "query_label": _optional_public_label(query_row),
+        "privacy": _matrix_privacy_payload(),
+        "config": _public_matrix_config(
+            suite=suite,
+            variant=variant,
+            index_uid=index_uid,
+            visual_index_uid=None,
+            index_kind=EVIDENCE_UNIT_HIT_SOURCE,
+            use_domain_lexicon=False,
+            query_vector_config={},
+        ),
+        "expected_time_available": bool(expected_ranges),
+        "expected_segment_available": bool(expected_segment_ids),
+        "expected_window_available": bool(expected_window_ids),
+        "search_hit_count": 0,
+        "bundle_count": 0,
+        "best_abs_error": None,
+        "top1_abs_error": None,
+        "top1_expected_segment_match": False if expected_segment_ids else None,
+        "target_rank": target_rank_diagnostics["target_rank"],
+        "target_rank_bucket": target_rank_diagnostics["target_rank_bucket"],
+        "target_rank_diagnostics": target_rank_diagnostics,
+        "hit_by_delta": {str(delta): False for delta in deltas},
+        "mrr": 0.0,
+        "evidence_covered": False,
+        "frame_backed": False,
+        "linked_entity_backed": False,
+        "candidate_visual_support": object_link_diagnostics["candidate_visual_support"],
+        "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
+        "object_link_diagnostics": object_link_diagnostics,
+        "object_evidence_coverage": _matrix_object_evidence_coverage(None),
+        "query_expansion": _public_query_expansion(None),
+        "semantic_retrieval": _public_semantic_retrieval(None),
+        "top_candidate": None,
+        "answer": _public_answer_summary(None),
+        "answer_grounding": _answer_grounding_metrics(
+            answer=None,
+            expected_segment_ids=expected_segment_ids,
+            expected_window_ids=expected_window_ids,
+            expected_ranges=expected_ranges,
+        ),
+        "processing_time_ms": None,
+        "elapsed_time_ms": round((time.perf_counter() - started) * 1000, 4),
+        "warning_count": 1,
+    }
+
+
+def _evidence_unit_matrix_sort_key(
+    candidate: dict[str, Any],
+    *,
+    priority: str,
+) -> tuple[Any, ...]:
+    rank = _optional_int(candidate.get("rank")) or 10**9
+    quality = _mapping(candidate.get("source_quality"))
+    verified_count = int(quality.get("verified_link_count") or 0)
+    candidate_count = int(quality.get("candidate_link_count") or 0)
+    fallback_count = int(quality.get("timestamp_fallback_link_count") or 0)
+    has_vlm = bool(quality.get("has_vlm_entity"))
+    has_visual_entity = bool(quality.get("has_visual_entity"))
+    has_visual_state = bool(quality.get("has_visual_state"))
+    score = _optional_float(candidate.get("score"))
+    score_key = -(score or 0.0)
+    stable_id = str(candidate.get("evidence_unit_id") or candidate.get("target_segment_id") or "")
+    if priority == "verified":
+        return (
+            not (verified_count > 0 or quality.get("has_verified_link") is True),
+            -verified_count,
+            not has_vlm,
+            not has_visual_entity,
+            fallback_count,
+            rank,
+            stable_id,
+        )
+    if priority in {"quality", "quality-rerank", "quality_rerank"}:
+        return (
+            not (verified_count > 0 or quality.get("has_verified_link") is True),
+            not has_vlm,
+            not has_visual_entity,
+            not has_visual_state,
+            -verified_count,
+            -candidate_count,
+            fallback_count,
+            score_key,
+            rank,
+            stable_id,
+        )
+    return (rank, stable_id)
+
+
+def _evidence_unit_matrix_bundle(
+    *,
+    candidate: dict[str, Any],
+    rank: int,
+) -> dict[str, Any]:
+    start_time = _optional_float(candidate.get("start_time"))
+    end_time = _optional_float(candidate.get("end_time"))
+    timestamp_center = _first_float(
+        candidate.get("timestamp_center"),
+        ((start_time + end_time) / 2.0) if start_time is not None and end_time is not None else None,
+        start_time,
+        end_time,
+    )
+    source_quality = _mapping(candidate.get("source_quality"))
+    target_segment_id = str(candidate.get("target_segment_id") or "")
+    source_segment_ids = _string_list(candidate.get("source_segment_ids"))
+    matrix_candidate = {
+        "source": EVIDENCE_UNIT_HIT_SOURCE,
+        "evidence_unit_id": candidate.get("evidence_unit_id"),
+        "segment_id": target_segment_id,
+        "target_segment_id": target_segment_id,
+        "sample_id": target_segment_id,
+        "video_id": candidate.get("video_id"),
+        "source_segment_ids": source_segment_ids,
+        "start_time": start_time,
+        "end_time": end_time,
+        "timestamp_center": timestamp_center,
+        "rank": rank,
+        "original_rank": candidate.get("rank"),
+        "score": candidate.get("score"),
+        "retrieval_mode": "evidence_unit",
+        "modality": "multimodal"
+        if (
+            source_quality.get("has_visual_state")
+            or source_quality.get("has_visual_entity")
+            or source_quality.get("has_vlm_entity")
+        )
+        else "transcript",
+        "alignment_status": candidate.get("alignment_status"),
+        "visual_state_ids": _string_list(candidate.get("visual_state_ids")),
+        "visual_entity_ids": _string_list(candidate.get("visual_entity_ids")),
+        "verified_entity_link_ids": _string_list(candidate.get("verified_entity_link_ids")),
+        "candidate_entity_link_ids": _string_list(candidate.get("candidate_entity_link_ids")),
+        "candidate_entity_link_statuses": _mapping(candidate.get("candidate_entity_link_statuses")),
+        "source_quality": source_quality,
+        "transcript_excerpt": candidate.get("transcript_window_text")
+        or candidate.get("evidence_text")
+        or candidate.get("semantic_text"),
+    }
+    return {
+        "rank": rank,
+        "candidate": matrix_candidate,
+        "evidence_window": {
+            "target_segment_id": target_segment_id,
+            "start_time": start_time,
+            "end_time": end_time,
+            "frame_refs": [],
+            "target_segment": {
+                "segment_id": target_segment_id,
+                "sample_id": target_segment_id,
+                "video_id": candidate.get("video_id"),
+                "start_time": start_time,
+                "end_time": end_time,
+                "timestamp_center": timestamp_center,
+                "transcript_text": matrix_candidate["transcript_excerpt"],
+            },
+        },
+        "visual_entities": [],
+        "linked_entities": [],
+        "retrieval_sources": [
+            {
+                "source": EVIDENCE_UNIT_HIT_SOURCE,
+                "modality": matrix_candidate["modality"],
+                "retrieval_mode": "evidence_unit",
+                "rank": rank,
+                "original_rank": candidate.get("rank"),
+                "score": candidate.get("score"),
+                "target_segment_id": target_segment_id,
+                "source_segment_ids": source_segment_ids,
+            }
+        ],
+        "merge": {"source_count": 1, "sources": [EVIDENCE_UNIT_HIT_SOURCE]},
     }
 
 
@@ -1411,6 +1905,10 @@ def _matrix_variant_metrics(
         "variant_id": variant["variant_id"],
         "label": variant["label"],
         "query_count": len(rows),
+        "queried_count": sum(1 for row in rows if row.get("status") == "queried"),
+        "skipped_count": sum(1 for row in rows if row.get("status") == "skipped"),
+        "query_status_counts": _query_status_counts(rows),
+        "skip_reason_counts": _skip_reason_counts(rows),
         "config": _public_matrix_variant_config(variant),
         "mean_abs_error": _mean_or_none(
             row.get("best_abs_error") for row in rows if row.get("best_abs_error") is not None
@@ -1459,6 +1957,20 @@ def _matrix_variant_metrics(
                 is True
             )
         ),
+        "object_evidence_coverage_counts": _object_evidence_coverage_counts(rows),
+        "visual_state_coverage_ratio": _coverage_bool_ratio(rows, "has_visual_state"),
+        "visual_entity_coverage_ratio": _coverage_bool_ratio(rows, "has_visual_entity"),
+        "vlm_entity_coverage_ratio": _coverage_bool_ratio(rows, "has_vlm_entity"),
+        "ocr_only_coverage_ratio": _coverage_bool_ratio(rows, "uses_ocr_only"),
+        "candidate_link_coverage_ratio": _coverage_bool_ratio(rows, "has_candidate_link"),
+        "verified_link_coverage_ratio": _coverage_bool_ratio(rows, "has_verified_link"),
+        "timestamp_fallback_coverage_ratio": _coverage_bool_ratio(
+            rows,
+            "has_timestamp_fallback_link",
+        ),
+        "target_rank_bucket_counts": _target_rank_bucket_counts(rows),
+        "target_found_in_top_k_count": _target_found_in_top_k_count(rows),
+        "target_found_in_top_k_ratio": _target_found_in_top_k_ratio(rows),
         "top1_expected_segment_match_ratio": _ratio(rows, "top1_expected_segment_match"),
         "grounded_answer_ratio": _answer_ratio(rows, "grounded_answer"),
         "candidate_evidence_only_ratio": _answer_ratio(rows, "candidate_evidence_only"),
@@ -1535,10 +2047,14 @@ def _normalize_index_kind(value: Any) -> str:
         "window": WINDOW_HIT_SOURCE,
         "windows": WINDOW_HIT_SOURCE,
         "lecture-window": WINDOW_HIT_SOURCE,
+        "evidence-unit": EVIDENCE_UNIT_HIT_SOURCE,
+        "evidence-units": EVIDENCE_UNIT_HIT_SOURCE,
     }
     result = aliases.get(normalized)
     if result is None:
-        valid = ", ".join(sorted({SEGMENT_HIT_SOURCE, WINDOW_HIT_SOURCE}))
+        valid = ", ".join(
+            sorted({SEGMENT_HIT_SOURCE, WINDOW_HIT_SOURCE, EVIDENCE_UNIT_HIT_SOURCE})
+        )
         raise ValueError(f"Unsupported retrieval_answer_matrix index_kind: {value}. Valid: {valid}")
     return result
 
@@ -1567,6 +2083,13 @@ def _matrix_index_uid(*, suite: dict[str, Any], variant: dict[str, Any], index_k
     explicit = _optional_str(variant.get("index"))
     if explicit:
         return explicit
+    if index_kind == EVIDENCE_UNIT_HIT_SOURCE:
+        evidence_index = _optional_str(
+            variant.get("evidence_unit_index", suite.get("evidence_unit_index"))
+        )
+        if evidence_index:
+            return evidence_index
+        raise ValueError("retrieval_answer_matrix evidence-unit variant requires evidence_unit_index")
     if index_kind == WINDOW_HIT_SOURCE:
         window_index = _optional_str(variant.get("window_index", suite.get("window_index")))
         if window_index:
@@ -1702,7 +2225,7 @@ def _public_matrix_config(
     *,
     suite: dict[str, Any],
     variant: dict[str, Any],
-    index_uid: str,
+    index_uid: str | None,
     visual_index_uid: str | None,
     index_kind: str,
     use_domain_lexicon: bool,
@@ -1716,7 +2239,7 @@ def _public_matrix_config(
     return {
         **config,
         "index_kind": index_kind,
-        "index_ref": f"index:{_short_hash(index_uid)}",
+        "index_ref": f"index:{_short_hash(index_uid)}" if index_uid is not None else None,
         "visual_index_ref": f"index:{_short_hash(visual_index_uid)}"
         if visual_index_uid is not None
         else None,
@@ -1780,6 +2303,10 @@ def _public_matrix_variant_config(variant: dict[str, Any]) -> dict[str, Any]:
         "rerank": _bool_config(variant, "rerank", default=False),
         "answer": _bool_config(variant, "include_answer", default=True),
     }
+    if config["index_kind"] == EVIDENCE_UNIT_HIT_SOURCE:
+        config["evidence_unit_priority"] = str(
+            variant.get("evidence_unit_priority") or "candidate"
+        )
     candidate_pool_limit = _optional_int(variant.get("candidate_pool_limit"))
     if candidate_pool_limit is not None:
         config["candidate_pool_limit"] = candidate_pool_limit
@@ -1882,6 +2409,7 @@ def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | 
     if isinstance(evidence_window, dict):
         frame_refs = _list_of_dicts(evidence_window.get("frame_refs"))
     object_link_diagnostics = _matrix_object_link_diagnostics(bundle)
+    coverage = _matrix_object_evidence_coverage(bundle)
     return {
         "ref": f"{source}:{_short_hash(candidate_id)}",
         "source": source,
@@ -1894,13 +2422,17 @@ def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | 
             candidate.get("end_time"),
         )
         is not None,
-        "frame_backed": bool(frame_refs),
-        "linked_entity_backed": bool(bundle.get("linked_entities")),
+        "frame_backed": bool(frame_refs) or coverage.get("has_visual_state") is True,
+        "linked_entity_backed": bool(bundle.get("linked_entities"))
+        or coverage.get("has_candidate_link") is True
+        or coverage.get("has_verified_link") is True
+        or coverage.get("has_timestamp_fallback_link") is True,
         "source_count": (bundle.get("merge") or {}).get("source_count")
         if isinstance(bundle.get("merge"), dict)
         else None,
         "candidate_visual_support": object_link_diagnostics["candidate_visual_support"],
         "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
+        "object_evidence_coverage": coverage,
     }
 
 
@@ -2149,16 +2681,224 @@ def _top_candidate_matches(
     return bool(set(candidate_ids).intersection(expected_segment_ids))
 
 
+def _matrix_target_rank_diagnostics(
+    *,
+    bundles: list[dict[str, Any]],
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+) -> dict[str, Any]:
+    configured = bool(expected_segment_ids or expected_window_ids)
+    target_rank: int | None = None
+    if configured:
+        for rank, bundle in enumerate(bundles, start=1):
+            candidate = bundle.get("candidate") if isinstance(bundle.get("candidate"), dict) else {}
+            if _bundle_matches_expected_target(
+                bundle=bundle,
+                candidate=candidate,
+                expected_segment_ids=expected_segment_ids,
+                expected_window_ids=expected_window_ids,
+            ):
+                target_rank = rank
+                break
+    return {
+        "target_configured": configured,
+        "target_rank": target_rank,
+        "target_rank_bucket": _target_rank_bucket(target_rank, configured=configured),
+        "found_in_top_k": bool(target_rank is not None) if configured else None,
+    }
+
+
+def _bundle_matches_expected_target(
+    *,
+    bundle: dict[str, Any],
+    candidate: dict[str, Any],
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+) -> bool:
+    if expected_segment_ids:
+        values = _string_list(
+            [
+                candidate.get("segment_id"),
+                candidate.get("target_segment_id"),
+                candidate.get("sample_id"),
+                _mapping(bundle.get("evidence_window")).get("target_segment_id"),
+            ]
+        )
+        values.extend(_string_list(candidate.get("source_segment_ids")))
+        for source in _list_of_dicts(bundle.get("retrieval_sources")):
+            values.extend(
+                _string_list(
+                    [
+                        source.get("segment_id"),
+                        source.get("target_segment_id"),
+                        source.get("sample_id"),
+                    ]
+                )
+            )
+            values.extend(_string_list(source.get("source_segment_ids")))
+        if set(values).intersection(expected_segment_ids):
+            return True
+    if expected_window_ids:
+        values = _string_list([candidate.get("window_id")])
+        for source in _list_of_dicts(bundle.get("retrieval_sources")):
+            values.extend(_string_list([source.get("window_id")]))
+        if set(values).intersection(expected_window_ids):
+            return True
+    return False
+
+
+def _target_rank_bucket(rank: int | None, *, configured: bool) -> str:
+    if not configured:
+        return "not_configured"
+    if rank is None:
+        return "not_found"
+    if rank == 1:
+        return "top1"
+    if rank <= 5:
+        return "top5"
+    if rank <= 10:
+        return "top10"
+    return "over10"
+
+
 def _bundles_have_frames(bundles: list[dict[str, Any]]) -> bool:
     for bundle in bundles:
         evidence_window = bundle.get("evidence_window")
         if isinstance(evidence_window, dict) and evidence_window.get("frame_refs"):
             return True
+        if _mapping(_mapping(bundle.get("candidate")).get("source_quality")).get(
+            "has_visual_state"
+        ) is True:
+            return True
     return False
 
 
 def _bundles_have_linked_entities(bundles: list[dict[str, Any]]) -> bool:
-    return any(bool(bundle.get("linked_entities")) for bundle in bundles)
+    for bundle in bundles:
+        if bundle.get("linked_entities"):
+            return True
+        source_quality = _mapping(_mapping(bundle.get("candidate")).get("source_quality"))
+        if any(
+            int(source_quality.get(key) or 0) > 0
+            for key in (
+                "candidate_link_count",
+                "verified_link_count",
+                "timestamp_fallback_link_count",
+            )
+        ):
+            return True
+    return False
+
+
+def _matrix_object_evidence_coverage(bundle: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(bundle, dict):
+        return {
+            "has_visual_state": False,
+            "has_visual_entity": False,
+            "has_vlm_entity": False,
+            "uses_ocr_only": False,
+            "has_candidate_link": False,
+            "has_verified_link": False,
+            "has_timestamp_fallback_link": False,
+            "visual_state_count": 0,
+            "visual_entity_count": 0,
+            "candidate_link_count": 0,
+            "verified_link_count": 0,
+            "timestamp_fallback_link_count": 0,
+            "visual_description_count": 0,
+            "detected_text_count": 0,
+        }
+    candidate = _mapping(bundle.get("candidate"))
+    source_quality = _mapping(candidate.get("source_quality"))
+    if source_quality:
+        visual_state_ids = _string_list(candidate.get("visual_state_ids"))
+        visual_entity_ids = _string_list(candidate.get("visual_entity_ids"))
+        visual_state_count = max(
+            int(source_quality.get("visual_state_count") or 0),
+            len(visual_state_ids),
+            1 if source_quality.get("has_visual_state") is True else 0,
+        )
+        visual_entity_count = max(
+            int(source_quality.get("visual_entity_count") or 0),
+            len(visual_entity_ids),
+            1 if source_quality.get("has_visual_entity") is True else 0,
+        )
+        visual_description_count = int(source_quality.get("visual_description_count") or 0)
+        detected_text_count = int(source_quality.get("visual_state_detected_text_count") or 0)
+        detected_text_count += int(source_quality.get("visual_entity_detected_text_count") or 0)
+        return {
+            "has_visual_state": visual_state_count > 0,
+            "has_visual_entity": visual_entity_count > 0,
+            "has_vlm_entity": bool(source_quality.get("has_vlm_entity")),
+            "uses_ocr_only": bool(source_quality.get("uses_ocr_only")),
+            "has_candidate_link": int(source_quality.get("candidate_link_count") or 0) > 0,
+            "has_verified_link": bool(source_quality.get("has_verified_link"))
+            or int(source_quality.get("verified_link_count") or 0) > 0,
+            "has_timestamp_fallback_link": bool(source_quality.get("has_timestamp_fallback_link"))
+            or int(source_quality.get("timestamp_fallback_link_count") or 0) > 0,
+            "visual_state_count": visual_state_count,
+            "visual_entity_count": visual_entity_count,
+            "candidate_link_count": int(source_quality.get("candidate_link_count") or 0),
+            "verified_link_count": int(source_quality.get("verified_link_count") or 0),
+            "timestamp_fallback_link_count": int(
+                source_quality.get("timestamp_fallback_link_count") or 0
+            ),
+            "visual_description_count": visual_description_count,
+            "detected_text_count": detected_text_count,
+        }
+
+    visual_entities = _list_of_dicts(bundle.get("visual_entities"))
+    linked_entities = _list_of_dicts(bundle.get("linked_entities"))
+    candidate_link_count = 0
+    verified_link_count = 0
+    timestamp_fallback_link_count = 0
+    for linked in linked_entities:
+        status = _matrix_link_status(linked)
+        if status == "verified":
+            verified_link_count += 1
+        elif status == "timestamp_fallback":
+            timestamp_fallback_link_count += 1
+        else:
+            candidate_link_count += 1
+    has_vlm_entity = any(_matrix_visual_entity_is_vlm(entity) for entity in visual_entities)
+    visual_description_count = sum(
+        1
+        for entity in visual_entities
+        if str(entity.get("visual_description") or "").strip()
+    )
+    detected_text_count = sum(
+        1
+        for entity in visual_entities
+        if str(entity.get("detected_text") or entity.get("text") or "").strip()
+    )
+    return {
+        "has_visual_state": False,
+        "has_visual_entity": bool(visual_entities),
+        "has_vlm_entity": has_vlm_entity,
+        "uses_ocr_only": bool(visual_entities) and not has_vlm_entity,
+        "has_candidate_link": candidate_link_count > 0,
+        "has_verified_link": verified_link_count > 0,
+        "has_timestamp_fallback_link": timestamp_fallback_link_count > 0,
+        "visual_state_count": 0,
+        "visual_entity_count": len(visual_entities),
+        "candidate_link_count": candidate_link_count,
+        "verified_link_count": verified_link_count,
+        "timestamp_fallback_link_count": timestamp_fallback_link_count,
+        "visual_description_count": visual_description_count,
+        "detected_text_count": detected_text_count,
+    }
+
+
+def _matrix_visual_entity_is_vlm(entity: dict[str, Any]) -> bool:
+    source_text = " ".join(
+        str(entity.get(key) or "")
+        for key in ("source", "source_model", "model", "entity_type")
+    ).casefold()
+    return bool(
+        "vlm" in source_text
+        or "vision" in source_text
+        or str(entity.get("visual_description") or "").strip()
+    )
 
 
 def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, Any]:
@@ -2167,10 +2907,15 @@ def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, 
             "schema_version": MATRIX_LINK_DIAGNOSTICS_SCHEMA_VERSION,
             "candidate_visual_support": _matrix_candidate_visual_support(
                 frame_backed=False,
+                visual_state_count=0,
                 visual_entity_count=0,
                 candidate_link_count=0,
                 timestamp_fallback_link_count=0,
                 candidate_link_signal_counts=_zero_count_map(CANDIDATE_LINK_SIGNAL_KEYS),
+                has_vlm_entity=False,
+                uses_ocr_only=False,
+                visual_description_count=0,
+                detected_text_count=0,
             ),
             "verified_object_alignment": _matrix_verified_object_alignment(
                 verified_link_count=0,
@@ -2178,6 +2923,20 @@ def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, 
             ),
             "public_note": MATRIX_LINK_DIAGNOSTICS_PUBLIC_NOTE,
         }
+
+    candidate = _mapping(bundle.get("candidate"))
+    source_quality = _mapping(candidate.get("source_quality"))
+    if source_quality:
+        return _matrix_object_link_diagnostics_from_source_quality(
+            source_quality=source_quality,
+            visual_state_ids=_string_list(candidate.get("visual_state_ids")),
+            visual_entity_ids=_string_list(candidate.get("visual_entity_ids")),
+            candidate_entity_link_ids=_string_list(candidate.get("candidate_entity_link_ids")),
+            verified_entity_link_ids=_string_list(candidate.get("verified_entity_link_ids")),
+            candidate_entity_link_statuses=_mapping(
+                candidate.get("candidate_entity_link_statuses")
+            ),
+        )
 
     evidence_window = _mapping(bundle.get("evidence_window"))
     frame_refs = _list_of_dicts(evidence_window.get("frame_refs"))
@@ -2204,10 +2963,99 @@ def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, 
         "schema_version": MATRIX_LINK_DIAGNOSTICS_SCHEMA_VERSION,
         "candidate_visual_support": _matrix_candidate_visual_support(
             frame_backed=frame_backed,
+            visual_state_count=0,
             visual_entity_count=len(visual_entities),
             candidate_link_count=candidate_link_count,
             timestamp_fallback_link_count=timestamp_fallback_link_count,
             candidate_link_signal_counts=candidate_signal_counts,
+            has_vlm_entity=any(_matrix_visual_entity_is_vlm(entity) for entity in visual_entities),
+            uses_ocr_only=bool(visual_entities)
+            and not any(_matrix_visual_entity_is_vlm(entity) for entity in visual_entities),
+            visual_description_count=sum(
+                1
+                for entity in visual_entities
+                if str(entity.get("visual_description") or "").strip()
+            ),
+            detected_text_count=sum(
+                1
+                for entity in visual_entities
+                if str(entity.get("detected_text") or entity.get("text") or "").strip()
+            ),
+        ),
+        "verified_object_alignment": _matrix_verified_object_alignment(
+            verified_link_count=verified_link_count,
+            verified_link_source_counts=verified_source_counts,
+        ),
+        "public_note": MATRIX_LINK_DIAGNOSTICS_PUBLIC_NOTE,
+    }
+
+
+def _matrix_object_link_diagnostics_from_source_quality(
+    *,
+    source_quality: dict[str, Any],
+    visual_state_ids: list[str],
+    visual_entity_ids: list[str],
+    candidate_entity_link_ids: list[str],
+    verified_entity_link_ids: list[str],
+    candidate_entity_link_statuses: dict[str, Any],
+) -> dict[str, Any]:
+    nested_candidate = _mapping(source_quality.get("candidate_visual_support"))
+    nested_verified = _mapping(source_quality.get("verified_object_alignment"))
+    candidate_signal_counts = _zero_count_map(CANDIDATE_LINK_SIGNAL_KEYS)
+    _add_counts(candidate_signal_counts, _mapping(source_quality.get("candidate_link_signal_counts")))
+    _add_counts(candidate_signal_counts, _mapping(nested_candidate.get("candidate_link_signal_counts")))
+    verified_source_counts = _zero_count_map(VERIFIED_LINK_SOURCE_KEYS)
+    _add_counts(verified_source_counts, _mapping(source_quality.get("verified_link_source_counts")))
+    _add_counts(verified_source_counts, _mapping(nested_verified.get("verified_link_source_counts")))
+
+    status_values = [str(value).casefold() for value in candidate_entity_link_statuses.values()]
+    fallback_from_status = sum(1 for value in status_values if value == "timestamp_fallback")
+    candidate_from_status = sum(1 for value in status_values if value == "candidate")
+    verified_from_status = sum(1 for value in status_values if value == "verified")
+    timestamp_fallback_link_count = max(
+        int(source_quality.get("timestamp_fallback_link_count") or 0),
+        int(nested_candidate.get("timestamp_fallback_link_count") or 0),
+        fallback_from_status,
+    )
+    candidate_link_count = max(
+        int(source_quality.get("candidate_link_count") or 0),
+        int(nested_candidate.get("candidate_link_count") or 0),
+        candidate_from_status,
+        max(0, len(candidate_entity_link_ids) - fallback_from_status - verified_from_status),
+    )
+    verified_link_count = max(
+        int(source_quality.get("verified_link_count") or 0),
+        int(nested_verified.get("verified_link_count") or 0),
+        len(verified_entity_link_ids),
+        verified_from_status,
+    )
+    visual_state_count = max(
+        int(source_quality.get("visual_state_count") or 0),
+        len(visual_state_ids),
+        1 if source_quality.get("has_visual_state") is True else 0,
+    )
+    visual_entity_count = max(
+        int(source_quality.get("visual_entity_count") or 0),
+        int(nested_candidate.get("visual_entity_count") or 0),
+        len(visual_entity_ids),
+        1 if source_quality.get("has_visual_entity") is True else 0,
+    )
+    return {
+        "schema_version": MATRIX_LINK_DIAGNOSTICS_SCHEMA_VERSION,
+        "candidate_visual_support": _matrix_candidate_visual_support(
+            frame_backed=visual_state_count > 0,
+            visual_state_count=visual_state_count,
+            visual_entity_count=visual_entity_count,
+            candidate_link_count=candidate_link_count,
+            timestamp_fallback_link_count=timestamp_fallback_link_count,
+            candidate_link_signal_counts=candidate_signal_counts,
+            has_vlm_entity=bool(source_quality.get("has_vlm_entity")),
+            uses_ocr_only=bool(source_quality.get("uses_ocr_only")),
+            visual_description_count=int(source_quality.get("visual_description_count") or 0),
+            detected_text_count=(
+                int(source_quality.get("visual_state_detected_text_count") or 0)
+                + int(source_quality.get("visual_entity_detected_text_count") or 0)
+            ),
         ),
         "verified_object_alignment": _matrix_verified_object_alignment(
             verified_link_count=verified_link_count,
@@ -2220,13 +3068,19 @@ def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, 
 def _matrix_candidate_visual_support(
     *,
     frame_backed: bool,
+    visual_state_count: int,
     visual_entity_count: int,
     candidate_link_count: int,
     timestamp_fallback_link_count: int,
     candidate_link_signal_counts: dict[str, int],
+    has_vlm_entity: bool,
+    uses_ocr_only: bool,
+    visual_description_count: int,
+    detected_text_count: int,
 ) -> dict[str, Any]:
     has_support = bool(
         frame_backed
+        or visual_state_count
         or visual_entity_count
         or candidate_link_count
         or timestamp_fallback_link_count
@@ -2234,7 +3088,12 @@ def _matrix_candidate_visual_support(
     return {
         "has_candidate_visual_support": has_support,
         "frame_backed": frame_backed,
+        "visual_state_count": visual_state_count,
         "visual_entity_count": visual_entity_count,
+        "has_vlm_entity": has_vlm_entity,
+        "uses_ocr_only": uses_ocr_only,
+        "visual_description_count": visual_description_count,
+        "detected_text_count": detected_text_count,
         "candidate_link_count": candidate_link_count,
         "timestamp_fallback_link_count": timestamp_fallback_link_count,
         "candidate_link_signal_counts": _public_count_map(
@@ -2470,6 +3329,9 @@ def _matrix_privacy_payload() -> dict[str, Any]:
         "raw_candidate_ids": "hashed",
         "candidate_visual_support": "aggregate_counts_only",
         "verified_object_alignment": "aggregate_counts_only",
+        "object_evidence_coverage": "aggregate_counts_only",
+        "target_rank_diagnostics": "rank_buckets_and_match_flags_only",
+        "skip_reasons": "public_safe_reason_codes_only",
         "raw_response_in_public_output": False,
         "grounding_proxy_metrics": "deterministic_expected_hint_overlap_not_full_llm_quality",
     }
@@ -2720,6 +3582,103 @@ def _source_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
         source = top.get("source") if isinstance(top, dict) else None
         counts[str(source or "none")] += 1
     return dict(sorted(counts.items()))
+
+
+def _query_status_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(str(row.get("status") or "queried") for row in rows)
+    return dict(sorted(counts.items()))
+
+
+def _skip_reason_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(
+        str(row.get("skip_reason"))
+        for row in rows
+        if row.get("status") == "skipped" and row.get("skip_reason")
+    )
+    return dict(sorted(counts.items()))
+
+
+def _object_evidence_coverage_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    keys = (
+        "has_visual_state",
+        "has_visual_entity",
+        "has_vlm_entity",
+        "uses_ocr_only",
+        "has_candidate_link",
+        "has_verified_link",
+        "has_timestamp_fallback_link",
+    )
+    counts = {key: 0 for key in keys}
+    counts.update(
+        {
+            "visual_state_count": 0,
+            "visual_entity_count": 0,
+            "candidate_link_count": 0,
+            "verified_link_count": 0,
+            "timestamp_fallback_link_count": 0,
+            "visual_description_count": 0,
+            "detected_text_count": 0,
+        }
+    )
+    for row in rows:
+        coverage = _mapping(row.get("object_evidence_coverage"))
+        for key in keys:
+            if coverage.get(key) is True:
+                counts[key] += 1
+        counts["visual_state_count"] += int(coverage.get("visual_state_count") or 0)
+        counts["visual_entity_count"] += int(coverage.get("visual_entity_count") or 0)
+        counts["candidate_link_count"] += int(coverage.get("candidate_link_count") or 0)
+        counts["verified_link_count"] += int(coverage.get("verified_link_count") or 0)
+        counts["timestamp_fallback_link_count"] += int(
+            coverage.get("timestamp_fallback_link_count") or 0
+        )
+        counts["visual_description_count"] += int(coverage.get("visual_description_count") or 0)
+        counts["detected_text_count"] += int(coverage.get("detected_text_count") or 0)
+    return counts
+
+
+def _coverage_bool_ratio(rows: list[dict[str, Any]], key: str) -> float | None:
+    if not rows:
+        return None
+    return round(
+        sum(
+            1.0
+            if _mapping(row.get("object_evidence_coverage")).get(key) is True
+            else 0.0
+            for row in rows
+        )
+        / len(rows),
+        4,
+    )
+
+
+def _target_rank_bucket_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter()
+    for row in rows:
+        diagnostics = _mapping(row.get("target_rank_diagnostics"))
+        if diagnostics.get("target_configured") is not True:
+            continue
+        counts[str(diagnostics.get("target_rank_bucket") or "not_found")] += 1
+    return dict(sorted(counts.items()))
+
+
+def _target_found_in_top_k_count(rows: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for row in rows
+        if _mapping(row.get("target_rank_diagnostics")).get("found_in_top_k") is True
+    )
+
+
+def _target_found_in_top_k_ratio(rows: list[dict[str, Any]]) -> float | None:
+    configured = [
+        row
+        for row in rows
+        if _mapping(row.get("target_rank_diagnostics")).get("target_configured") is True
+    ]
+    if not configured:
+        return None
+    return round(_target_found_in_top_k_count(configured) / len(configured), 4)
 
 
 def _combined_processing_time_ms(responses: list[dict[str, Any]]) -> float | None:
@@ -3115,27 +4074,33 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 "tracking; they do not replace full LLM answer quality review.",
                 "Grounding gap counts separate answer policy decisions from retrieval localization "
                 "misses in the JSON metrics.",
+                "Evidence-unit rows may be queried or skipped; skipped variants report zero hit/MRR "
+                "and a public-safe skip reason in JSON metrics.",
                 "",
-                "| suite | variant | queries | pool | Hit@10s | MRR | frame-backed | linked-backed | candidate support | verified align | grounded | cite P | cite R | expected hit | unsupported | latency ms |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                "| suite | variant | queries | skipped | pool | Hit@10s | MRR | target in pool | frame-backed | linked-backed | candidate support | verified align | VLM | grounded | cite P | cite R | expected hit | unsupported | latency ms |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for suite, variant in matrix_variants:
             lines.append(
-                "| {suite_id} | {variant_id} | {query_count} | {pool} | {hit10} | {mrr} | "
-                "{frame} | {linked} | {candidate_support} | {verified_align} | "
+                "| {suite_id} | {variant_id} | {query_count} | {skipped} | {pool} | "
+                "{hit10} | {mrr} | {target_pool} | "
+                "{frame} | {linked} | {candidate_support} | {verified_align} | {vlm} | "
                 "{grounded} | {precision} | {recall} | {hit} | "
                 "{unsupported} | {latency} |".format(
                     suite_id=suite.get("suite_id"),
                     variant_id=variant.get("variant_id"),
                     query_count=variant.get("query_count") or 0,
+                    skipped=variant.get("skipped_count") or 0,
                     pool=(variant.get("config") or {}).get("candidate_pool_limit", "-"),
                     hit10=_format_metric(variant.get("hit_at_10s")),
                     mrr=_format_metric(variant.get("mrr_at_max_delta")),
+                    target_pool=_format_metric(variant.get("target_found_in_top_k_ratio")),
                     frame=_format_metric(variant.get("frame_backed_ratio")),
                     linked=_format_metric(variant.get("linked_entity_backed_ratio")),
                     candidate_support=_format_metric(variant.get("candidate_visual_support_ratio")),
                     verified_align=_format_metric(variant.get("verified_object_alignment_ratio")),
+                    vlm=_format_metric(variant.get("vlm_entity_coverage_ratio")),
                     grounded=_format_metric(variant.get("grounded_answer_ratio")),
                     precision=_format_metric(variant.get("answer_citation_precision")),
                     recall=_format_metric(variant.get("answer_citation_recall")),
@@ -3202,8 +4167,20 @@ def _write_metrics_summary_csv(path: Path, metrics: dict[str, Any]) -> None:
         "hit_at_15s",
         "mrr_at_max_delta",
         "top1_mean_abs_error",
+        "queried_count",
+        "skipped_count",
         "frame_backed_ratio",
         "linked_entity_backed_ratio",
+        "candidate_visual_support_ratio",
+        "verified_object_alignment_ratio",
+        "visual_state_coverage_ratio",
+        "visual_entity_coverage_ratio",
+        "vlm_entity_coverage_ratio",
+        "ocr_only_coverage_ratio",
+        "candidate_link_coverage_ratio",
+        "verified_link_coverage_ratio",
+        "timestamp_fallback_coverage_ratio",
+        "target_found_in_top_k_ratio",
         "grounded_answer_ratio",
         "citation_coverage_ratio",
         "answer_citation_precision",
@@ -3283,11 +4260,23 @@ def _metrics_summary_row(
         "hit_at_15s": item.get("hit_at_15s"),
         "mrr_at_max_delta": item.get("mrr_at_max_delta"),
         "top1_mean_abs_error": item.get("top1_mean_abs_error"),
+        "queried_count": item.get("queried_count"),
+        "skipped_count": item.get("skipped_count"),
         "frame_backed_ratio": item.get("frame_backed_ratio"),
         "linked_entity_backed_ratio": item.get(
             "linked_entity_backed_ratio",
             item.get("linked_entity_ratio"),
         ),
+        "candidate_visual_support_ratio": item.get("candidate_visual_support_ratio"),
+        "verified_object_alignment_ratio": item.get("verified_object_alignment_ratio"),
+        "visual_state_coverage_ratio": item.get("visual_state_coverage_ratio"),
+        "visual_entity_coverage_ratio": item.get("visual_entity_coverage_ratio"),
+        "vlm_entity_coverage_ratio": item.get("vlm_entity_coverage_ratio"),
+        "ocr_only_coverage_ratio": item.get("ocr_only_coverage_ratio"),
+        "candidate_link_coverage_ratio": item.get("candidate_link_coverage_ratio"),
+        "verified_link_coverage_ratio": item.get("verified_link_coverage_ratio"),
+        "timestamp_fallback_coverage_ratio": item.get("timestamp_fallback_coverage_ratio"),
+        "target_found_in_top_k_ratio": item.get("target_found_in_top_k_ratio"),
         "grounded_answer_ratio": item.get("grounded_answer_ratio"),
         "citation_coverage_ratio": item.get("citation_coverage_ratio"),
         "answer_citation_precision": item.get("answer_citation_precision"),
