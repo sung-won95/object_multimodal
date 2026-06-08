@@ -9,6 +9,8 @@ from oarag.cli import (
     cmd_build_project_evidence_units,
     cmd_build_project_visual_states,
     cmd_build_project_windows,
+    cmd_concept_graph_ingest,
+    cmd_extract_concept_candidates,
     cmd_index_project_evidence_units,
     cmd_index_project,
     cmd_index_project_visual_entities,
@@ -219,6 +221,94 @@ def test_cmd_index_project_forwards_hybrid_embedder_options(monkeypatch, capsys)
     assert calls["index_kwargs"]["hybrid_embedder_live_smoke"] is True
     assert calls["index_kwargs"]["vector_manifest"] == Path("manifests/segment_vectors.json")
     assert json.loads(capsys.readouterr().out)["hybrid_embedder_live_smoke"] is True
+
+
+def test_cmd_concept_graph_ingest_forwards_public_safe_options(monkeypatch, capsys) -> None:
+    calls = {}
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_ingest_concept_graph(**kwargs):
+        calls["ingest_kwargs"] = kwargs
+        return {"ok": True, "dry_run": kwargs["dry_run"]}
+
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr("oarag.cli.ingest_concept_graph", fake_ingest_concept_graph)
+
+    args = build_parser().parse_args(
+        [
+            "concept-graph-ingest",
+            "--project-dir",
+            "/tmp/project",
+            "--dry-run",
+            "--skip-schema",
+            "--fail-on-unavailable-runtime",
+        ]
+    )
+
+    cmd_concept_graph_ingest(args)
+
+    assert calls["location"] == (None, Path("/tmp/project"))
+    assert calls["ingest_kwargs"] == {
+        "project_dir": Path("/tmp/project"),
+        "concept_graph_path": None,
+        "project_id": None,
+        "create_schema": False,
+        "dry_run": True,
+        "skip_unavailable_runtime": False,
+    }
+    assert json.loads(capsys.readouterr().out) == {"ok": True, "dry_run": True}
+
+
+def test_cmd_extract_concept_candidates_forwards_project_options(monkeypatch, capsys) -> None:
+    calls = {}
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_extract_project_concept_candidates(**kwargs):
+        calls["extract_kwargs"] = kwargs
+        return {"concepts": 2, "output": "public_safe"}
+
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr(
+        "oarag.cli.extract_project_concept_candidates",
+        fake_extract_project_concept_candidates,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "extract-concept-candidates",
+            "--project-id",
+            "sample_project",
+            "--evidence-units",
+            "segments/evidence_units.jsonl",
+            "--output",
+            "manifests/concept_graph.jsonl",
+            "--manifest",
+            "manifests/project_manifest.json",
+            "--lecture-id",
+            "lecture_public_001",
+            "--min-confidence",
+            "0.42",
+        ]
+    )
+
+    cmd_extract_concept_candidates(args)
+
+    assert calls["location"] == ("sample_project", None)
+    assert calls["extract_kwargs"] == {
+        "project_dir": Path("/tmp/project"),
+        "evidence_units": Path("segments/evidence_units.jsonl"),
+        "output_path": Path("manifests/concept_graph.jsonl"),
+        "manifest_path": Path("manifests/project_manifest.json"),
+        "lecture_id": "lecture_public_001",
+        "min_confidence": 0.42,
+    }
+    assert json.loads(capsys.readouterr().out) == {"concepts": 2, "output": "public_safe"}
 
 
 def test_build_project_windows_cli_defaults() -> None:
