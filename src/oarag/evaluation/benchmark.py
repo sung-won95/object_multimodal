@@ -89,6 +89,15 @@ VERIFIED_LINK_SOURCE_KEYS = (
     "unspecified_verified",
 )
 EVIDENCE_UNIT_HIT_SOURCE = "evidence_unit"
+INSUFFICIENT_EVIDENCE_POLICY_REASONS = {
+    "no_candidate_bundles",
+    "no_informative_query_terms",
+    "search_score_below_threshold",
+    "candidate_visual_evidence_only",
+    "timestamp_fallback_evidence_only",
+    "no_claim_source_in_candidate",
+    "insufficient_query_overlap",
+}
 DEFAULT_MATRIX_VARIANTS = [
     {
         "variant_id": "segment_lexical",
@@ -1892,9 +1901,10 @@ def _evidence_unit_matrix_bundle(
         "candidate_entity_link_statuses": _mapping(candidate.get("candidate_entity_link_statuses")),
         "source_quality": source_quality,
         "modality_aware_rerank": _mapping(candidate.get("modality_aware_rerank")),
-        "transcript_excerpt": candidate.get("transcript_window_text")
-        or candidate.get("evidence_text")
-        or candidate.get("semantic_text"),
+        "transcript_window_text": candidate.get("transcript_window_text"),
+        "evidence_text": candidate.get("evidence_text"),
+        "semantic_text": candidate.get("semantic_text"),
+        "transcript_excerpt": candidate.get("transcript_window_text") or "",
     }
     return {
         "rank": rank,
@@ -1924,8 +1934,20 @@ def _evidence_unit_matrix_bundle(
                 "rank": rank,
                 "original_rank": candidate.get("rank"),
                 "score": candidate.get("score"),
+                "evidence_unit_id": candidate.get("evidence_unit_id"),
                 "target_segment_id": target_segment_id,
                 "source_segment_ids": source_segment_ids,
+                "visual_state_ids": _string_list(candidate.get("visual_state_ids")),
+                "visual_entity_ids": _string_list(candidate.get("visual_entity_ids")),
+                "verified_entity_link_ids": _string_list(
+                    candidate.get("verified_entity_link_ids")
+                ),
+                "candidate_entity_link_ids": _string_list(
+                    candidate.get("candidate_entity_link_ids")
+                ),
+                "candidate_entity_link_statuses": _mapping(
+                    candidate.get("candidate_entity_link_statuses")
+                ),
             }
         ],
         "merge": {"source_count": 1, "sources": [EVIDENCE_UNIT_HIT_SOURCE]},
@@ -2013,12 +2035,40 @@ def _matrix_variant_metrics(
         "top1_expected_segment_match_ratio": _ratio(rows, "top1_expected_segment_match"),
         "grounded_answer_ratio": _answer_ratio(rows, "grounded_answer"),
         "candidate_evidence_only_ratio": _answer_ratio(rows, "candidate_evidence_only"),
+        "insufficient_evidence_ratio": _answer_policy_reason_ratio(
+            rows,
+            INSUFFICIENT_EVIDENCE_POLICY_REASONS,
+        ),
         "citation_coverage_ratio": _answer_count_ratio(rows, "citation_count"),
         "answer_citation_precision": _mean_grounding_metric(rows, "citation_precision"),
         "answer_citation_recall": _mean_grounding_metric(rows, "citation_recall"),
         "expected_citation_hit_ratio": _grounding_bool_ratio(rows, "expected_citation_hit"),
         "mean_unsupported_claim_count": _mean_grounding_metric(rows, "unsupported_claim_count"),
         "unsupported_claim_ratio": _grounding_positive_ratio(rows, "unsupported_claim_count"),
+        "unsupported_answer_count": _answer_grounding_positive_count(
+            rows,
+            "unsupported_claim_count",
+        ),
+        "answer_uses_verified_visual_evidence_count": _answer_grounding_positive_count(
+            rows,
+            "verified_visual_citation_count",
+        ),
+        "answer_uses_verified_visual_evidence_ratio": _grounding_bool_ratio(
+            rows,
+            "answer_uses_verified_visual_evidence",
+        ),
+        "answer_uses_candidate_only_visual_evidence_count": _answer_grounding_positive_count(
+            rows,
+            "candidate_only_visual_citation_count",
+        ),
+        "answer_uses_candidate_only_visual_evidence_ratio": _grounding_bool_ratio(
+            rows,
+            "answer_uses_candidate_only_visual_evidence",
+        ),
+        "timestamp_fallback_answer_citation_count": _answer_grounding_positive_count(
+            rows,
+            "timestamp_fallback_citation_count",
+        ),
         "mean_answer_citation_count": _mean_or_none(
             (row.get("answer") or {}).get("citation_count")
             for row in rows
@@ -2541,7 +2591,7 @@ def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | 
         frame_refs = _list_of_dicts(evidence_window.get("frame_refs"))
     object_link_diagnostics = _matrix_object_link_diagnostics(bundle)
     coverage = _matrix_object_evidence_coverage(bundle)
-    return {
+    public_candidate = {
         "ref": f"{source}:{_short_hash(candidate_id)}",
         "source": source,
         "modality": candidate.get("modality"),
@@ -2566,6 +2616,51 @@ def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | 
         "object_evidence_coverage": coverage,
         "modality_aware_rerank": _public_candidate_modality_rerank(candidate),
     }
+    if source == EVIDENCE_UNIT_HIT_SOURCE or candidate.get("evidence_unit_id"):
+        public_candidate["evidence_unit_citation"] = _public_evidence_unit_candidate_citation(
+            candidate
+        )
+    return public_candidate
+
+
+def _public_evidence_unit_candidate_citation(candidate: dict[str, Any]) -> dict[str, Any]:
+    statuses = _mapping(candidate.get("candidate_entity_link_statuses"))
+    status_counts = Counter(str(value).strip().casefold() for value in statuses.values())
+    verified_count = max(
+        len(_string_list(candidate.get("verified_entity_link_ids"))),
+        status_counts.get("verified", 0),
+        int(_mapping(candidate.get("source_quality")).get("verified_link_count") or 0),
+    )
+    fallback_count = max(
+        status_counts.get("timestamp_fallback", 0),
+        int(
+            _mapping(candidate.get("source_quality")).get("timestamp_fallback_link_count")
+            or 0
+        ),
+    )
+    candidate_count = max(
+        status_counts.get("candidate", 0),
+        int(_mapping(candidate.get("source_quality")).get("candidate_link_count") or 0),
+    )
+    evidence_unit_id = str(candidate.get("evidence_unit_id") or "")
+    return {
+        "evidence_unit_ref": f"evu:{_short_hash(evidence_unit_id)}"
+        if evidence_unit_id
+        else None,
+        "target_segment_ref": f"seg:{_short_hash(str(candidate.get('target_segment_id') or ''))}",
+        "source_segment_ref_count": len(_string_list(candidate.get("source_segment_ids"))),
+        "visual_state_ref_count": len(_string_list(candidate.get("visual_state_ids"))),
+        "visual_entity_ref_count": len(_string_list(candidate.get("visual_entity_ids"))),
+        "entity_link_status_counts": {
+            "verified": verified_count,
+            "candidate": candidate_count,
+            "timestamp_fallback": fallback_count,
+        },
+        "verified_visual_citation": verified_count > 0,
+        "candidate_only_visual_citation": bool(candidate_count or fallback_count)
+        and verified_count == 0,
+        "timestamp_fallback_citation": fallback_count > 0,
+    }
 
 
 def _public_answer_summary(answer: dict[str, Any] | None) -> dict[str, Any]:
@@ -2573,6 +2668,7 @@ def _public_answer_summary(answer: dict[str, Any] | None) -> dict[str, Any]:
         return {"enabled": False}
     policy = answer.get("no_answer_policy") if isinstance(answer.get("no_answer_policy"), dict) else {}
     llm = answer.get("llm") if isinstance(answer.get("llm"), dict) else {}
+    citation_quality = _answer_visual_citation_counts(_list_of_dicts(answer.get("citations")))
     return {
         "enabled": True,
         "schema_version": answer.get("schema_version"),
@@ -2581,6 +2677,15 @@ def _public_answer_summary(answer: dict[str, Any] | None) -> dict[str, Any]:
         "citation_count": len(_list_of_dicts(answer.get("citations"))),
         "candidate_evidence_count": len(_list_of_dicts(answer.get("candidate_evidence"))),
         "policy_reason": policy.get("reason"),
+        "insufficient_evidence": policy.get("reason") in INSUFFICIENT_EVIDENCE_POLICY_REASONS,
+        "evidence_unit_citation_count": citation_quality["evidence_unit_citation_count"],
+        "verified_visual_citation_count": citation_quality["verified_visual_citation_count"],
+        "candidate_only_visual_citation_count": citation_quality[
+            "candidate_only_visual_citation_count"
+        ],
+        "timestamp_fallback_citation_count": citation_quality[
+            "timestamp_fallback_citation_count"
+        ],
         "llm_enabled": bool(llm.get("enabled")),
     }
 
@@ -2650,6 +2755,7 @@ def _answer_grounding_metrics(
         expected_ranges=expected_ranges,
         expected_available=expected_available,
     )
+    citation_quality = _answer_visual_citation_counts(citations)
     return {
         "enabled": True,
         "expected_available": expected_available,
@@ -2664,6 +2770,42 @@ def _answer_grounding_metrics(
         if matched_citation_count is not None
         else None,
         "unsupported_claim_count": unsupported_claim_count,
+        **citation_quality,
+        "answer_uses_verified_visual_evidence": citation_quality[
+            "verified_visual_citation_count"
+        ]
+        > 0,
+        "answer_uses_candidate_only_visual_evidence": citation_quality[
+            "candidate_only_visual_citation_count"
+        ]
+        > 0,
+    }
+
+
+def _answer_visual_citation_counts(citations: list[dict[str, Any]]) -> dict[str, int]:
+    evidence_unit_count = 0
+    verified_visual_count = 0
+    candidate_only_count = 0
+    timestamp_fallback_count = 0
+    for citation in citations:
+        evidence_unit = _mapping(citation.get("evidence_unit"))
+        if not evidence_unit:
+            continue
+        evidence_unit_count += 1
+        has_verified = evidence_unit.get("has_verified_visual_evidence") is True
+        has_candidate = evidence_unit.get("has_candidate_visual_evidence") is True
+        has_timestamp = evidence_unit.get("has_timestamp_fallback_evidence") is True
+        if has_verified:
+            verified_visual_count += 1
+        if has_candidate and not has_verified:
+            candidate_only_count += 1
+        if has_timestamp:
+            timestamp_fallback_count += 1
+    return {
+        "evidence_unit_citation_count": evidence_unit_count,
+        "verified_visual_citation_count": verified_visual_count,
+        "candidate_only_visual_citation_count": candidate_only_count,
+        "timestamp_fallback_citation_count": timestamp_fallback_count,
     }
 
 
@@ -3399,6 +3541,22 @@ def _answer_count_ratio(rows: list[dict[str, Any]], key: str) -> float | None:
     )
 
 
+def _answer_policy_reason_ratio(rows: list[dict[str, Any]], reasons: set[str]) -> float | None:
+    answer_rows = [row for row in rows if isinstance(row.get("answer"), dict)]
+    if not answer_rows:
+        return None
+    return round(
+        sum(
+            1.0
+            if str((row.get("answer") or {}).get("policy_reason") or "") in reasons
+            else 0.0
+            for row in answer_rows
+        )
+        / len(answer_rows),
+        4,
+    )
+
+
 def _mean_grounding_metric(rows: list[dict[str, Any]], key: str) -> float | None:
     values = []
     for row in rows:
@@ -3428,6 +3586,18 @@ def _grounding_positive_ratio(rows: list[dict[str, Any]], key: str) -> float | N
     if not values:
         return None
     return round(sum(1.0 if value > 0 else 0.0 for value in values) / len(values), 4)
+
+
+def _answer_grounding_positive_count(rows: list[dict[str, Any]], key: str) -> int:
+    count = 0
+    for row in rows:
+        grounding = row.get("answer_grounding")
+        if not isinstance(grounding, dict):
+            continue
+        value = _optional_float(grounding.get(key))
+        if value is not None and value > 0:
+            count += 1
+    return count
 
 
 def _answer_policy_reason_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -3479,6 +3649,7 @@ def _matrix_privacy_payload() -> dict[str, Any]:
         "candidate_visual_support": "aggregate_counts_only",
         "verified_object_alignment": "aggregate_counts_only",
         "object_evidence_coverage": "aggregate_counts_only",
+        "evidence_unit_answer_citations": "aggregate_counts_and_public_statuses_only",
         "target_rank_diagnostics": "rank_buckets_and_match_flags_only",
         "skip_reasons": "public_safe_reason_codes_only",
         "raw_response_in_public_output": False,
@@ -4332,11 +4503,18 @@ def _write_metrics_summary_csv(path: Path, metrics: dict[str, Any]) -> None:
         "target_found_in_top_k_ratio",
         "grounded_answer_ratio",
         "citation_coverage_ratio",
+        "insufficient_evidence_ratio",
         "answer_citation_precision",
         "answer_citation_recall",
         "expected_citation_hit_ratio",
         "mean_unsupported_claim_count",
         "unsupported_claim_ratio",
+        "unsupported_answer_count",
+        "answer_uses_verified_visual_evidence_count",
+        "answer_uses_verified_visual_evidence_ratio",
+        "answer_uses_candidate_only_visual_evidence_count",
+        "answer_uses_candidate_only_visual_evidence_ratio",
+        "timestamp_fallback_answer_citation_count",
         "mean_processing_time_ms",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -4428,11 +4606,28 @@ def _metrics_summary_row(
         "target_found_in_top_k_ratio": item.get("target_found_in_top_k_ratio"),
         "grounded_answer_ratio": item.get("grounded_answer_ratio"),
         "citation_coverage_ratio": item.get("citation_coverage_ratio"),
+        "insufficient_evidence_ratio": item.get("insufficient_evidence_ratio"),
         "answer_citation_precision": item.get("answer_citation_precision"),
         "answer_citation_recall": item.get("answer_citation_recall"),
         "expected_citation_hit_ratio": item.get("expected_citation_hit_ratio"),
         "mean_unsupported_claim_count": item.get("mean_unsupported_claim_count"),
         "unsupported_claim_ratio": item.get("unsupported_claim_ratio"),
+        "unsupported_answer_count": item.get("unsupported_answer_count"),
+        "answer_uses_verified_visual_evidence_count": item.get(
+            "answer_uses_verified_visual_evidence_count"
+        ),
+        "answer_uses_verified_visual_evidence_ratio": item.get(
+            "answer_uses_verified_visual_evidence_ratio"
+        ),
+        "answer_uses_candidate_only_visual_evidence_count": item.get(
+            "answer_uses_candidate_only_visual_evidence_count"
+        ),
+        "answer_uses_candidate_only_visual_evidence_ratio": item.get(
+            "answer_uses_candidate_only_visual_evidence_ratio"
+        ),
+        "timestamp_fallback_answer_citation_count": item.get(
+            "timestamp_fallback_answer_citation_count"
+        ),
         "mean_processing_time_ms": item.get(
             "mean_processing_time_ms",
             item.get("mean_elapsed_time_ms"),

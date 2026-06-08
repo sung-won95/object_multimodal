@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
-from oarag.retrieval.answer import CANDIDATE_EVIDENCE_ONLY, GROUNDED_ANSWER, ask_project
+from oarag.retrieval.answer import (
+    CANDIDATE_EVIDENCE_ONLY,
+    GROUNDED_ANSWER,
+    ask_project,
+    compose_answer,
+)
 
 
 class FakeClient:
@@ -241,6 +246,157 @@ def test_ask_project_returns_candidate_evidence_only_when_query_is_weakly_ground
     assert "not strong enough" in answer["answer"]
 
 
+def test_compose_answer_marks_verified_evidence_unit_visual_citation() -> None:
+    response = {
+        "query": "loss curve slope",
+        "index_kind": "evidence_unit",
+        "bundles": [
+            _evidence_unit_bundle(
+                evidence_unit_id="evu_loss_verified",
+                target_segment_id="seg_loss",
+                source_segment_ids=["seg_intro", "seg_loss"],
+                transcript_window_text="The loss curve slope decreases after training.",
+                visual_state_ids=["vstate_loss"],
+                visual_entity_ids=["ent_loss_curve"],
+                verified_entity_link_ids=["link_verified"],
+                candidate_entity_link_ids=["link_verified"],
+                candidate_entity_link_statuses={"link_verified": "verified"},
+                source_quality={
+                    "has_visual_state": True,
+                    "has_visual_entity": True,
+                    "has_vlm_entity": True,
+                    "has_verified_link": True,
+                    "candidate_link_count": 0,
+                    "timestamp_fallback_link_count": 0,
+                    "verified_link_count": 1,
+                },
+            )
+        ],
+    }
+
+    answer = compose_answer(response)
+
+    assert answer["answer_type"] == GROUNDED_ANSWER
+    citation = answer["citations"][0]
+    evidence_unit = citation["evidence_unit"]
+    assert evidence_unit["evidence_unit_id"] == "evu_loss_verified"
+    assert evidence_unit["transcript_window_ref"] == {
+        "target_segment_id": "seg_loss",
+        "source_segment_ids": ["seg_intro", "seg_loss"],
+        "source_segment_count": 2,
+    }
+    assert evidence_unit["visual_state_refs"] == [{"visual_state_id": "vstate_loss"}]
+    assert evidence_unit["visual_entity_refs"] == [{"visual_entity_id": "ent_loss_curve"}]
+    assert evidence_unit["entity_link_status_counts"] == {
+        "verified": 1,
+        "candidate": 0,
+        "timestamp_fallback": 0,
+    }
+    assert evidence_unit["visual_support_level"] == "verified"
+    assert evidence_unit["has_verified_visual_evidence"] is True
+    assert evidence_unit["paper_claim_eligible"] is True
+    assert answer["candidate_evidence"][0]["evidence_unit"]["visual_support_level"] == "verified"
+    assert answer["no_answer_policy"]["signals"]["evidence_unit_verified_visual_evidence"] is True
+
+
+def test_compose_answer_abstains_for_candidate_only_visual_evidence_unit() -> None:
+    response = {
+        "query": "loss curve slope",
+        "index_kind": "evidence_unit",
+        "bundles": [
+            _evidence_unit_bundle(
+                evidence_unit_id="evu_candidate_visual",
+                target_segment_id="seg_visual_only",
+                transcript_window_text="",
+                evidence_text="Visual: loss curve slope appears in the chart.",
+                visual_state_ids=["vstate_candidate"],
+                visual_entity_ids=["ent_candidate"],
+                verified_entity_link_ids=[],
+                candidate_entity_link_ids=["link_candidate"],
+                candidate_entity_link_statuses={"link_candidate": "candidate"},
+                source_quality={
+                    "has_visual_state": True,
+                    "has_visual_entity": True,
+                    "has_vlm_entity": False,
+                    "has_verified_link": False,
+                    "candidate_link_count": 1,
+                    "timestamp_fallback_link_count": 0,
+                    "verified_link_count": 0,
+                },
+            )
+        ],
+    }
+
+    answer = compose_answer(response)
+
+    assert answer["answer_type"] == CANDIDATE_EVIDENCE_ONLY
+    assert answer["claims"] == []
+    assert answer["no_answer_policy"]["reason"] == "candidate_visual_evidence_only"
+    signals = answer["no_answer_policy"]["signals"]
+    assert signals["matched_query_terms"] == ["curve", "loss", "slope"]
+    assert signals["evidence_unit_candidate_only_visual_evidence"] is True
+    citation = answer["citations"][0]
+    evidence_unit = citation["evidence_unit"]
+    assert evidence_unit["visual_support_level"] == "candidate"
+    assert evidence_unit["has_verified_visual_evidence"] is False
+    assert evidence_unit["has_candidate_visual_evidence"] is True
+    assert evidence_unit["paper_claim_eligible"] is False
+    assert evidence_unit["entity_link_status_counts"] == {
+        "verified": 0,
+        "candidate": 1,
+        "timestamp_fallback": 0,
+    }
+
+
+def test_compose_answer_abstains_for_timestamp_fallback_evidence_unit() -> None:
+    response = {
+        "query": "loss curve slope",
+        "index_kind": "evidence_unit",
+        "bundles": [
+            _evidence_unit_bundle(
+                evidence_unit_id="evu_timestamp_fallback",
+                target_segment_id="seg_timestamp_only",
+                transcript_window_text="",
+                evidence_text="Timestamp-only fallback near a loss curve slope chart.",
+                visual_state_ids=["vstate_fallback"],
+                visual_entity_ids=["ent_fallback"],
+                verified_entity_link_ids=[],
+                candidate_entity_link_ids=["link_fallback"],
+                candidate_entity_link_statuses={"link_fallback": "timestamp_fallback"},
+                source_quality={
+                    "has_visual_state": True,
+                    "has_visual_entity": True,
+                    "has_vlm_entity": False,
+                    "has_verified_link": False,
+                    "has_timestamp_fallback_link": True,
+                    "candidate_link_count": 0,
+                    "timestamp_fallback_link_count": 1,
+                    "verified_link_count": 0,
+                },
+            )
+        ],
+    }
+
+    answer = compose_answer(response)
+
+    assert answer["answer_type"] == CANDIDATE_EVIDENCE_ONLY
+    assert answer["claims"] == []
+    assert answer["no_answer_policy"]["reason"] == "timestamp_fallback_evidence_only"
+    signals = answer["no_answer_policy"]["signals"]
+    assert signals["evidence_unit_timestamp_fallback_only"] is True
+    citation = answer["citations"][0]
+    evidence_unit = citation["evidence_unit"]
+    assert evidence_unit["visual_support_level"] == "timestamp_fallback"
+    assert evidence_unit["has_verified_visual_evidence"] is False
+    assert evidence_unit["has_timestamp_fallback_evidence"] is True
+    assert evidence_unit["paper_claim_eligible"] is False
+    assert evidence_unit["entity_link_status_counts"] == {
+        "verified": 0,
+        "candidate": 0,
+        "timestamp_fallback": 1,
+    }
+
+
 def _write_grounded_project(project_dir: Path) -> None:
     _write_jsonl(
         project_dir / "segments" / "lecture_segments_aligned.jsonl",
@@ -305,6 +461,68 @@ def _segment(
         "timestamp_center": (start_time + end_time) / 2,
         "transcript_text": transcript_text,
         "frame_refs": frame_refs,
+    }
+
+
+def _evidence_unit_bundle(
+    *,
+    evidence_unit_id: str,
+    target_segment_id: str,
+    transcript_window_text: str,
+    evidence_text: str | None = None,
+    source_segment_ids: list[str] | None = None,
+    visual_state_ids: list[str] | None = None,
+    visual_entity_ids: list[str] | None = None,
+    verified_entity_link_ids: list[str] | None = None,
+    candidate_entity_link_ids: list[str] | None = None,
+    candidate_entity_link_statuses: dict[str, str] | None = None,
+    source_quality: dict | None = None,
+) -> dict:
+    candidate = {
+        "source": "evidence_unit",
+        "retrieval_mode": "evidence_unit",
+        "evidence_unit_id": evidence_unit_id,
+        "target_segment_id": target_segment_id,
+        "segment_id": target_segment_id,
+        "source_segment_ids": source_segment_ids or [target_segment_id],
+        "video_id": "video",
+        "start_time": 10.0,
+        "end_time": 14.0,
+        "timestamp_center": 12.0,
+        "rank": 1,
+        "score": 0.9,
+        "transcript_window_text": transcript_window_text,
+        "evidence_text": evidence_text,
+        "visual_state_ids": visual_state_ids or [],
+        "visual_entity_ids": visual_entity_ids or [],
+        "verified_entity_link_ids": verified_entity_link_ids or [],
+        "candidate_entity_link_ids": candidate_entity_link_ids or [],
+        "candidate_entity_link_statuses": candidate_entity_link_statuses or {},
+        "source_quality": source_quality or {},
+    }
+    return {
+        "rank": 1,
+        "candidate": candidate,
+        "evidence_window": {
+            "target_segment_id": target_segment_id,
+            "target_segment": {
+                "segment_id": target_segment_id,
+                "video_id": "video",
+                "start_time": 10.0,
+                "end_time": 14.0,
+                "timestamp_center": 12.0,
+                "transcript_text": transcript_window_text,
+            },
+        },
+        "retrieval_sources": [
+            {
+                "source": "evidence_unit",
+                "retrieval_mode": "evidence_unit",
+                "evidence_unit_id": evidence_unit_id,
+                "target_segment_id": target_segment_id,
+                "source_segment_ids": source_segment_ids or [target_segment_id],
+            }
+        ],
     }
 
 

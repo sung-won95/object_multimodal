@@ -865,6 +865,21 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
         "modality_aware_rerank"
     ]["score_component_presence_counts"]["verified_link"] == 1
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "answer_uses_candidate_only_visual_evidence_count"
+    ] == 1
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "answer_uses_verified_visual_evidence_count"
+    ] == 1
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "answer_uses_verified_visual_evidence_count"
+    ] == 1
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "answer_uses_candidate_only_visual_evidence_count"
+    ] == 1
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
+        "answer_uses_verified_visual_evidence_ratio"
+    ] == 1.0
     assert suite["variant_metrics"]["evidence_unit_candidate"]["skipped_count"] == 0
     assert suite["variant_metrics"]["evidence_unit_candidate"][
         "candidate_link_signal_counts"
@@ -950,6 +965,12 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     )
     assert evidence_candidate_row["status"] == "queried"
     assert evidence_candidate_row["top_candidate"]["source"] == "evidence_unit"
+    assert evidence_candidate_row["top_candidate"]["evidence_unit_citation"][
+        "candidate_only_visual_citation"
+    ] is True
+    assert evidence_candidate_row["top_candidate"]["evidence_unit_citation"][
+        "verified_visual_citation"
+    ] is False
     assert evidence_candidate_row["verified_object_alignment"]["verified_link_count"] == 0
     assert evidence_candidate_row["candidate_visual_support"]["candidate_link_signal_counts"][
         "temporal_overlap"
@@ -958,7 +979,18 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         "visual_text_overlap"
     ] == 1
     assert evidence_candidate_row["target_rank_bucket"] == "top5"
+    assert evidence_candidate_row["answer"]["candidate_only_visual_citation_count"] == 1
+    assert evidence_candidate_row["answer"]["verified_visual_citation_count"] == 1
+    assert evidence_candidate_row["answer_grounding"][
+        "candidate_only_visual_citation_count"
+    ] == 1
+    assert evidence_candidate_row["answer_grounding"][
+        "verified_visual_citation_count"
+    ] == 1
     assert evidence_verified_row["verified_object_alignment"]["verified_link_count"] == 1
+    assert evidence_verified_row["top_candidate"]["evidence_unit_citation"][
+        "verified_visual_citation"
+    ] is True
     assert evidence_verified_row["candidate_visual_support"]["candidate_link_signal_counts"][
         "vlm_object_visual_description_overlap"
     ] == 1
@@ -970,6 +1002,11 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     ] == 1
     assert evidence_verified_row["target_rank_bucket"] == "top1"
     assert evidence_verified_row["object_evidence_coverage"]["has_vlm_entity"] is True
+    assert evidence_verified_row["answer"]["verified_visual_citation_count"] == 1
+    assert evidence_verified_row["answer_grounding"]["answer_uses_verified_visual_evidence"] is True
+    assert evidence_verified_row["answer_grounding"][
+        "candidate_only_visual_citation_count"
+    ] == 1
     assert evidence_quality_row["config"]["evidence_unit_rerank"] == "modality_aware"
     assert evidence_quality_row["modality_aware_rerank"]["enabled"] is True
     assert evidence_quality_row["modality_aware_rerank"]["strategy"] == "modality_aware"
@@ -984,6 +1021,8 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     metrics_csv = run.metrics_csv_path.read_text(encoding="utf-8")
     assert "variant,segment_lexical" in metrics_csv
     assert "answer_citation_precision" in metrics_csv
+    assert "answer_uses_verified_visual_evidence_count" in metrics_csv
+    assert "answer_uses_candidate_only_visual_evidence_count" in metrics_csv
     assert "verified_object_alignment_ratio" in metrics_csv
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "Retrieval/Answer Matrix" in summary
