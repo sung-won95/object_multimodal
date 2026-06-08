@@ -123,9 +123,15 @@ class VlmJsonlVisualEntityExtractor:
             visual_description = _optional_str(
                 entity_payload.get("visual_description")
             ) or _optional_str(entity_payload.get("description"))
+            detected_text = _optional_str(entity_payload.get("detected_text"))
             text = _optional_str(entity_payload.get("text"))
             if text is None:
-                text = visual_description or _optional_str(entity_payload.get("label")) or ""
+                text = (
+                    detected_text
+                    or visual_description
+                    or _optional_str(entity_payload.get("label"))
+                    or ""
+                )
             entity_id = _optional_str(entity_payload.get("entity_id"))
             if entity_id is None:
                 entity_id = f"ent_{slugify(frame.frame_id)}_{entity_index:04d}"
@@ -144,6 +150,7 @@ class VlmJsonlVisualEntityExtractor:
                 confidence=_optional_float(entity_payload.get("confidence")),
                 source=source,
                 visual_description=visual_description,
+                detected_text=detected_text,
                 position=_coerce_mapping(entity_payload.get("position")),
                 relations=_coerce_relations(entity_payload.get("relations")),
                 parser_version=parser_version,
@@ -216,6 +223,7 @@ class VlmObservationsVisualEntityExtractor:
                     confidence=observation.confidence,
                     source=source,
                     visual_description=visual_description,
+                    detected_text=detected_text,
                     position=observation.position,
                     relations=observation.relations,
                     parser_version=(
@@ -533,7 +541,9 @@ def _entity_duplicate_key(entity: VisualEntity) -> tuple[Any, ...]:
 
 
 def _normalize_visual_entity_text(entity: VisualEntity) -> str:
-    return _normalize_ocr_text(entity.text or entity.visual_description or "")
+    return _normalize_ocr_text(
+        entity.text or entity.visual_description or entity.detected_text or ""
+    )
 
 
 def _normalize_ocr_text(text: str) -> str:

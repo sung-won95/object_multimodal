@@ -518,6 +518,7 @@ def test_extract_visual_entities_vlm_observations_maps_success_observations(
             "confidence": 0.92,
             "source": "vlm:offline-vlm",
             "visual_description": "A labeled covariance matrix diagram",
+            "detected_text": "Covariance Matrix",
             "position": {"region": "center", "x": 0.5, "y": 0.4},
             "relations": [{"type": "contains", "target": "matrix_label"}],
             "parser_version": "observation-parser-v2",
@@ -577,6 +578,7 @@ def test_run_vlm_to_extract_visual_entities_vlm_observations_smoke(tmp_path: Pat
     assert rows[0]["source"] == "vlm:fixture-vlm"
     assert rows[0]["text"] == "E = mc^2"
     assert rows[0]["visual_description"] == "A displayed equation"
+    assert rows[0]["detected_text"] == "E = mc^2"
 
 
 def test_vlm_observations_backend_rejects_unknown_frame_id(tmp_path: Path) -> None:
