@@ -6,6 +6,14 @@ from typing import Any, Iterable
 
 from oarag.core.io import write_json, write_jsonl
 from oarag.core.schemas import slugify
+from oarag.graph.concept_graph_schema import (
+    CONCEPT_GRAPH_ARTIFACT_RELATIVE_PATH,
+    TIMESTAMP_ONLY_SOURCE_SIGNALS,
+    ConceptGraphConceptNode,
+    ConceptGraphRecord,
+    ConceptGraphRelationEdge,
+    load_concept_graph_artifact,
+)
 from oarag.retrieval.evidence import (
     resolve_window_config,
     segment_sort_key,
@@ -20,6 +28,7 @@ VISUAL_STATES_ARTIFACT_RELATIVE_PATH = Path("manifests") / "visual_states.jsonl"
 VISUAL_STATES_SCHEMA_VERSION = "oarag-visual-states-jsonl-v1"
 VISUAL_STATE_COVERAGE_SCHEMA_VERSION = "oarag-visual-state-coverage-v1"
 LINK_DIAGNOSTICS_SCHEMA_VERSION = "oarag-object-link-diagnostics-public-v1"
+CONCEPT_FIELD_COVERAGE_SCHEMA_VERSION = "oarag-evidence-unit-concept-field-coverage-v1"
 DEFAULT_STATE_PADDING_SECONDS = 15.0
 VISUAL_STATE_PUBLIC_NOTE = (
     "Visual states are candidate interval support derived from sampled-frame midpoints "
@@ -31,6 +40,11 @@ LINK_DIAGNOSTICS_PUBLIC_NOTE = (
     "Candidate visual support is reported separately from verified object alignment. "
     "Timestamp fallback links are candidate/fallback evidence only and are never "
     "counted as verified object alignment unless an explicit verified field is present."
+)
+CONCEPT_FIELD_PUBLIC_NOTE = (
+    "Concept field coverage reports public-safe counts only. Concept graph labels, "
+    "aliases, and relation text may enrich local evidence-unit search, but timestamp-only "
+    "concept relation signals remain candidate-only and are not verified object alignment."
 )
 CANDIDATE_LINK_SIGNAL_KEYS = (
     "temporal_overlap",
@@ -139,6 +153,7 @@ def build_project_evidence_units(
     visual_states_output: Path | None = None,
     visual_entities: Path | None = None,
     entity_links: Path | None = None,
+    concept_graph: Path | None = None,
     manifest_path: Path | None = None,
     window_seconds: float | None = None,
     neighbor_count: int = 1,
@@ -190,6 +205,12 @@ def build_project_evidence_units(
         default=resolved_project_dir / "manifests" / "entity_links.jsonl",
         artifact_name="entity links",
     )
+    concept_graph_path = _optional_existing_project_path(
+        project_dir=resolved_project_dir,
+        path=concept_graph,
+        default=resolved_project_dir / CONCEPT_GRAPH_ARTIFACT_RELATIVE_PATH,
+        artifact_name="concept graph",
+    )
     resolved_output_path = _resolve_project_output_path(
         project_dir=resolved_project_dir,
         path=output_path,
@@ -205,6 +226,11 @@ def build_project_evidence_units(
     frame_rows = list(iter_jsonl_documents(frames_path)) if frames_path else []
     visual_entity_rows = list(iter_jsonl_documents(visual_entities_path)) if visual_entities_path else []
     entity_link_rows = list(iter_jsonl_documents(entity_links_path)) if entity_links_path else []
+    concept_graph_records = (
+        load_concept_graph_artifact(concept_graph_path)
+        if concept_graph_path is not None
+        else []
+    )
     if visual_states_path is not None:
         visual_state_rows = load_visual_states_artifact(visual_states_path)
         visual_state_source = "external_visual_states_artifact"
@@ -224,6 +250,7 @@ def build_project_evidence_units(
         visual_states=visual_state_rows,
         visual_entities=visual_entity_rows,
         entity_links=entity_link_rows,
+        concept_graph_records=concept_graph_records,
         window_seconds=window_seconds,
         neighbor_count=neighbor_count,
         previous_neighbor_count=previous_neighbor_count,
@@ -239,10 +266,22 @@ def build_project_evidence_units(
         "frames_total": len(frame_rows),
         "visual_entities_total": len(visual_entity_rows),
         "entity_links_total": len(entity_link_rows),
+        "concept_graph_records_total": len(concept_graph_records),
+        "concept_nodes_total": sum(
+            1 for record in concept_graph_records if isinstance(record, ConceptGraphConceptNode)
+        ),
+        "concept_relation_edges_total": sum(
+            1 for record in concept_graph_records if isinstance(record, ConceptGraphRelationEdge)
+        ),
         "evidence_units_total": len(documents),
         "units_with_visual_state": sum(1 for document in documents if document["source_quality"]["has_visual_state"]),
         "units_with_visual_entity": sum(1 for document in documents if document["source_quality"]["has_visual_entity"]),
         "units_with_vlm_entity": sum(1 for document in documents if document["source_quality"]["has_vlm_entity"]),
+        "units_with_concept": sum(1 for document in documents if document["source_quality"]["has_concept"]),
+        "units_with_concept_relation": sum(
+            1 for document in documents if document["source_quality"]["has_concept_relation"]
+        ),
+        "units_with_concept_search_text": sum(1 for document in documents if _has_concept_search_text(document)),
         "units_with_candidate_link": sum(
             1
             for document in documents
@@ -273,6 +312,10 @@ def build_project_evidence_units(
         ),
         "candidate_links": sum(document["source_quality"]["candidate_link_count"] for document in documents),
         "verified_links": sum(document["source_quality"]["verified_link_count"] for document in documents),
+        "concept_mentions": sum(document["source_quality"]["concept_count"] for document in documents),
+        "concept_relation_mentions": sum(
+            document["source_quality"]["concept_relation_count"] for document in documents
+        ),
     }
     visual_state_coverage = _visual_state_coverage_summary(
         visual_states=visual_state_rows,
@@ -282,6 +325,11 @@ def build_project_evidence_units(
         min_visual_states=visual_state_min_total,
     )
     link_diagnostics = _evidence_unit_link_diagnostics(documents)
+    concept_field_coverage = _concept_field_coverage_summary(
+        documents=documents,
+        concept_graph_records=concept_graph_records,
+        source="concept_graph_artifact" if concept_graph_path is not None else "not_available",
+    )
     summary = {
         "project_dir": str(resolved_project_dir),
         "paths": {
@@ -294,6 +342,7 @@ def build_project_evidence_units(
             ),
             "visual_entities": str(visual_entities_path) if visual_entities_path else None,
             "entity_links": str(entity_links_path) if entity_links_path else None,
+            "concept_graph": str(concept_graph_path) if concept_graph_path else None,
             "evidence_units": str(resolved_output_path),
             "project_manifest": str(resolved_manifest_path),
         },
@@ -320,6 +369,7 @@ def build_project_evidence_units(
         "counts": counts,
         "alignment_status_counts": _status_counts(documents),
         "link_diagnostics": link_diagnostics,
+        "concept_field_coverage": concept_field_coverage,
     }
     _update_project_manifest(
         manifest_path=resolved_manifest_path,
@@ -340,6 +390,7 @@ def build_evidence_unit_documents(
     visual_states: list[dict[str, Any]] | None = None,
     visual_entities: list[dict[str, Any]] | None = None,
     entity_links: list[dict[str, Any]] | None = None,
+    concept_graph_records: list[ConceptGraphRecord] | None = None,
     window_seconds: float | None = None,
     neighbor_count: int = 1,
     previous_neighbor_count: int | None = None,
@@ -365,6 +416,9 @@ def build_evidence_unit_documents(
     entities_by_frame_id = _group_by_text(visual_entities or [], "frame_id")
     entities_by_id = {str(entity.get("entity_id")): entity for entity in visual_entities or []}
     links_by_segment_id = _group_by_text(entity_links or [], "segment_id")
+    concept_context_by_evidence_unit = _concept_context_by_evidence_unit(
+        concept_graph_records or []
+    )
     window_config = _window_config(
         window_seconds=window_seconds,
         neighbor_count=neighbor_count,
@@ -398,6 +452,7 @@ def build_evidence_unit_documents(
                 entities_by_frame_id=entities_by_frame_id,
                 entities_by_id=entities_by_id,
                 links_by_segment_id=links_by_segment_id,
+                concept_context_by_evidence_unit=concept_context_by_evidence_unit,
                 window_config=window_config,
             )
         )
@@ -693,12 +748,14 @@ def _evidence_unit_document(
     entities_by_frame_id: dict[str, list[dict[str, Any]]],
     entities_by_id: dict[str, dict[str, Any]],
     links_by_segment_id: dict[str, list[dict[str, Any]]],
+    concept_context_by_evidence_unit: dict[str, dict[str, Any]],
     window_config: dict[str, Any],
 ) -> dict[str, Any]:
     source_segment_ids = [_text(segment.get("segment_id")) for segment in window_segments]
     source_segment_ids = [segment_id for segment_id in source_segment_ids if segment_id]
     start_time, end_time = _window_bounds(window_segments)
     target_segment_id = _text(target.get("segment_id"))
+    evidence_unit_id = f"evu_{slugify(target_segment_id)}"
     video_id = _text(target.get("video_id"))
     window_state_ids = _state_ids_for_window(
         visual_states,
@@ -730,12 +787,15 @@ def _evidence_unit_document(
     ]
     transcript_window_text = _transcript_window_text(window_segments)
     visual_text = _visual_summary_text(window_states=window_states, visual_entities=visual_entity_rows)
+    concept_context = concept_context_by_evidence_unit.get(evidence_unit_id) or _empty_concept_context()
+    concept_text = _concept_summary_text(concept_context)
     evidence_text = _compact_text(
         " ".join(
             part
             for part in (
                 f"Transcript: {transcript_window_text}" if transcript_window_text else "",
                 f"Visual: {visual_text}" if visual_text else "",
+                f"Concepts: {concept_text}" if concept_text else "",
             )
             if part
         )
@@ -745,9 +805,10 @@ def _evidence_unit_document(
         visual_entities=visual_entity_rows,
         links=window_links,
         link_statuses=link_statuses,
+        concept_context=concept_context,
     )
     return {
-        "evidence_unit_id": f"evu_{slugify(target_segment_id)}",
+        "evidence_unit_id": evidence_unit_id,
         "project_id": _text(target.get("project_id")),
         "video_id": video_id,
         "target_segment_id": target_segment_id,
@@ -764,9 +825,15 @@ def _evidence_unit_document(
         "candidate_entity_link_statuses": {
             link_id: status for link_id, status in link_statuses.items() if status != "verified"
         },
+        "concept_ids": concept_context["concept_ids"],
+        "concept_labels": concept_context["concept_labels"],
+        "concept_aliases": concept_context["concept_aliases"],
+        "concept_relation_text": concept_context["concept_relation_text"],
+        "concepts": concept_context["concepts"],
+        "concept_relations": concept_context["concept_relations"],
         "modality": ["speech", "visual"] if source_quality["has_visual_state"] or source_quality["has_visual_entity"] else ["speech"],
         "evidence_text": evidence_text,
-        "semantic_text": _compact_text(f"{transcript_window_text} {visual_text}"),
+        "semantic_text": _compact_text(f"{transcript_window_text} {visual_text} {concept_text}"),
         "alignment_score": _alignment_score(window_links, link_statuses),
         "alignment_status": _alignment_status(source_quality),
         "source_quality": source_quality,
@@ -873,6 +940,7 @@ def _source_quality(
     visual_entities: list[dict[str, Any]],
     links: list[dict[str, Any]],
     link_statuses: dict[str, str],
+    concept_context: dict[str, Any],
 ) -> dict[str, Any]:
     has_vlm_entity = any(_is_vlm_entity(entity) for entity in visual_entities)
     visual_state_detected_text_count = sum(
@@ -904,17 +972,32 @@ def _source_quality(
         or timestamp_fallback_link_count
     )
     has_verified_object_alignment = verified_link_count > 0
+    concept_count = len(_string_list(concept_context.get("concept_ids")))
+    concept_relation_count = len(_list_of_dicts(concept_context.get("concept_relations")))
+    timestamp_only_concept_relation_count = sum(
+        1
+        for relation in _list_of_dicts(concept_context.get("concept_relations"))
+        if relation.get("timestamp_only_candidate") is True
+    )
     return {
         "has_visual_state": bool(visual_states),
         "has_visual_entity": bool(visual_entities),
         "has_vlm_entity": has_vlm_entity,
+        "has_concept": concept_count > 0,
+        "has_concept_relation": concept_relation_count > 0,
         "has_verified_link": any(status == "verified" for status in link_statuses.values()),
         "uses_ocr_only": bool(visual_entities) and not has_vlm_entity,
         "has_detected_text": bool(visual_state_detected_text_count or visual_entity_detected_text_count),
         "has_visual_description": bool(visual_description_count),
+        "has_concept_search_text": _has_concept_search_text(concept_context),
         "visual_state_detected_text_count": visual_state_detected_text_count,
         "visual_entity_detected_text_count": visual_entity_detected_text_count,
         "visual_description_count": visual_description_count,
+        "concept_count": concept_count,
+        "concept_label_count": len(_string_list(concept_context.get("concept_labels"))),
+        "concept_alias_count": len(_string_list(concept_context.get("concept_aliases"))),
+        "concept_relation_count": concept_relation_count,
+        "timestamp_only_concept_relation_count": timestamp_only_concept_relation_count,
         "has_timestamp_fallback_link": any(
             status == "timestamp_fallback" for status in link_statuses.values()
         ),
@@ -938,6 +1021,15 @@ def _source_quality(
             "verified_link_source_counts": verified_source_counts,
             "timestamp_fallback_counted_as_verified": False,
             "paper_claim_eligible": has_verified_object_alignment,
+        },
+        "concept_field_coverage": {
+            "has_concept_search_text": _has_concept_search_text(concept_context),
+            "concept_count": concept_count,
+            "concept_label_count": len(_string_list(concept_context.get("concept_labels"))),
+            "concept_alias_count": len(_string_list(concept_context.get("concept_aliases"))),
+            "concept_relation_count": concept_relation_count,
+            "timestamp_only_concept_relation_count": timestamp_only_concept_relation_count,
+            "timestamp_only_counted_as_verified_object_alignment": False,
         },
     }
 
@@ -1132,6 +1224,68 @@ def _evidence_unit_link_diagnostics(documents: list[dict[str, Any]]) -> dict[str
     }
 
 
+def _concept_field_coverage_summary(
+    *,
+    documents: list[dict[str, Any]],
+    concept_graph_records: list[ConceptGraphRecord],
+    source: str,
+) -> dict[str, Any]:
+    evidence_units_total = len(documents)
+    units_with_concepts = 0
+    units_with_relations = 0
+    units_with_search_text = 0
+    concept_mentions = 0
+    relation_mentions = 0
+    timestamp_only_relation_mentions = 0
+    for document in documents:
+        source_quality = _mapping(document.get("source_quality"))
+        concept_count = int(source_quality.get("concept_count") or len(_string_list(document.get("concept_ids"))))
+        relation_count = int(
+            source_quality.get("concept_relation_count")
+            or len(_list_of_dicts(document.get("concept_relations")))
+        )
+        timestamp_only_relation_count = int(
+            source_quality.get("timestamp_only_concept_relation_count") or 0
+        )
+        concept_mentions += concept_count
+        relation_mentions += relation_count
+        timestamp_only_relation_mentions += timestamp_only_relation_count
+        if concept_count:
+            units_with_concepts += 1
+        if relation_count:
+            units_with_relations += 1
+        if _has_concept_search_text(document):
+            units_with_search_text += 1
+    concept_nodes_total = sum(
+        1 for record in concept_graph_records if isinstance(record, ConceptGraphConceptNode)
+    )
+    relation_edges_total = sum(
+        1 for record in concept_graph_records if isinstance(record, ConceptGraphRelationEdge)
+    )
+    return {
+        "schema_version": CONCEPT_FIELD_COVERAGE_SCHEMA_VERSION,
+        "source": source,
+        "concept_graph_loaded": bool(concept_graph_records),
+        "concept_graph_records_total": len(concept_graph_records),
+        "concept_nodes_total": concept_nodes_total,
+        "concept_relation_edges_total": relation_edges_total,
+        "evidence_units_total": evidence_units_total,
+        "evidence_units_with_concepts": units_with_concepts,
+        "evidence_units_with_concept_relations": units_with_relations,
+        "evidence_units_with_concept_search_text": units_with_search_text,
+        "unit_concept_coverage_ratio": _ratio_or_none(units_with_concepts, evidence_units_total),
+        "unit_concept_relation_coverage_ratio": _ratio_or_none(
+            units_with_relations,
+            evidence_units_total,
+        ),
+        "concept_mentions": concept_mentions,
+        "concept_relation_mentions": relation_mentions,
+        "timestamp_only_concept_relation_mentions": timestamp_only_relation_mentions,
+        "timestamp_only_counted_as_verified_object_alignment": False,
+        "public_note": CONCEPT_FIELD_PUBLIC_NOTE,
+    }
+
+
 def _add_counts(target: dict[str, int], source: dict[str, Any]) -> None:
     for key in target:
         target[key] += int(source.get(key) or 0)
@@ -1198,6 +1352,173 @@ def _visual_summary_text(
             ]
         )
     return _compact_text(" ".join(_unique_text_values(values)))
+
+
+def _concept_context_by_evidence_unit(
+    records: list[ConceptGraphRecord],
+) -> dict[str, dict[str, Any]]:
+    if not records:
+        return {}
+
+    concepts_by_id = {
+        record.concept_id: record
+        for record in records
+        if isinstance(record, ConceptGraphConceptNode)
+    }
+    context_by_unit: dict[str, dict[str, Any]] = {}
+    seen_concepts: dict[str, set[str]] = {}
+    seen_relations: dict[str, set[str]] = {}
+
+    def context_for(evidence_unit_id: str) -> dict[str, Any]:
+        context = context_by_unit.setdefault(evidence_unit_id, _empty_concept_context())
+        seen_concepts.setdefault(evidence_unit_id, set())
+        seen_relations.setdefault(evidence_unit_id, set())
+        return context
+
+    def add_concept(evidence_unit_id: str, concept: ConceptGraphConceptNode) -> None:
+        if not evidence_unit_id:
+            return
+        context = context_for(evidence_unit_id)
+        seen = seen_concepts[evidence_unit_id]
+        if concept.concept_id not in seen:
+            seen.add(concept.concept_id)
+            context["concepts"].append(_concept_context(concept))
+        context["concept_ids"] = _unique_text_values([*context["concept_ids"], concept.concept_id])
+        context["concept_labels"] = _unique_text_values([*context["concept_labels"], concept.label])
+        context["concept_aliases"] = _unique_text_values([*context["concept_aliases"], concept.aliases])
+
+    for record in records:
+        if not isinstance(record, ConceptGraphConceptNode):
+            continue
+        for evidence_unit_id in record.source_evidence_unit_ids:
+            add_concept(evidence_unit_id, record)
+
+    for record in records:
+        if not isinstance(record, ConceptGraphRelationEdge):
+            continue
+        relation_context = _concept_relation_context(record, concepts_by_id)
+        for evidence_unit_id in record.evidence_unit_ids:
+            if not evidence_unit_id:
+                continue
+            context = context_for(evidence_unit_id)
+            seen = seen_relations[evidence_unit_id]
+            if record.edge_id not in seen:
+                seen.add(record.edge_id)
+                context["concept_relations"].append(relation_context)
+            for concept_id in (record.source_concept_id, record.target_concept_id):
+                concept = concepts_by_id.get(concept_id)
+                if concept is None:
+                    continue
+                context["concept_ids"] = _unique_text_values([*context["concept_ids"], concept.concept_id])
+                context["concept_labels"] = _unique_text_values([*context["concept_labels"], concept.label])
+                context["concept_aliases"] = _unique_text_values([*context["concept_aliases"], concept.aliases])
+            context["concept_relation_text"] = _compact_text(
+                " ".join(
+                    _unique_text_values(
+                        [context.get("concept_relation_text"), relation_context.get("relation_text")]
+                    )
+                )
+            )
+
+    return context_by_unit
+
+
+def _empty_concept_context() -> dict[str, Any]:
+    return {
+        "concept_ids": [],
+        "concept_labels": [],
+        "concept_aliases": [],
+        "concept_relation_text": "",
+        "concepts": [],
+        "concept_relations": [],
+    }
+
+
+def _concept_context(concept: ConceptGraphConceptNode) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in {
+            "concept_id": concept.concept_id,
+            "label": concept.label,
+            "aliases": list(concept.aliases),
+            "concept_type": concept.concept_type,
+            "confidence": concept.confidence,
+            "description": concept.description,
+        }.items()
+        if value not in (None, "", [])
+    }
+
+
+def _concept_relation_context(
+    relation: ConceptGraphRelationEdge,
+    concepts_by_id: dict[str, ConceptGraphConceptNode],
+) -> dict[str, Any]:
+    source = concepts_by_id.get(relation.source_concept_id)
+    target = concepts_by_id.get(relation.target_concept_id)
+    timestamp_only = _timestamp_only_concept_relation(relation)
+    return {
+        key: value
+        for key, value in {
+            "edge_id": relation.edge_id,
+            "source_concept_id": relation.source_concept_id,
+            "source_label": source.label if source is not None else relation.source_concept_id,
+            "relation_type": relation.relation_type,
+            "target_concept_id": relation.target_concept_id,
+            "target_label": target.label if target is not None else relation.target_concept_id,
+            "relation_status": relation.relation_status,
+            "source_signals": list(relation.source_signals),
+            "confidence": relation.confidence,
+            "description": relation.description,
+            "relation_text": _concept_relation_text(relation, concepts_by_id),
+            "timestamp_only_candidate": timestamp_only,
+            "timestamp_only_counted_as_verified_object_alignment": False,
+        }.items()
+        if value not in (None, "", [])
+    }
+
+
+def _concept_relation_text(
+    relation: ConceptGraphRelationEdge,
+    concepts_by_id: dict[str, ConceptGraphConceptNode],
+) -> str:
+    source = concepts_by_id.get(relation.source_concept_id)
+    target = concepts_by_id.get(relation.target_concept_id)
+    source_label = source.label if source is not None else relation.source_concept_id
+    target_label = target.label if target is not None else relation.target_concept_id
+    relation_label = _humanize_snake(relation.relation_type)
+    return _compact_text(
+        " ".join(
+            _unique_text_values(
+                [
+                    f"{source_label} {relation_label} {target_label}",
+                    relation.description,
+                ]
+            )
+        )
+    )
+
+
+def _concept_summary_text(concept_context: dict[str, Any]) -> str:
+    return _compact_text(
+        " ".join(
+            _unique_text_values(
+                [
+                    concept_context.get("concept_labels"),
+                    concept_context.get("concept_aliases"),
+                    concept_context.get("concept_relation_text"),
+                ]
+            )
+        )
+    )
+
+
+def _timestamp_only_concept_relation(relation: ConceptGraphRelationEdge) -> bool:
+    source_signals = {_text(signal).casefold() for signal in relation.source_signals if _text(signal)}
+    return bool(source_signals) and source_signals <= TIMESTAMP_ONLY_SOURCE_SIGNALS
+
+
+def _humanize_snake(value: str) -> str:
+    return _compact_text(value.replace("_", " "))
 
 
 def _transcript_window_text(segments: list[dict[str, Any]]) -> str:
@@ -1315,6 +1636,7 @@ def _update_project_manifest(
         "counts": summary["counts"],
         "alignment_status_counts": summary["alignment_status_counts"],
         "link_diagnostics": summary["link_diagnostics"],
+        "concept_field_coverage": summary["concept_field_coverage"],
     }
     write_json(manifest_path, payload)
 
@@ -1403,7 +1725,7 @@ def _text_values(values: Iterable[Any]) -> list[str]:
             continue
         if isinstance(value, dict):
             text_values.extend(_text_values(value.values()))
-        elif isinstance(value, list):
+        elif isinstance(value, (list, tuple)):
             text_values.extend(_text_values(value))
         else:
             text = _text(value)
@@ -1413,9 +1735,15 @@ def _text_values(values: Iterable[Any]) -> list[str]:
 
 
 def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
+    if not isinstance(value, (list, tuple)):
         return []
     return [_text(item) for item in value if _text(item)]
+
+
+def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -1428,6 +1756,20 @@ def _text(value: Any) -> str:
 
 def _compact_text(value: str) -> str:
     return " ".join(value.split())
+
+
+def _has_concept_search_text(document: dict[str, Any]) -> bool:
+    return bool(
+        _string_list(document.get("concept_labels"))
+        or _string_list(document.get("concept_aliases"))
+        or _text(document.get("concept_relation_text"))
+    )
+
+
+def _ratio_or_none(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(numerator / denominator, 6)
 
 
 def _optional_float(value: Any) -> float | None:

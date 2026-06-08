@@ -18,6 +18,8 @@ from oarag.retrieval.evidence_unit_index import (
 )
 from oarag.retrieval.evidence_units import (
     CANDIDATE_LINK_SIGNAL_KEYS,
+    CONCEPT_FIELD_COVERAGE_SCHEMA_VERSION,
+    CONCEPT_FIELD_PUBLIC_NOTE,
     LINK_DIAGNOSTICS_PUBLIC_NOTE,
     LINK_DIAGNOSTICS_SCHEMA_VERSION,
     VERIFIED_LINK_SOURCE_KEYS,
@@ -150,6 +152,7 @@ def _run_suite(
     evidence_units_path = _optional_path(suite.get("evidence_units"))
     visual_states_path = _optional_path(suite.get("visual_states"))
     visual_states_output_path = _optional_path(suite.get("visual_states_output"))
+    concept_graph_path = _optional_path(suite.get("concept_graph"))
     index_uid = str(suite.get("index") or _default_index_uid(run_id, suite_id))
     segment_index_uid = _optional_str(suite.get("segment_index"))
     limit = _positive_int(suite.get("limit", 5), field_name="limit")
@@ -176,6 +179,7 @@ def _run_suite(
             visual_states_output=visual_states_output_path,
             visual_entities=_optional_path(suite.get("visual_entities")),
             entity_links=_optional_path(suite.get("entity_links")),
+            concept_graph=concept_graph_path,
             manifest_path=_optional_path(suite.get("project_manifest")),
             window_seconds=_optional_float(suite.get("window_seconds")),
             neighbor_count=int(suite.get("neighbor_count", 1)),
@@ -530,6 +534,7 @@ def _artifact_summary(
             "link_counts": {},
             "link_diagnostics": _empty_public_link_diagnostics(),
             "visual_state_coverage": {},
+            "concept_field_coverage": _empty_public_concept_field_coverage(),
             "vlm_object_evidence_coverage": {
                 "status": "dry_run",
                 "skip_reason": "dry_run_requested",
@@ -562,14 +567,24 @@ def _artifact_summary(
                 ),
                 "units_with_detected_text": int(counts.get("units_with_detected_text") or 0),
                 "units_with_visual_description": int(counts.get("units_with_visual_description") or 0),
+                "units_with_concept": int(counts.get("units_with_concept") or 0),
+                "units_with_concept_relation": int(counts.get("units_with_concept_relation") or 0),
+                "units_with_concept_search_text": int(
+                    counts.get("units_with_concept_search_text") or 0
+                ),
             },
             "link_counts": {
                 "candidate_links": int(counts.get("candidate_links") or 0),
                 "verified_links": int(counts.get("verified_links") or 0),
                 "timestamp_fallback_links": int(counts.get("timestamp_fallback_links") or 0),
+                "concept_mentions": int(counts.get("concept_mentions") or 0),
+                "concept_relation_mentions": int(counts.get("concept_relation_mentions") or 0),
             },
             "link_diagnostics": _public_link_diagnostics(
                 build_summary.get("link_diagnostics")
+            ),
+            "concept_field_coverage": _public_concept_field_coverage(
+                build_summary.get("concept_field_coverage")
             ),
             "visual_state_coverage": _public_visual_state_coverage(
                 build_summary.get("visual_state_coverage")
@@ -598,9 +613,22 @@ def _artifact_summary(
             source_quality["units_with_candidate_visual_support"] += 1
         if _mapping(quality.get("verified_object_alignment")).get("has_verified_object_alignment") is True:
             source_quality["units_with_verified_object_alignment"] += 1
+        if _has_concept_fields(row, quality):
+            source_quality["units_with_concept"] += 1
+        if _has_concept_relation_fields(row, quality):
+            source_quality["units_with_concept_relation"] += 1
+        if _has_concept_search_text(row, quality):
+            source_quality["units_with_concept_search_text"] += 1
         source_quality["candidate_links"] += int(quality.get("candidate_link_count") or 0)
         source_quality["verified_links"] += int(quality.get("verified_link_count") or 0)
         source_quality["timestamp_fallback_links"] += int(quality.get("timestamp_fallback_link_count") or 0)
+        source_quality["concept_mentions"] += int(
+            quality.get("concept_count") or len(_string_list(row.get("concept_ids")))
+        )
+        source_quality["concept_relation_mentions"] += int(
+            quality.get("concept_relation_count")
+            or len(_list_of_dicts(row.get("concept_relations")))
+        )
     visual_state_rows = _visual_state_rows(project_dir=project_dir, visual_states=visual_states)
     link_diagnostics = _link_diagnostics_from_rows(rows)
     return {
@@ -622,13 +650,19 @@ def _artifact_summary(
             ],
             "units_with_detected_text": source_quality["has_detected_text"],
             "units_with_visual_description": source_quality["has_visual_description"],
+            "units_with_concept": source_quality["units_with_concept"],
+            "units_with_concept_relation": source_quality["units_with_concept_relation"],
+            "units_with_concept_search_text": source_quality["units_with_concept_search_text"],
         },
         "link_counts": {
             "candidate_links": source_quality["candidate_links"],
             "verified_links": source_quality["verified_links"],
             "timestamp_fallback_links": source_quality["timestamp_fallback_links"],
+            "concept_mentions": source_quality["concept_mentions"],
+            "concept_relation_mentions": source_quality["concept_relation_mentions"],
         },
         "link_diagnostics": link_diagnostics,
+        "concept_field_coverage": _loaded_concept_field_coverage(rows),
         "visual_state_coverage": _loaded_visual_state_coverage(
             evidence_units=rows,
             visual_states=visual_state_rows,
@@ -657,16 +691,32 @@ def _public_candidate(candidate: dict[str, Any], *, query_text: str | None = Non
             "has_visual_state": bool(source_quality.get("has_visual_state")),
             "has_visual_entity": bool(source_quality.get("has_visual_entity")),
             "has_vlm_entity": bool(source_quality.get("has_vlm_entity")),
+            "has_concept": _has_concept_fields(candidate, source_quality),
+            "has_concept_relation": _has_concept_relation_fields(candidate, source_quality),
             "has_verified_link": bool(source_quality.get("has_verified_link")),
             "has_timestamp_fallback_link": bool(source_quality.get("has_timestamp_fallback_link")),
             "has_detected_text": bool(source_quality.get("has_detected_text")),
             "has_visual_description": bool(source_quality.get("has_visual_description")),
+            "has_concept_search_text": _has_concept_search_text(candidate, source_quality),
             "candidate_link_count": int(source_quality.get("candidate_link_count") or 0),
             "timestamp_fallback_link_count": int(source_quality.get("timestamp_fallback_link_count") or 0),
             "verified_link_count": int(source_quality.get("verified_link_count") or 0),
             "visual_state_detected_text_count": int(source_quality.get("visual_state_detected_text_count") or 0),
             "visual_entity_detected_text_count": int(source_quality.get("visual_entity_detected_text_count") or 0),
             "visual_description_count": int(source_quality.get("visual_description_count") or 0),
+            "concept_count": _concept_count(candidate, source_quality),
+            "concept_label_count": int(
+                source_quality.get("concept_label_count")
+                or len(_string_list(candidate.get("concept_labels")))
+            ),
+            "concept_alias_count": int(
+                source_quality.get("concept_alias_count")
+                or len(_string_list(candidate.get("concept_aliases")))
+            ),
+            "concept_relation_count": _concept_relation_count(candidate, source_quality),
+            "timestamp_only_concept_relation_count": int(
+                source_quality.get("timestamp_only_concept_relation_count") or 0
+            ),
             "candidate_link_signal_counts": _public_count_map(
                 source_quality.get("candidate_link_signal_counts"),
                 CANDIDATE_LINK_SIGNAL_KEYS,
@@ -681,7 +731,9 @@ def _public_candidate(candidate: dict[str, Any], *, query_text: str | None = Non
         "rag_fields": {
             "evidence_text_available": bool(candidate.get("evidence_text")),
             "semantic_text_available": bool(candidate.get("semantic_text")),
+            "concept_search_text_available": _has_concept_search_text(candidate, source_quality),
         },
+        "concept_field_coverage": _public_candidate_concept_field_coverage(candidate),
         "content_coverage": _candidate_content_coverage(candidate),
         "query_term_coverage": _query_term_coverage(
             query_text=query_text or "",
@@ -827,13 +879,17 @@ def _candidate_quality_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         "has_visual_state": bool(source_quality.get("has_visual_state")),
         "has_visual_entity": bool(source_quality.get("has_visual_entity")),
         "has_vlm_entity": bool(source_quality.get("has_vlm_entity")),
+        "has_concept": _has_concept_fields(candidate, source_quality),
+        "has_concept_relation": _has_concept_relation_fields(candidate, source_quality),
         "has_verified_link": bool(source_quality.get("has_verified_link")),
         "has_timestamp_fallback_link": bool(source_quality.get("has_timestamp_fallback_link")),
         "candidate_visual_support": _public_candidate_visual_support(candidate),
         "verified_object_alignment": _public_verified_object_alignment(candidate),
+        "concept_field_coverage": _public_candidate_concept_field_coverage(candidate),
         "rag_fields": {
             "evidence_text_available": bool(candidate.get("evidence_text")),
             "semantic_text_available": bool(candidate.get("semantic_text")),
+            "concept_search_text_available": _has_concept_search_text(candidate, source_quality),
         },
         "content_coverage": _candidate_content_coverage(candidate),
     }
@@ -845,16 +901,29 @@ def _candidate_content_coverage(candidate: dict[str, Any]) -> dict[str, Any]:
     evidence_text = _text_for_coverage(candidate.get("evidence_text"))
     semantic_text = _text_for_coverage(candidate.get("semantic_text"))
     transcript_text = _text_for_coverage(candidate.get("transcript_window_text"))
+    concept_relation_text = _text_for_coverage(candidate.get("concept_relation_text"))
     source_quality = _mapping(candidate.get("source_quality"))
     return {
         "evidence_text_char_count": len(evidence_text),
         "semantic_text_char_count": len(semantic_text),
         "transcript_window_char_count": len(transcript_text),
+        "concept_relation_text_char_count": len(concept_relation_text),
         "evidence_text_bucket": _char_count_bucket(len(evidence_text)),
         "semantic_text_bucket": _char_count_bucket(len(semantic_text)),
         "transcript_window_bucket": _char_count_bucket(len(transcript_text)),
+        "concept_relation_text_bucket": _char_count_bucket(len(concept_relation_text)),
         "visual_state_count": len(_string_list(candidate.get("visual_state_ids"))),
         "visual_entity_count": len(_string_list(candidate.get("visual_entity_ids"))),
+        "concept_count": _concept_count(candidate, source_quality),
+        "concept_label_count": int(
+            source_quality.get("concept_label_count")
+            or len(_string_list(candidate.get("concept_labels")))
+        ),
+        "concept_alias_count": int(
+            source_quality.get("concept_alias_count")
+            or len(_string_list(candidate.get("concept_aliases")))
+        ),
+        "concept_relation_count": _concept_relation_count(candidate, source_quality),
         "candidate_entity_link_count": len(_string_list(candidate.get("candidate_entity_link_ids"))),
         "verified_entity_link_count": len(_string_list(candidate.get("verified_entity_link_ids"))),
         "timestamp_fallback_link_count": int(source_quality.get("timestamp_fallback_link_count") or 0),
@@ -869,17 +938,30 @@ def _query_term_coverage(*, query_text: str, candidate: dict[str, Any]) -> dict[
     evidence_terms = set(_coverage_terms(_text_for_coverage(candidate.get("evidence_text"))))
     semantic_terms = set(_coverage_terms(_text_for_coverage(candidate.get("semantic_text"))))
     transcript_terms = set(_coverage_terms(_text_for_coverage(candidate.get("transcript_window_text"))))
-    combined_terms = evidence_terms | semantic_terms | transcript_terms
+    concept_terms = set(
+        _coverage_terms(
+            " ".join(
+                [
+                    *_string_list(candidate.get("concept_labels")),
+                    *_string_list(candidate.get("concept_aliases")),
+                    _text_for_coverage(candidate.get("concept_relation_text")),
+                ]
+            )
+        )
+    )
+    combined_terms = evidence_terms | semantic_terms | transcript_terms | concept_terms
     query_term_count = len(query_terms)
     evidence_matches = len(query_terms & evidence_terms)
     semantic_matches = len(query_terms & semantic_terms)
     transcript_matches = len(query_terms & transcript_terms)
+    concept_matches = len(query_terms & concept_terms)
     combined_matches = len(query_terms & combined_terms)
     return {
         "query_term_count": query_term_count,
         "evidence_text_match_count": evidence_matches,
         "semantic_text_match_count": semantic_matches,
         "transcript_window_match_count": transcript_matches,
+        "concept_search_text_match_count": concept_matches,
         "combined_match_count": combined_matches,
         "combined_match_ratio": _ratio(combined_matches, query_term_count),
         "combined_match_bucket": _ratio_bucket(combined_matches, query_term_count),
@@ -1266,6 +1348,7 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
         entity_coverage = _mapping(vlm_coverage.get("visual_entity_coverage"))
         unit_coverage = _mapping(vlm_coverage.get("evidence_unit_coverage"))
         visual_coverage = _mapping(build.get("visual_state_coverage"))
+        concept_coverage = _mapping(build.get("concept_field_coverage"))
         interval_summary = _mapping(visual_coverage.get("interval_duration_seconds"))
         coverage_gate = _mapping(visual_coverage.get("coverage_gate"))
         lines.extend(
@@ -1279,6 +1362,7 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- verified object alignment: `{json.dumps(verified_alignment, sort_keys=True)}`",
                 f"- visual state source: `{visual_coverage.get('source') or 'unknown'}`",
                 f"- visual state coverage: `{visual_coverage.get('evidence_units_with_visual_state', 0)}`/`{visual_coverage.get('evidence_units_total', 0)}`",
+                f"- concept field coverage: `{concept_coverage.get('evidence_units_with_concept_search_text', 0)}`/`{concept_coverage.get('evidence_units_total', 0)}`",
                 f"- visual state duration buckets: `{json.dumps(interval_summary.get('buckets', {}), sort_keys=True)}`",
                 f"- visual state gate: `{coverage_gate.get('status') or 'not_configured'}`",
                 f"- index status: `{index.get('status')}`",
@@ -1313,11 +1397,17 @@ def _rag_input_inspection(query_rows: list[dict[str, Any]], artifact_summary: di
         for row in queried
         if _mapping(_mapping(row.get("top_evidence_unit")).get("source_quality")).get("has_visual_state")
     ]
+    top_with_concepts = [
+        row
+        for row in queried
+        if _mapping(_mapping(row.get("top_evidence_unit")).get("source_quality")).get("has_concept")
+    ]
     return {
         "query_count": len(query_rows),
         "queried_count": len(queried),
         "inspectable_top_hit_count": len(inspectable),
         "top_hits_with_visual_state_count": len(top_with_visual),
+        "top_hits_with_concept_count": len(top_with_concepts),
         "artifact_evidence_units_total": _mapping(artifact_summary.get("counts")).get("evidence_units_total"),
         "public_note": (
             "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/"
@@ -1513,6 +1603,9 @@ def _public_build_counts(counts: dict[str, Any]) -> dict[str, int]:
         "frames_total",
         "visual_entities_total",
         "entity_links_total",
+        "concept_graph_records_total",
+        "concept_nodes_total",
+        "concept_relation_edges_total",
         "evidence_units_total",
     ]
     return {key: int(counts.get(key) or 0) for key in keys}
@@ -1568,6 +1661,111 @@ def _public_link_diagnostics(value: Any) -> dict[str, Any]:
             VERIFIED_LINK_SOURCE_KEYS,
         ),
         "public_note": diagnostics.get("public_note") or LINK_DIAGNOSTICS_PUBLIC_NOTE,
+    }
+
+
+def _public_concept_field_coverage(value: Any) -> dict[str, Any]:
+    coverage = _mapping(value)
+    return {
+        "schema_version": coverage.get("schema_version") or CONCEPT_FIELD_COVERAGE_SCHEMA_VERSION,
+        "source": coverage.get("source") or "unknown",
+        "concept_graph_loaded": bool(coverage.get("concept_graph_loaded")),
+        "concept_graph_records_total": int(coverage.get("concept_graph_records_total") or 0),
+        "concept_nodes_total": int(coverage.get("concept_nodes_total") or 0),
+        "concept_relation_edges_total": int(coverage.get("concept_relation_edges_total") or 0),
+        "evidence_units_total": int(coverage.get("evidence_units_total") or 0),
+        "evidence_units_with_concepts": int(coverage.get("evidence_units_with_concepts") or 0),
+        "evidence_units_with_concept_relations": int(
+            coverage.get("evidence_units_with_concept_relations") or 0
+        ),
+        "evidence_units_with_concept_search_text": int(
+            coverage.get("evidence_units_with_concept_search_text") or 0
+        ),
+        "unit_concept_coverage_ratio": coverage.get("unit_concept_coverage_ratio"),
+        "unit_concept_relation_coverage_ratio": coverage.get(
+            "unit_concept_relation_coverage_ratio"
+        ),
+        "concept_mentions": int(coverage.get("concept_mentions") or 0),
+        "concept_relation_mentions": int(coverage.get("concept_relation_mentions") or 0),
+        "timestamp_only_concept_relation_mentions": int(
+            coverage.get("timestamp_only_concept_relation_mentions") or 0
+        ),
+        "timestamp_only_counted_as_verified_object_alignment": False,
+        "public_note": coverage.get("public_note") or CONCEPT_FIELD_PUBLIC_NOTE,
+    }
+
+
+def _empty_public_concept_field_coverage() -> dict[str, Any]:
+    return _public_concept_field_coverage(
+        {
+            "schema_version": CONCEPT_FIELD_COVERAGE_SCHEMA_VERSION,
+            "source": "dry_run",
+            "public_note": CONCEPT_FIELD_PUBLIC_NOTE,
+        }
+    )
+
+
+def _loaded_concept_field_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    units_with_concepts = 0
+    units_with_relations = 0
+    units_with_search_text = 0
+    concept_mentions = 0
+    relation_mentions = 0
+    timestamp_only_relation_mentions = 0
+    for row in rows:
+        quality = _mapping(row.get("source_quality"))
+        concept_count = _concept_count(row, quality)
+        relation_count = _concept_relation_count(row, quality)
+        timestamp_only_count = int(quality.get("timestamp_only_concept_relation_count") or 0)
+        if concept_count:
+            units_with_concepts += 1
+        if relation_count:
+            units_with_relations += 1
+        if _has_concept_search_text(row, quality):
+            units_with_search_text += 1
+        concept_mentions += concept_count
+        relation_mentions += relation_count
+        timestamp_only_relation_mentions += timestamp_only_count
+    total = len(rows)
+    return _public_concept_field_coverage(
+        {
+            "schema_version": CONCEPT_FIELD_COVERAGE_SCHEMA_VERSION,
+            "source": "loaded_existing",
+            "evidence_units_total": total,
+            "evidence_units_with_concepts": units_with_concepts,
+            "evidence_units_with_concept_relations": units_with_relations,
+            "evidence_units_with_concept_search_text": units_with_search_text,
+            "unit_concept_coverage_ratio": _ratio_or_none(units_with_concepts, total),
+            "unit_concept_relation_coverage_ratio": _ratio_or_none(
+                units_with_relations,
+                total,
+            ),
+            "concept_mentions": concept_mentions,
+            "concept_relation_mentions": relation_mentions,
+            "timestamp_only_concept_relation_mentions": timestamp_only_relation_mentions,
+            "public_note": CONCEPT_FIELD_PUBLIC_NOTE,
+        }
+    )
+
+
+def _public_candidate_concept_field_coverage(candidate: dict[str, Any]) -> dict[str, Any]:
+    source_quality = _mapping(candidate.get("source_quality"))
+    return {
+        "has_concept_search_text": _has_concept_search_text(candidate, source_quality),
+        "concept_count": _concept_count(candidate, source_quality),
+        "concept_label_count": int(
+            source_quality.get("concept_label_count")
+            or len(_string_list(candidate.get("concept_labels")))
+        ),
+        "concept_alias_count": int(
+            source_quality.get("concept_alias_count")
+            or len(_string_list(candidate.get("concept_aliases")))
+        ),
+        "concept_relation_count": _concept_relation_count(candidate, source_quality),
+        "timestamp_only_concept_relation_count": int(
+            source_quality.get("timestamp_only_concept_relation_count") or 0
+        ),
+        "timestamp_only_counted_as_verified_object_alignment": False,
     }
 
 
@@ -1815,6 +2013,56 @@ def _text_for_coverage(value: Any) -> str:
     if value in (None, ""):
         return ""
     return " ".join(str(value).split())
+
+
+def _has_concept_fields(candidate: dict[str, Any], source_quality: dict[str, Any]) -> bool:
+    return bool(
+        source_quality.get("has_concept")
+        or _concept_count(candidate, source_quality) > 0
+        or _string_list(candidate.get("concept_labels"))
+        or _string_list(candidate.get("concept_aliases"))
+        or _list_of_dicts(candidate.get("concepts"))
+    )
+
+
+def _has_concept_relation_fields(candidate: dict[str, Any], source_quality: dict[str, Any]) -> bool:
+    return bool(
+        source_quality.get("has_concept_relation")
+        or _concept_relation_count(candidate, source_quality) > 0
+        or _text_for_coverage(candidate.get("concept_relation_text")).strip()
+        or _list_of_dicts(candidate.get("concept_relations"))
+    )
+
+
+def _has_concept_search_text(candidate: dict[str, Any], source_quality: dict[str, Any]) -> bool:
+    return bool(
+        source_quality.get("has_concept_search_text")
+        or _string_list(candidate.get("concept_labels"))
+        or _string_list(candidate.get("concept_aliases"))
+        or _text_for_coverage(candidate.get("concept_relation_text")).strip()
+    )
+
+
+def _concept_count(candidate: dict[str, Any], source_quality: dict[str, Any]) -> int:
+    return int(
+        source_quality.get("concept_count")
+        or len(_string_list(candidate.get("concept_ids")))
+        or len(_list_of_dicts(candidate.get("concepts")))
+    )
+
+
+def _concept_relation_count(candidate: dict[str, Any], source_quality: dict[str, Any]) -> int:
+    return int(
+        source_quality.get("concept_relation_count")
+        or len(_list_of_dicts(candidate.get("concept_relations")))
+        or (1 if _text_for_coverage(candidate.get("concept_relation_text")).strip() else 0)
+    )
+
+
+def _ratio_or_none(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(numerator / denominator, 6)
 
 
 def _coverage_terms(value: str) -> set[str]:

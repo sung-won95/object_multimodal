@@ -559,6 +559,8 @@ def index_project_evidence_units(
         "has_visual_state": 0,
         "has_visual_entity": 0,
         "has_vlm_entity": 0,
+        "has_concept": 0,
+        "has_concept_relation": 0,
         "has_verified_link": 0,
         "has_timestamp_fallback_link": 0,
     }
@@ -578,6 +580,19 @@ def index_project_evidence_units(
                 for key in source_quality_counts:
                     if source_quality.get(key) is True:
                         source_quality_counts[key] += 1
+            if _evidence_unit_has_concept_fields(document):
+                source_quality_counts["has_concept"] += (
+                    0
+                    if isinstance(source_quality, dict) and source_quality.get("has_concept") is True
+                    else 1
+                )
+            if _evidence_unit_has_concept_relation_fields(document):
+                source_quality_counts["has_concept_relation"] += (
+                    0
+                    if isinstance(source_quality, dict)
+                    and source_quality.get("has_concept_relation") is True
+                    else 1
+                )
 
     return {
         "index": index_uid,
@@ -1304,6 +1319,7 @@ def _evidence_unit_index_document(document: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("evidence unit document is missing evidence_unit_id")
     indexed = dict(document)
     indexed["evidence_unit_id"] = evidence_unit_id
+    indexed.update(_evidence_unit_concept_search_fields(indexed))
     semantic_text = _compact_text(str(indexed.get("semantic_text") or ""))
     evidence_text = _compact_text(str(indexed.get("evidence_text") or ""))
     transcript_text = _compact_text(str(indexed.get("transcript_window_text") or ""))
@@ -1314,6 +1330,14 @@ def _evidence_unit_index_document(document: dict[str, Any]) -> dict[str, Any]:
             "visual_entities",
         ],
     )
+    concept_text = text_from_document_fields(
+        indexed,
+        [
+            "concept_labels",
+            "concept_aliases",
+            "concept_relation_text",
+        ],
+    )
     if not evidence_text:
         evidence_text = _compact_text(
             " ".join(part for part in (transcript_text, visual_text) if part)
@@ -1321,9 +1345,63 @@ def _evidence_unit_index_document(document: dict[str, Any]) -> dict[str, Any]:
         indexed["evidence_text"] = evidence_text
     if not semantic_text:
         indexed["semantic_text"] = _compact_text(
-            " ".join(part for part in (evidence_text, transcript_text, visual_text) if part)
+            " ".join(part for part in (evidence_text, transcript_text, visual_text, concept_text) if part)
         )
     return indexed
+
+
+def _evidence_unit_concept_search_fields(document: dict[str, Any]) -> dict[str, Any]:
+    concepts = _list_of_dicts(document.get("concepts"))
+    relations = _list_of_dicts(document.get("concept_relations"))
+    labels = _string_list(document.get("concept_labels"))
+    aliases = _string_list(document.get("concept_aliases"))
+    relation_text = _compact_text(str(document.get("concept_relation_text") or ""))
+
+    if not labels:
+        labels = _unique_text_values(
+            [
+                *[concept.get("label") for concept in concepts],
+                *[relation.get("source_label") for relation in relations],
+                *[relation.get("target_label") for relation in relations],
+            ]
+        )
+    if not aliases:
+        alias_values: list[str] = []
+        for concept in concepts:
+            alias_values.extend(_string_list(concept.get("aliases")))
+        aliases = _unique_text_values(alias_values)
+    if not relation_text:
+        relation_text = _compact_text(
+            " ".join(
+                _unique_text_values(
+                    [
+                        *[relation.get("relation_text") for relation in relations],
+                        *[relation.get("description") for relation in relations],
+                    ]
+                )
+            )
+        )
+    return {
+        "concept_labels": labels,
+        "concept_aliases": aliases,
+        "concept_relation_text": relation_text,
+    }
+
+
+def _evidence_unit_has_concept_fields(document: dict[str, Any]) -> bool:
+    return bool(
+        _string_list(document.get("concept_ids"))
+        or _string_list(document.get("concept_labels"))
+        or _string_list(document.get("concept_aliases"))
+        or _list_of_dicts(document.get("concepts"))
+    )
+
+
+def _evidence_unit_has_concept_relation_fields(document: dict[str, Any]) -> bool:
+    return bool(
+        _compact_text(str(document.get("concept_relation_text") or ""))
+        or _list_of_dicts(document.get("concept_relations"))
+    )
 
 
 def _window_index_document(
