@@ -410,6 +410,156 @@ def test_build_project_evidence_units_supports_transcript_only_project(tmp_path:
     assert rows[0]["modality"] == ["speech"]
     assert rows[0]["visual_state_ids"] == []
     assert rows[0]["visual_entity_ids"] == []
+    assert rows[0]["concept_ids"] == []
+    assert rows[0]["source_quality"]["has_concept"] is False
+
+
+def test_build_project_evidence_units_adds_concept_graph_search_fields(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "concept_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments.jsonl",
+        [
+            _segment(
+                "public_001_0001",
+                10.0,
+                14.0,
+                "We define the optimization objective.",
+            ),
+            _segment(
+                "public_001_0002",
+                20.0,
+                24.0,
+                "Step size controls the next update.",
+            ),
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "concept_graph.jsonl",
+        [
+            {
+                "schema_version": "oarag-concept-graph-v1",
+                "record_type": "concept_node",
+                "concept_id": "concept_gradient_descent",
+                "lecture_id": "public_lecture_graph_001",
+                "label": "Gradient descent",
+                "aliases": ["steepest descent"],
+                "concept_type": "algorithm",
+                "source_evidence_unit_ids": ["evu_public_001_0001"],
+                "evidence_sources": [
+                    {
+                        "evidence_unit_id": "evu_public_001_0001",
+                        "source_type": "transcript",
+                        "source_signal": "transcript_statement",
+                        "confidence": 0.86,
+                    }
+                ],
+                "confidence": 0.86,
+            },
+            {
+                "schema_version": "oarag-concept-graph-v1",
+                "record_type": "concept_node",
+                "concept_id": "concept_loss",
+                "lecture_id": "public_lecture_graph_001",
+                "label": "Loss function",
+                "aliases": ["objective function"],
+                "concept_type": "metric",
+                "source_evidence_unit_ids": ["evu_public_001_0001"],
+                "evidence_sources": [
+                    {
+                        "evidence_unit_id": "evu_public_001_0001",
+                        "source_type": "slide_text",
+                        "source_signal": "slide_text",
+                        "confidence": 0.82,
+                    }
+                ],
+                "confidence": 0.82,
+            },
+            {
+                "schema_version": "oarag-concept-graph-v1",
+                "record_type": "concept_node",
+                "concept_id": "concept_learning_rate",
+                "lecture_id": "public_lecture_graph_001",
+                "label": "Learning rate",
+                "aliases": ["step size"],
+                "concept_type": "hyperparameter",
+                "source_evidence_unit_ids": ["evu_public_001_0002"],
+                "evidence_sources": [
+                    {
+                        "evidence_unit_id": "evu_public_001_0002",
+                        "source_type": "transcript",
+                        "source_signal": "transcript_statement",
+                        "confidence": 0.8,
+                    }
+                ],
+                "confidence": 0.8,
+            },
+            {
+                "schema_version": "oarag-concept-graph-v1",
+                "record_type": "relation_edge",
+                "edge_id": "edge_gradient_descent_related_loss",
+                "lecture_id": "public_lecture_graph_001",
+                "source_concept_id": "concept_gradient_descent",
+                "relation_type": "related_to",
+                "target_concept_id": "concept_loss",
+                "evidence_unit_ids": ["evu_public_001_0001"],
+                "source_signals": ["timestamp_overlap"],
+                "confidence": 0.35,
+                "relation_status": "candidate",
+            },
+            {
+                "schema_version": "oarag-concept-graph-v1",
+                "record_type": "relation_edge",
+                "edge_id": "edge_gradient_descent_uses_learning_rate",
+                "lecture_id": "public_lecture_graph_001",
+                "source_concept_id": "concept_gradient_descent",
+                "relation_type": "uses",
+                "target_concept_id": "concept_learning_rate",
+                "evidence_unit_ids": ["evu_public_001_0002"],
+                "source_signals": ["transcript_statement", "strict_deterministic_rule"],
+                "confidence": 0.78,
+                "relation_status": "verified",
+            },
+        ],
+    )
+
+    summary = build_project_evidence_units(
+        project_dir=project_dir,
+        previous_neighbor_count=0,
+        next_neighbor_count=0,
+    )
+
+    rows = _read_jsonl(project_dir / "segments" / "evidence_units.jsonl")
+    first = next(row for row in rows if row["target_segment_id"] == "public_001_0001")
+    second = next(row for row in rows if row["target_segment_id"] == "public_001_0002")
+    assert first["concept_ids"] == ["concept_gradient_descent", "concept_loss"]
+    assert first["concept_labels"] == ["Gradient descent", "Loss function"]
+    assert first["concept_aliases"] == ["steepest descent", "objective function"]
+    assert "Gradient descent related to Loss function" in first["concept_relation_text"]
+    assert "steepest descent" in first["semantic_text"]
+    assert first["source_quality"]["has_concept"] is True
+    assert first["source_quality"]["has_concept_relation"] is True
+    assert first["source_quality"]["timestamp_only_concept_relation_count"] == 1
+    assert first["source_quality"]["verified_object_alignment"][
+        "timestamp_fallback_counted_as_verified"
+    ] is False
+    assert second["concept_labels"] == ["Learning rate", "Gradient descent"]
+    assert "Gradient descent uses Learning rate" in second["concept_relation_text"]
+    assert summary["counts"]["concept_graph_records_total"] == 5
+    assert summary["counts"]["units_with_concept"] == 2
+    assert summary["counts"]["units_with_concept_relation"] == 2
+    assert summary["counts"]["units_with_concept_search_text"] == 2
+    assert summary["concept_field_coverage"]["concept_graph_loaded"] is True
+    assert summary["concept_field_coverage"]["timestamp_only_concept_relation_mentions"] == 1
+    assert summary["concept_field_coverage"][
+        "timestamp_only_counted_as_verified_object_alignment"
+    ] is False
+
+    manifest = json.loads((project_dir / "manifests" / "project_manifest.json").read_text())
+    assert manifest["evidence_unit_storage"]["concept_field_coverage"][
+        "evidence_units_with_concept_search_text"
+    ] == 2
 
 
 def test_index_project_evidence_units_indexes_artifact_and_preserves_fallback_status(
@@ -445,6 +595,22 @@ def test_index_project_evidence_units_indexes_artifact_and_preserves_fallback_st
                 },
                 "evidence_text": "Transcript: This gradient arrow shows descent.",
                 "semantic_text": "gradient arrow descent",
+                "concept_ids": ["concept_gradient_descent"],
+                "concepts": [
+                    {
+                        "concept_id": "concept_gradient_descent",
+                        "label": "Gradient descent",
+                        "aliases": ["steepest descent"],
+                    }
+                ],
+                "concept_relations": [
+                    {
+                        "edge_id": "edge_gradient_descent_uses_learning_rate",
+                        "source_label": "Gradient descent",
+                        "target_label": "Learning rate",
+                        "relation_text": "Gradient descent uses Learning rate",
+                    }
+                ],
             }
         ],
     )
@@ -460,10 +626,18 @@ def test_index_project_evidence_units_indexes_artifact_and_preserves_fallback_st
     assert client.created_indexes == [("sample_evidence_units", "evidence_unit_id")]
     assert client.deleted_indexes == ["sample_evidence_units"]
     assert client.settings["searchableAttributes"][:2] == ["semantic_text", "evidence_text"]
+    assert "concept_labels" in client.settings["searchableAttributes"]
+    assert "concept_aliases" in client.settings["searchableAttributes"]
+    assert "concept_relation_text" in client.settings["searchableAttributes"]
     assert summary["indexed_documents"] == 1
     assert summary["alignment_status_counts"] == {"candidate": 1}
+    assert summary["source_quality_counts"]["has_concept"] == 1
+    assert summary["source_quality_counts"]["has_concept_relation"] == 1
     indexed = client.documents[0]
     assert indexed["evidence_unit_id"] == "evu_seg_1"
+    assert indexed["concept_labels"] == ["Gradient descent", "Learning rate"]
+    assert indexed["concept_aliases"] == ["steepest descent"]
+    assert indexed["concept_relation_text"] == "Gradient descent uses Learning rate"
     assert indexed["candidate_entity_link_statuses"] == {
         "link_timestamp": "timestamp_fallback"
     }
@@ -503,6 +677,17 @@ def test_query_project_evidence_units_returns_required_fields(tmp_path: Path) ->
         },
         "evidence_text": "Transcript: gradient arrow",
         "semantic_text": "gradient arrow",
+        "concept_ids": ["concept_gradient_descent"],
+        "concept_labels": ["Gradient descent"],
+        "concept_aliases": ["steepest descent"],
+        "concept_relation_text": "Gradient descent uses Learning rate",
+        "concepts": [{"concept_id": "concept_gradient_descent", "label": "Gradient descent"}],
+        "concept_relations": [
+            {
+                "edge_id": "edge_gradient_descent_uses_learning_rate",
+                "relation_text": "Gradient descent uses Learning rate",
+            }
+        ],
         "_rankingScore": 0.9,
     }
     client = _FakeMeiliClient(search_hits=[hit])
@@ -534,6 +719,12 @@ def test_query_project_evidence_units_returns_required_fields(tmp_path: Path) ->
         "end_time",
         "visual_state_ids",
         "visual_entity_ids",
+        "concept_ids",
+        "concept_labels",
+        "concept_aliases",
+        "concept_relation_text",
+        "concepts",
+        "concept_relations",
         "candidate_entity_link_ids",
         "candidate_entity_link_statuses",
         "alignment_status",
@@ -542,6 +733,8 @@ def test_query_project_evidence_units_returns_required_fields(tmp_path: Path) ->
     assert required_fields <= set(candidate)
     assert candidate["verified_entity_link_ids"] == []
     assert candidate["candidate_entity_link_statuses"]["link_timestamp"] == "timestamp_fallback"
+    assert candidate["concept_labels"] == ["Gradient descent"]
+    assert candidate["concept_relation_text"] == "Gradient descent uses Learning rate"
     assert candidate["source_quality"]["has_verified_link"] is False
 
 

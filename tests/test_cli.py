@@ -356,6 +356,7 @@ def test_build_project_evidence_units_cli_defaults() -> None:
     assert args.visual_states_output is None
     assert args.visual_entities is None
     assert args.entity_links is None
+    assert args.concept_graph is None
     assert args.output is None
     assert args.manifest is None
     assert args.state_padding_seconds == 15.0
@@ -399,6 +400,8 @@ def test_cmd_build_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
             "manifests/visual_states.normalized.jsonl",
             "--entity-links",
             "manifests/entity_links.jsonl",
+            "--concept-graph",
+            "manifests/concept_graph.jsonl",
             "--output",
             "segments/evidence_units.jsonl",
             "--state-padding-seconds",
@@ -423,6 +426,7 @@ def test_cmd_build_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
     assert calls["build_kwargs"]["visual_states"].as_posix() == "manifests/visual_states.jsonl"
     assert calls["build_kwargs"]["visual_states_output"].as_posix() == "manifests/visual_states.normalized.jsonl"
     assert calls["build_kwargs"]["entity_links"].as_posix() == "manifests/entity_links.jsonl"
+    assert calls["build_kwargs"]["concept_graph"].as_posix() == "manifests/concept_graph.jsonl"
     assert calls["build_kwargs"]["output_path"].as_posix() == "segments/evidence_units.jsonl"
     assert calls["build_kwargs"]["state_padding_seconds"] == 20.0
     assert calls["build_kwargs"]["visual_state_min_coverage_ratio"] == 0.5

@@ -263,6 +263,17 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert suite["build"]["visual_state_coverage"]["transcript_only_units"] == 0
     assert suite["build"]["visual_state_coverage"]["coverage_gate"]["status"] == "not_configured"
     assert suite["build"]["visual_state_coverage"]["interval_duration_seconds"]["buckets"]["15-30s"] == 1
+    assert suite["build"]["source_quality_counts"]["units_with_concept"] == 1
+    assert suite["build"]["source_quality_counts"]["units_with_concept_relation"] == 1
+    assert suite["build"]["concept_field_coverage"][
+        "evidence_units_with_concept_search_text"
+    ] == 1
+    assert suite["build"]["concept_field_coverage"][
+        "timestamp_only_concept_relation_mentions"
+    ] == 1
+    assert suite["build"]["concept_field_coverage"][
+        "timestamp_only_counted_as_verified_object_alignment"
+    ] is False
     assert suite["index"]["status"] == "indexed"
     assert suite["rag_input_inspection"]["inspectable_top_hit_count"] == 1
 
@@ -299,6 +310,10 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert rows[0]["target_diagnostics"]["target_rank_bucket"] == "top5"
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_verified_link"] is False
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_timestamp_fallback_link"] is True
+    assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_concept"] is True
+    assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"][
+        "concept_field_coverage"
+    ]["timestamp_only_concept_relation_count"] == 1
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"][
         "candidate_visual_support"
     ]["timestamp_fallback_link_count"] == 1
@@ -579,6 +594,62 @@ def _write_project(tmp_path: Path) -> Path:
                 "frame_id": "frame_private",
                 "evidence": ["time_overlap", "timestamp_fallback"],
             }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "concept_graph.jsonl",
+        [
+            {
+                "schema_version": "oarag-concept-graph-v1",
+                "record_type": "concept_node",
+                "concept_id": "concept_public_optimizer",
+                "lecture_id": "public_lecture_smoke",
+                "label": "Public optimizer",
+                "aliases": ["public optimization"],
+                "concept_type": "algorithm",
+                "source_evidence_unit_ids": ["evu_seg_private_1"],
+                "evidence_sources": [
+                    {
+                        "evidence_unit_id": "evu_seg_private_1",
+                        "source_type": "transcript",
+                        "source_signal": "transcript_statement",
+                        "confidence": 0.8,
+                    }
+                ],
+                "confidence": 0.8,
+            },
+            {
+                "schema_version": "oarag-concept-graph-v1",
+                "record_type": "concept_node",
+                "concept_id": "concept_public_objective",
+                "lecture_id": "public_lecture_smoke",
+                "label": "Public objective",
+                "aliases": ["public loss"],
+                "concept_type": "metric",
+                "source_evidence_unit_ids": ["evu_seg_private_1"],
+                "evidence_sources": [
+                    {
+                        "evidence_unit_id": "evu_seg_private_1",
+                        "source_type": "slide_text",
+                        "source_signal": "slide_text",
+                        "confidence": 0.75,
+                    }
+                ],
+                "confidence": 0.75,
+            },
+            {
+                "schema_version": "oarag-concept-graph-v1",
+                "record_type": "relation_edge",
+                "edge_id": "edge_public_optimizer_related_objective",
+                "lecture_id": "public_lecture_smoke",
+                "source_concept_id": "concept_public_optimizer",
+                "relation_type": "related_to",
+                "target_concept_id": "concept_public_objective",
+                "evidence_unit_ids": ["evu_seg_private_1"],
+                "source_signals": ["timestamp_overlap"],
+                "confidence": 0.35,
+                "relation_status": "candidate",
+            },
         ],
     )
     return project_dir

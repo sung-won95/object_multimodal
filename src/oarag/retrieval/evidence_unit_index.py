@@ -22,6 +22,12 @@ EVIDENCE_UNIT_RESULT_FIELDS = [
     "end_time",
     "visual_state_ids",
     "visual_entity_ids",
+    "concept_ids",
+    "concept_labels",
+    "concept_aliases",
+    "concept_relation_text",
+    "concepts",
+    "concept_relations",
     "verified_entity_link_ids",
     "candidate_entity_link_ids",
     "candidate_entity_link_statuses",
@@ -338,6 +344,12 @@ def _evidence_unit_candidate(*, rank: int, hit: dict[str, Any]) -> dict[str, Any
         "end_time": _optional_float(hit.get("end_time")),
         "visual_state_ids": _string_list(hit.get("visual_state_ids")),
         "visual_entity_ids": _string_list(hit.get("visual_entity_ids")),
+        "concept_ids": _string_list(hit.get("concept_ids")),
+        "concept_labels": _string_list(hit.get("concept_labels")),
+        "concept_aliases": _string_list(hit.get("concept_aliases")),
+        "concept_relation_text": str(hit.get("concept_relation_text") or ""),
+        "concepts": _list_of_dicts(hit.get("concepts")),
+        "concept_relations": _list_of_dicts(hit.get("concept_relations")),
         "verified_entity_link_ids": _string_list(hit.get("verified_entity_link_ids")),
         "candidate_entity_link_ids": _string_list(hit.get("candidate_entity_link_ids")),
         "candidate_entity_link_statuses": _mapping(hit.get("candidate_entity_link_statuses")),
@@ -539,6 +551,12 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if item not in (None, "")]
+
+
+def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
 
 
 def _mapping(value: Any) -> dict[str, Any]:
