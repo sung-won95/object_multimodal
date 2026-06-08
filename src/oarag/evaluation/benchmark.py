@@ -31,7 +31,10 @@ from oarag.retrieval.evidence import (
 )
 from oarag.retrieval.answer import compose_answer
 from oarag.retrieval.project_index import segment_artifact_path
-from oarag.retrieval.evidence_unit_index import query_project_evidence_units
+from oarag.retrieval.evidence_unit_index import (
+    MODALITY_AWARE_RERANK,
+    query_project_evidence_units,
+)
 from oarag.retrieval.project_query import (
     DEFAULT_HYBRID_EMBEDDER,
     DEFAULT_HYBRID_SEMANTIC_RATIO,
@@ -147,6 +150,7 @@ DEFAULT_MATRIX_VARIANTS = [
         "label": "Evidence-unit quality rerank",
         "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
         "evidence_unit_priority": "quality",
+        "evidence_unit_rerank": MODALITY_AWARE_RERANK,
         "candidate_pool_limit": 30,
         "use_domain_lexicon": False,
     },
@@ -1509,6 +1513,7 @@ def _run_evidence_unit_matrix_query(
     candidate_pool_limit = _optional_int(_variant_value(suite, variant, "candidate_pool_limit"))
     search_limit = max(limit, candidate_pool_limit or limit)
     evidence_units_path = _optional_path(_variant_value(suite, variant, "evidence_units"))
+    evidence_unit_rerank = _matrix_evidence_unit_rerank(suite=suite, variant=variant)
     try:
         evidence_response = query_project_evidence_units(
             client=client,  # type: ignore[arg-type]
@@ -1517,6 +1522,7 @@ def _run_evidence_unit_matrix_query(
             query=query_text,
             limit=search_limit,
             evidence_units=evidence_units_path,
+            evidence_unit_rerank=evidence_unit_rerank,
         )
     except FileNotFoundError:
         return _skipped_matrix_row(
@@ -1579,9 +1585,15 @@ def _run_evidence_unit_matrix_query(
             "evidence_unit": {
                 "enabled": True,
                 "priority": priority,
+                "rerank": evidence_unit_rerank,
                 "candidate_pool_limit": search_limit,
                 "returned_limit": limit,
-            }
+            },
+            "evidence_unit_rerank": _mapping(
+                _mapping(evidence_response.get("retrieval_context")).get(
+                    "evidence_unit_rerank"
+                )
+            ),
         },
         "warnings": [],
     }
@@ -1663,6 +1675,9 @@ def _run_evidence_unit_matrix_query(
         "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
         "object_link_diagnostics": object_link_diagnostics,
         "object_evidence_coverage": _matrix_object_evidence_coverage(top_bundle),
+        "modality_aware_rerank": _public_evidence_unit_rerank(
+            response.get("retrieval_context")
+        ),
         "query_expansion": _public_query_expansion(None),
         "semantic_retrieval": _public_semantic_retrieval(response.get("retrieval_context")),
         "top_candidate": _public_matrix_candidate(top_bundle),
@@ -1684,6 +1699,17 @@ def _matrix_evidence_unit_index_uid(
         or _optional_str(variant.get("evidence_unit_index"))
         or _optional_str(suite.get("evidence_unit_index"))
     )
+
+
+def _matrix_evidence_unit_rerank(*, suite: dict[str, Any], variant: dict[str, Any]) -> str | None:
+    configured = _optional_str(_variant_value(suite, variant, "evidence_unit_rerank"))
+    if configured:
+        normalized = configured.casefold().replace("-", "_")
+        return MODALITY_AWARE_RERANK if normalized in {"modality", "modality_aware"} else configured
+    priority = str(variant.get("evidence_unit_priority") or "").strip().casefold()
+    if priority in {"quality", "quality-rerank", "quality_rerank"}:
+        return MODALITY_AWARE_RERANK
+    return None
 
 
 def _skipped_matrix_row(
@@ -1751,6 +1777,7 @@ def _skipped_matrix_row(
         "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
         "object_link_diagnostics": object_link_diagnostics,
         "object_evidence_coverage": _matrix_object_evidence_coverage(None),
+        "modality_aware_rerank": _public_evidence_unit_rerank(None),
         "query_expansion": _public_query_expansion(None),
         "semantic_retrieval": _public_semantic_retrieval(None),
         "top_candidate": None,
@@ -1794,6 +1821,16 @@ def _evidence_unit_matrix_sort_key(
             stable_id,
         )
     if priority in {"quality", "quality-rerank", "quality_rerank"}:
+        rerank = _mapping(candidate.get("modality_aware_rerank"))
+        rerank_score = _optional_float(rerank.get("score"))
+        if rerank_score is not None:
+            return (
+                -rerank_score,
+                not (verified_count > 0 or quality.get("has_verified_link") is True),
+                fallback_count,
+                rank,
+                stable_id,
+            )
         return (
             not (verified_count > 0 or quality.get("has_verified_link") is True),
             not has_vlm,
@@ -1854,6 +1891,7 @@ def _evidence_unit_matrix_bundle(
         "candidate_entity_link_ids": _string_list(candidate.get("candidate_entity_link_ids")),
         "candidate_entity_link_statuses": _mapping(candidate.get("candidate_entity_link_statuses")),
         "source_quality": source_quality,
+        "modality_aware_rerank": _mapping(candidate.get("modality_aware_rerank")),
         "transcript_excerpt": candidate.get("transcript_window_text")
         or candidate.get("evidence_text")
         or candidate.get("semantic_text"),
@@ -1957,6 +1995,7 @@ def _matrix_variant_metrics(
                 is True
             )
         ),
+        "modality_aware_rerank": _matrix_modality_aware_rerank_metrics(rows),
         "object_evidence_coverage_counts": _object_evidence_coverage_counts(rows),
         "visual_state_coverage_ratio": _coverage_bool_ratio(rows, "has_visual_state"),
         "visual_entity_coverage_ratio": _coverage_bool_ratio(rows, "has_visual_entity"),
@@ -1995,6 +2034,27 @@ def _matrix_variant_metrics(
     for delta in deltas:
         metric[f"hit_at_{delta}s"] = _ratio_hit(rows, str(delta))
     return metric
+
+
+def _matrix_modality_aware_rerank_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    diagnostics = [_mapping(row.get("modality_aware_rerank")) for row in rows]
+    enabled = [diag for diag in diagnostics if diag.get("enabled") is True]
+    query_types = Counter(str(diag.get("query_type") or "unknown") for diag in enabled)
+    top_changed_count = sum(1 for diag in enabled if diag.get("top_changed") is True)
+    component_presence = Counter()
+    for diag in enabled:
+        for name in diag.get("component_names", []):
+            if isinstance(name, str):
+                component_presence[name] += 1
+    return {
+        "enabled_query_count": len(enabled),
+        "top_changed_count": top_changed_count,
+        "query_type_counts": dict(query_types),
+        "score_component_presence_counts": dict(component_presence),
+        "public_note": (
+            "Matrix rerank metrics are aggregate-only and exclude raw query/evidence text."
+        ),
+    }
 
 
 def _expected_ranges(query_row: dict[str, Any]) -> list[tuple[float, float]]:
@@ -2307,6 +2367,15 @@ def _public_matrix_variant_config(variant: dict[str, Any]) -> dict[str, Any]:
         config["evidence_unit_priority"] = str(
             variant.get("evidence_unit_priority") or "candidate"
         )
+        config["evidence_unit_rerank"] = (
+            _optional_str(variant.get("evidence_unit_rerank"))
+            or (
+                MODALITY_AWARE_RERANK
+                if str(variant.get("evidence_unit_priority") or "").casefold()
+                in {"quality", "quality-rerank", "quality_rerank"}
+                else None
+            )
+        )
     candidate_pool_limit = _optional_int(variant.get("candidate_pool_limit"))
     if candidate_pool_limit is not None:
         config["candidate_pool_limit"] = candidate_pool_limit
@@ -2377,6 +2446,68 @@ def _public_semantic_retrieval(value: Any) -> dict[str, Any]:
     }
 
 
+def _public_evidence_unit_rerank(value: Any) -> dict[str, Any]:
+    context = value if isinstance(value, dict) else {}
+    rerank = _mapping(context.get("evidence_unit_rerank"))
+    if not rerank or rerank.get("enabled") is not True:
+        return {"enabled": False, "strategy": None}
+    return {
+        "enabled": True,
+        "strategy": rerank.get("strategy"),
+        "query_type": rerank.get("query_type"),
+        "candidate_count": int(rerank.get("candidate_count") or 0),
+        "top_changed": bool(rerank.get("top_changed")),
+        "base_top_ref": rerank.get("base_top_ref"),
+        "reranked_top_ref": rerank.get("reranked_top_ref"),
+        "reranked_top_score": rerank.get("reranked_top_score"),
+        "reranked_top_score_bucket": _matrix_score_bucket(
+            _optional_float(rerank.get("reranked_top_score"))
+        ),
+        "reranked_top_original_rank": rerank.get("reranked_top_original_rank"),
+        "reranked_top_rank": rerank.get("reranked_top_rank"),
+        "component_names": [
+            str(name)
+            for name in rerank.get("component_names", [])
+            if isinstance(name, str)
+        ],
+        "public_note": (
+            "Evidence-unit modality-aware rerank reports hashed refs, query type, "
+            "feature names, counts, buckets, and scores only."
+        ),
+    }
+
+
+def _public_candidate_modality_rerank(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    rerank = _mapping(candidate.get("modality_aware_rerank"))
+    if not rerank:
+        return None
+    return {
+        "strategy": rerank.get("strategy"),
+        "query_type": rerank.get("query_type"),
+        "original_rank": rerank.get("original_rank"),
+        "reranked_rank": rerank.get("reranked_rank"),
+        "score": rerank.get("score"),
+        "score_bucket": _matrix_score_bucket(_optional_float(rerank.get("score"))),
+        "score_components": _mapping(rerank.get("components")),
+        "flags": _mapping(rerank.get("flags")),
+        "query_term_overlap": _mapping(rerank.get("query_term_overlap")),
+    }
+
+
+def _matrix_score_bucket(score: float | None) -> str:
+    if score is None:
+        return "not_available"
+    if score < 0:
+        return "negative"
+    if score < 0.5:
+        return "low"
+    if score < 1.0:
+        return "medium"
+    if score < 1.5:
+        return "high"
+    return "very_high"
+
+
 def _row_has_provider_backed_query_vector(row: dict[str, Any]) -> bool:
     config = row.get("config") if isinstance(row.get("config"), dict) else {}
     query_vector = config.get("query_vector") if isinstance(config.get("query_vector"), dict) else {}
@@ -2433,6 +2564,7 @@ def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | 
         "candidate_visual_support": object_link_diagnostics["candidate_visual_support"],
         "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
         "object_evidence_coverage": coverage,
+        "modality_aware_rerank": _public_candidate_modality_rerank(candidate),
     }
 
 

@@ -135,6 +135,80 @@ class QualityRerankFakeClient(AvailableFakeClient):
         return {"hits": hits[:limit], "processingTimeMs": 2}
 
 
+class ModalityAwareRerankFakeClient(AvailableFakeClient):
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        if index_uid != "evidence_index":
+            return super().search(index_uid, query, limit=limit, filter=filter, **kwargs)
+        hits = [
+            {
+                "evidence_unit_id": "evu_ocr_private",
+                "project_id": "project_private",
+                "video_id": "video_private",
+                "target_segment_id": "seg_private_2",
+                "source_segment_ids": ["seg_private_2"],
+                "start_time": 20.0,
+                "end_time": 22.0,
+                "evidence_text": "SECRET OCR fallback visual evidence",
+                "semantic_text": "SECRET OCR fallback semantic",
+                "visual_state_ids": ["vstate_ocr"],
+                "visual_entity_ids": ["entity_ocr"],
+                "verified_entity_link_ids": [],
+                "candidate_entity_link_ids": ["link_time"],
+                "candidate_entity_link_statuses": {"link_time": "timestamp_fallback"},
+                "alignment_status": "candidate",
+                "source_quality": {
+                    "has_visual_state": True,
+                    "has_visual_entity": True,
+                    "has_vlm_entity": False,
+                    "has_verified_link": False,
+                    "uses_ocr_only": True,
+                    "has_timestamp_fallback_link": True,
+                    "candidate_link_count": 0,
+                    "timestamp_fallback_link_count": 1,
+                    "verified_link_count": 0,
+                },
+                "_rankingScore": 0.99,
+            },
+            {
+                "evidence_unit_id": "evu_verified_private",
+                "project_id": "project_private",
+                "video_id": "video_private",
+                "target_segment_id": "seg_private_1",
+                "source_segment_ids": ["seg_private_1"],
+                "start_time": 10.0,
+                "end_time": 12.0,
+                "evidence_text": "SECRET verified diagram arrow evidence",
+                "semantic_text": "SECRET verified diagram arrow semantic",
+                "visual_state_ids": ["vstate_verified"],
+                "visual_entity_ids": ["entity_verified"],
+                "verified_entity_link_ids": ["link_verified"],
+                "candidate_entity_link_ids": ["link_verified"],
+                "candidate_entity_link_statuses": {"link_verified": "verified"},
+                "alignment_status": "verified",
+                "source_quality": {
+                    "has_visual_state": True,
+                    "has_visual_entity": True,
+                    "has_vlm_entity": True,
+                    "has_verified_link": True,
+                    "uses_ocr_only": False,
+                    "has_timestamp_fallback_link": False,
+                    "candidate_link_count": 0,
+                    "timestamp_fallback_link_count": 0,
+                    "verified_link_count": 1,
+                },
+                "_rankingScore": 0.6,
+            },
+        ]
+        return {"hits": hits[:limit], "processingTimeMs": 2}
+
+
 def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: Path) -> None:
     project_dir = _write_project(tmp_path)
     manifest_path = _write_manifest(
@@ -314,6 +388,69 @@ def test_evidence_unit_smoke_quality_rerank_compares_base_and_reranked(tmp_path:
         "SECRET top transcript",
         "SECRET target transcript",
         "evu_target_visual_private",
+        "seg_private_1",
+        str(project_dir),
+    ]:
+        assert sensitive not in public_text
+
+
+def test_evidence_unit_smoke_modality_aware_rerank_reports_public_breakdown(
+    tmp_path: Path,
+) -> None:
+    project_dir = _write_project(tmp_path)
+    manifest_path = _write_manifest(
+        tmp_path,
+        project_dir=project_dir,
+        extra_suite={
+            "modality_aware_rerank": True,
+            "target_rank_limit": 2,
+            "queries": [
+                {
+                    "query_id": "q_visual",
+                    "query_label": "visual concept label",
+                    "query_text": "PRIVATE RAW diagram arrow query should stay private",
+                    "expected_segment_id": "seg_private_1",
+                }
+            ],
+        },
+    )
+
+    run = run_evidence_unit_smoke(
+        client=ModalityAwareRerankFakeClient(),
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "public",
+        repo_root=tmp_path,
+    )
+
+    payload = json.loads(run.metrics_path.read_text(encoding="utf-8"))
+    row = json.loads(run.query_results_path.read_text(encoding="utf-8").splitlines()[0])
+    rerank = row["modality_aware_rerank"]
+
+    assert rerank["enabled"] is True
+    assert rerank["strategy"] == "modality_aware"
+    assert rerank["query_type"] == "visual-heavy"
+    assert rerank["top_changed"] is True
+    assert rerank["base_target_rank_bucket"] == "top5"
+    assert rerank["reranked_target_rank_bucket"] == "top1"
+    assert rerank["failure_mode"] == "ranking_improved"
+    assert row["top_evidence_unit"]["source_quality"]["has_verified_link"] is True
+    top_rerank = row["top_evidence_unit"]["modality_aware_rerank"]
+    assert top_rerank["score_components"]["verified_link"] > 0
+    assert top_rerank["score_components"]["vlm_entity"] > 0
+    assert "verified_link" in rerank["component_names"]
+    assert payload["modality_aware_rerank_diagnostics"]["query_type_counts"] == {
+        "visual-heavy": 1
+    }
+    assert payload["modality_aware_rerank_diagnostics"]["failure_mode_counts"] == {
+        "ranking_improved": 1
+    }
+
+    public_text = _public_text(run)
+    for sensitive in [
+        "PRIVATE RAW diagram arrow query",
+        "SECRET OCR fallback",
+        "SECRET verified diagram",
+        "evu_verified_private",
         "seg_private_1",
         str(project_dir),
     ]:
