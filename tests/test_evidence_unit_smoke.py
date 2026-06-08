@@ -164,6 +164,12 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert suite["build"]["alignment_status_counts"] == {"candidate": 2}
     assert suite["build"]["link_counts"]["verified_links"] == 0
     assert suite["build"]["link_counts"]["timestamp_fallback_links"] == 1
+    assert suite["build"]["visual_state_coverage"]["source"] == "sampled_frame_midpoints"
+    assert suite["build"]["visual_state_coverage"]["visual_states_total"] == 1
+    assert suite["build"]["visual_state_coverage"]["evidence_units_with_visual_state"] == 2
+    assert suite["build"]["visual_state_coverage"]["transcript_only_units"] == 0
+    assert suite["build"]["visual_state_coverage"]["coverage_gate"]["status"] == "not_configured"
+    assert suite["build"]["visual_state_coverage"]["interval_duration_seconds"]["buckets"]["15-30s"] == 1
     assert suite["index"]["status"] == "indexed"
     assert suite["rag_input_inspection"]["inspectable_top_hit_count"] == 1
 
@@ -223,6 +229,7 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     ]:
         assert sensitive not in public_text
     assert "Timestamp-only overlap is not counted" in run.summary_path.read_text(encoding="utf-8")
+    assert "Visual-state interval overlap" in run.summary_path.read_text(encoding="utf-8")
     assert "redacted" in public_text
 
 

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from oarag.retrieval.evidence_unit_index import query_project_evidence_units
-from oarag.retrieval.evidence_units import build_project_evidence_units
+from oarag.retrieval.evidence_units import build_project_evidence_units, build_project_visual_states
 from oarag.retrieval.project_index import index_project_evidence_units
 
 
@@ -128,6 +128,119 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     manifest = json.loads((project_dir / "manifests" / "project_manifest.json").read_text())
     assert manifest["artifacts"]["evidence_units"].endswith("segments/evidence_units.jsonl")
     assert manifest["counts"]["evidence_units"] == 3
+
+
+def test_build_project_visual_states_writes_public_safe_artifact_and_manifest(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "visual_state_project"
+    manifest_path = project_dir / "manifests" / "project_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps({"project_id": "visual_state_project", "video_id": "lecture_video"}),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "frames_manifest.jsonl",
+        [
+            {
+                "frame_id": "frame_intro",
+                "timestamp": 10.0,
+                "frame_path": "/private/raw/frame_intro.jpg",
+                "detected_text": ["Intro"],
+            },
+            {
+                "frame_id": "frame_middle",
+                "timestamp": 20.0,
+                "frame_path": "/private/raw/frame_middle.jpg",
+                "visual_description": "A public-safe board summary.",
+            },
+            {
+                "frame_id": "frame_end",
+                "timestamp": 35.0,
+                "frame_path": "/private/raw/frame_end.jpg",
+            },
+        ],
+    )
+
+    summary = build_project_visual_states(
+        project_dir=project_dir,
+        state_padding_seconds=5.0,
+        min_visual_states=3,
+        fail_on_visual_state_gate=True,
+    )
+
+    visual_states_path = project_dir / "manifests" / "visual_states.jsonl"
+    rows = _read_jsonl(visual_states_path)
+    artifact_text = visual_states_path.read_text(encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert summary["counts"]["visual_states_total"] == 3
+    assert summary["interval_duration_seconds"]["buckets"]["5-15s"] == 3
+    assert summary["coverage_gate"]["status"] == "passed"
+    assert rows[0]["schema_version"] == "oarag-visual-states-jsonl-v1"
+    assert rows[0]["valid_start_time"] == 5.0
+    assert rows[0]["valid_end_time"] == 15.0
+    assert "frame_path" not in artifact_text
+    assert "/private/raw" not in artifact_text
+    assert manifest["artifacts"]["visual_states"].endswith("manifests/visual_states.jsonl")
+    assert manifest["counts"]["visual_states"] == 3
+    assert manifest["visual_state_storage"]["schema_version"] == "oarag-visual-states-jsonl-v1"
+
+
+def test_build_project_evidence_units_loads_visual_states_artifact_and_reports_gate(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "external_visual_state_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment("seg_external", 10.0, 12.0, "A transcript-only mention."),
+        ],
+    )
+    _write_jsonl(
+        project_dir / "manifests" / "visual_states.jsonl",
+        [
+            {
+                "visual_state_id": "vstate_external",
+                "project_id": "sample_project",
+                "video_id": "sample_video",
+                "representative_frame_id": "frame_external",
+                "frame_ids": ["frame_external"],
+                "valid_start_time": 9.0,
+                "valid_end_time": 13.0,
+                "state_summary": "External diagram state.",
+                "source": "fixture_external",
+                "frame_path": "/private/raw/frame_external.jpg",
+            },
+        ],
+    )
+
+    summary = build_project_evidence_units(
+        project_dir=project_dir,
+        visual_states=Path("manifests/visual_states.jsonl"),
+        previous_neighbor_count=0,
+        next_neighbor_count=0,
+        visual_state_min_coverage_ratio=1.0,
+        visual_state_min_total=1,
+        fail_on_visual_state_gate=True,
+    )
+
+    rows = _read_jsonl(project_dir / "segments" / "evidence_units.jsonl")
+    unit = rows[0]
+    output_text = (project_dir / "segments" / "evidence_units.jsonl").read_text(encoding="utf-8")
+    manifest = json.loads((project_dir / "manifests" / "project_manifest.json").read_text())
+    assert unit["visual_state_ids"] == ["vstate_external"]
+    assert unit["alignment_status"] == "candidate"
+    assert unit["source_quality"]["has_visual_state"] is True
+    assert unit["source_quality"]["has_verified_link"] is False
+    assert summary["visual_state_config"]["mode"] == "external_visual_states_artifact"
+    assert summary["visual_state_config"]["artifact_loaded"] is True
+    assert summary["visual_state_coverage"]["coverage_gate"]["status"] == "passed"
+    assert summary["visual_state_coverage"]["source"] == "external_visual_states_artifact"
+    assert summary["visual_state_coverage"]["transcript_only_units"] == 0
+    assert "frame_path" not in output_text
+    assert "/private/raw" not in output_text
+    assert manifest["artifacts"]["visual_states"].endswith("manifests/visual_states.jsonl")
 
 
 def test_build_project_evidence_units_supports_transcript_only_project(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ from oarag.cli import (
     build_parser,
     build_vlm_alignment_parser,
     cmd_build_project_evidence_units,
+    cmd_build_project_visual_states,
     cmd_build_project_windows,
     cmd_index_project_evidence_units,
     cmd_index_project,
@@ -280,6 +281,68 @@ def test_cmd_build_project_windows_forwards_window_options(monkeypatch, capsys) 
     assert json.loads(capsys.readouterr().out)["counts"]["windows_total"] == 1
 
 
+def test_build_project_visual_states_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        ["build-project-visual-states", "--project-id", "sample_project"]
+    )
+
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.frames_manifest is None
+    assert args.output is None
+    assert args.manifest is None
+    assert args.state_padding_seconds == 15.0
+    assert args.min_visual_states is None
+    assert args.fail_on_visual_state_gate is False
+
+
+def test_cmd_build_project_visual_states_forwards_inputs(monkeypatch, capsys) -> None:
+    calls = {}
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_build_project_visual_states(**kwargs):
+        calls["build_kwargs"] = kwargs
+        return {"counts": {"visual_states_total": 1}, "coverage_gate": {"status": "passed"}}
+
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr(
+        "oarag.cli.build_project_visual_states",
+        fake_build_project_visual_states,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "build-project-visual-states",
+            "--project-dir",
+            str(project_dir),
+            "--frames-manifest",
+            "manifests/frames_manifest.jsonl",
+            "--output",
+            "manifests/visual_states.jsonl",
+            "--state-padding-seconds",
+            "20",
+            "--min-visual-states",
+            "1",
+            "--fail-on-visual-state-gate",
+        ]
+    )
+
+    cmd_build_project_visual_states(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["build_kwargs"]["project_dir"] == Path("/tmp/project")
+    assert calls["build_kwargs"]["frames_manifest"].as_posix() == "manifests/frames_manifest.jsonl"
+    assert calls["build_kwargs"]["output_path"].as_posix() == "manifests/visual_states.jsonl"
+    assert calls["build_kwargs"]["state_padding_seconds"] == 20.0
+    assert calls["build_kwargs"]["min_visual_states"] == 1
+    assert calls["build_kwargs"]["fail_on_visual_state_gate"] is True
+    assert json.loads(capsys.readouterr().out)["counts"]["visual_states_total"] == 1
+
+
 def test_build_project_evidence_units_cli_defaults() -> None:
     args = build_parser().parse_args(
         ["build-project-evidence-units", "--project-id", "sample_project"]
@@ -289,11 +352,16 @@ def test_build_project_evidence_units_cli_defaults() -> None:
     assert args.project_dir is None
     assert args.segments is None
     assert args.frames_manifest is None
+    assert args.visual_states is None
+    assert args.visual_states_output is None
     assert args.visual_entities is None
     assert args.entity_links is None
     assert args.output is None
     assert args.manifest is None
     assert args.state_padding_seconds == 15.0
+    assert args.visual_state_min_coverage_ratio is None
+    assert args.visual_state_min_total is None
+    assert args.fail_on_visual_state_gate is False
     assert args.neighbor_count == 1
     assert args.window_seconds is None
     assert args.previous_neighbor_count is None
@@ -325,12 +393,21 @@ def test_cmd_build_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
             str(project_dir),
             "--segments",
             "segments/custom.jsonl",
+            "--visual-states",
+            "manifests/visual_states.jsonl",
+            "--visual-states-output",
+            "manifests/visual_states.normalized.jsonl",
             "--entity-links",
             "manifests/entity_links.jsonl",
             "--output",
             "segments/evidence_units.jsonl",
             "--state-padding-seconds",
             "20",
+            "--visual-state-min-coverage-ratio",
+            "0.5",
+            "--visual-state-min-total",
+            "2",
+            "--fail-on-visual-state-gate",
             "--previous-neighbor-count",
             "2",
             "--next-neighbor-count",
@@ -343,9 +420,14 @@ def test_cmd_build_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
     assert calls["location"] == (None, project_dir)
     assert calls["build_kwargs"]["project_dir"] == Path("/tmp/project")
     assert calls["build_kwargs"]["segments"].as_posix() == "segments/custom.jsonl"
+    assert calls["build_kwargs"]["visual_states"].as_posix() == "manifests/visual_states.jsonl"
+    assert calls["build_kwargs"]["visual_states_output"].as_posix() == "manifests/visual_states.normalized.jsonl"
     assert calls["build_kwargs"]["entity_links"].as_posix() == "manifests/entity_links.jsonl"
     assert calls["build_kwargs"]["output_path"].as_posix() == "segments/evidence_units.jsonl"
     assert calls["build_kwargs"]["state_padding_seconds"] == 20.0
+    assert calls["build_kwargs"]["visual_state_min_coverage_ratio"] == 0.5
+    assert calls["build_kwargs"]["visual_state_min_total"] == 2
+    assert calls["build_kwargs"]["fail_on_visual_state_gate"] is True
     assert calls["build_kwargs"]["previous_neighbor_count"] == 2
     assert calls["build_kwargs"]["next_neighbor_count"] == 0
     assert json.loads(capsys.readouterr().out)["counts"]["evidence_units_total"] == 1

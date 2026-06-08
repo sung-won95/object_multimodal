@@ -74,7 +74,7 @@ from oarag.retrieval.project_index import (
     index_project_windows,
     project_dir_from_args,
 )
-from oarag.retrieval.evidence_units import build_project_evidence_units
+from oarag.retrieval.evidence_units import build_project_evidence_units, build_project_visual_states
 from oarag.retrieval.evidence_unit_index import query_project_evidence_units
 from oarag.core.schemas import SearchCandidate
 from oarag.ingestion.stt import DEFAULT_MLX_WHISPER_MODEL
@@ -317,6 +317,46 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build_windows.set_defaults(func=cmd_build_project_windows)
 
+    build_visual_states = subparsers.add_parser(
+        "build-project-visual-states",
+        help="Build a local project visual_states JSONL artifact from sampled frames",
+    )
+    location = build_visual_states.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    build_visual_states.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Optional frames manifest JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_visual_states.add_argument(
+        "--output",
+        type=Path,
+        help="Output visual_states JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_visual_states.add_argument(
+        "--manifest",
+        type=Path,
+        help="Project manifest JSON path. Relative paths are resolved from project dir.",
+    )
+    build_visual_states.add_argument(
+        "--state-padding-seconds",
+        type=float,
+        default=15.0,
+        help="Seconds to extend first/last sampled frames when building rough visual state intervals.",
+    )
+    build_visual_states.add_argument(
+        "--min-visual-states",
+        type=int,
+        help="Optional minimum visual state count for the visual state coverage gate.",
+    )
+    build_visual_states.add_argument(
+        "--fail-on-visual-state-gate",
+        action="store_true",
+        help="Exit non-zero if configured visual state coverage thresholds fail.",
+    )
+    build_visual_states.set_defaults(func=cmd_build_project_visual_states)
+
     build_evidence_units = subparsers.add_parser(
         "build-project-evidence-units",
         help="Build a local project evidence_units JSONL for evidence-first retrieval",
@@ -333,6 +373,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--frames-manifest",
         type=Path,
         help="Optional frames manifest JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_evidence_units.add_argument(
+        "--visual-states",
+        type=Path,
+        help="Optional visual_states JSONL path. Relative paths are resolved from project dir.",
+    )
+    build_evidence_units.add_argument(
+        "--visual-states-output",
+        type=Path,
+        help="Optional visual_states JSONL output path to write the normalized visual state artifact.",
     )
     build_evidence_units.add_argument(
         "--visual-entities",
@@ -359,6 +409,23 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=15.0,
         help="Seconds to extend first/last sampled frames when building rough visual state intervals.",
+    )
+    build_evidence_units.add_argument(
+        "--visual-state-min-coverage-ratio",
+        "--visual-state-min-unit-coverage-ratio",
+        dest="visual_state_min_coverage_ratio",
+        type=float,
+        help="Optional minimum fraction of evidence units with visual_state for the coverage gate.",
+    )
+    build_evidence_units.add_argument(
+        "--visual-state-min-total",
+        type=int,
+        help="Optional minimum total visual states for the coverage gate.",
+    )
+    build_evidence_units.add_argument(
+        "--fail-on-visual-state-gate",
+        action="store_true",
+        help="Exit non-zero if configured visual state coverage thresholds fail.",
     )
     build_evidence_units.add_argument(
         "--window-seconds",
@@ -1956,6 +2023,20 @@ def cmd_build_project_windows(args: argparse.Namespace) -> None:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def cmd_build_project_visual_states(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = build_project_visual_states(
+        project_dir=project_dir,
+        output_path=args.output,
+        frames_manifest=args.frames_manifest,
+        manifest_path=args.manifest,
+        state_padding_seconds=args.state_padding_seconds,
+        min_visual_states=args.min_visual_states,
+        fail_on_visual_state_gate=args.fail_on_visual_state_gate,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
 def cmd_build_project_evidence_units(args: argparse.Namespace) -> None:
     project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
     summary = build_project_evidence_units(
@@ -1963,6 +2044,8 @@ def cmd_build_project_evidence_units(args: argparse.Namespace) -> None:
         output_path=args.output,
         segments=args.segments,
         frames_manifest=args.frames_manifest,
+        visual_states=args.visual_states,
+        visual_states_output=args.visual_states_output,
         visual_entities=args.visual_entities,
         entity_links=args.entity_links,
         manifest_path=args.manifest,
@@ -1973,6 +2056,9 @@ def cmd_build_project_evidence_units(args: argparse.Namespace) -> None:
         window_before_seconds=args.window_before_seconds,
         window_after_seconds=args.window_after_seconds,
         state_padding_seconds=args.state_padding_seconds,
+        visual_state_min_coverage_ratio=args.visual_state_min_coverage_ratio,
+        visual_state_min_total=args.visual_state_min_total,
+        fail_on_visual_state_gate=args.fail_on_visual_state_gate,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
