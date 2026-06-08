@@ -2668,7 +2668,10 @@ def _public_answer_summary(answer: dict[str, Any] | None) -> dict[str, Any]:
         return {"enabled": False}
     policy = answer.get("no_answer_policy") if isinstance(answer.get("no_answer_policy"), dict) else {}
     llm = answer.get("llm") if isinstance(answer.get("llm"), dict) else {}
-    citation_quality = _answer_visual_citation_counts(_list_of_dicts(answer.get("citations")))
+    citation_quality = _answer_visual_citation_counts(
+        citations=_list_of_dicts(answer.get("citations")),
+        claims=_list_of_dicts(answer.get("claims")),
+    )
     return {
         "enabled": True,
         "schema_version": answer.get("schema_version"),
@@ -2755,7 +2758,7 @@ def _answer_grounding_metrics(
         expected_ranges=expected_ranges,
         expected_available=expected_available,
     )
-    citation_quality = _answer_visual_citation_counts(citations)
+    citation_quality = _answer_visual_citation_counts(citations=citations, claims=claims)
     return {
         "enabled": True,
         "expected_available": expected_available,
@@ -2782,12 +2785,27 @@ def _answer_grounding_metrics(
     }
 
 
-def _answer_visual_citation_counts(citations: list[dict[str, Any]]) -> dict[str, int]:
+def _answer_visual_citation_counts(
+    *,
+    citations: list[dict[str, Any]],
+    claims: list[dict[str, Any]],
+) -> dict[str, int]:
+    referenced_citation_ids = _claim_referenced_citation_ids(claims)
     evidence_unit_count = 0
     verified_visual_count = 0
     candidate_only_count = 0
     timestamp_fallback_count = 0
+    if not referenced_citation_ids:
+        return {
+            "evidence_unit_citation_count": evidence_unit_count,
+            "verified_visual_citation_count": verified_visual_count,
+            "candidate_only_visual_citation_count": candidate_only_count,
+            "timestamp_fallback_citation_count": timestamp_fallback_count,
+        }
     for citation in citations:
+        citation_id = str(citation.get("citation_id") or "")
+        if citation_id not in referenced_citation_ids:
+            continue
         evidence_unit = _mapping(citation.get("evidence_unit"))
         if not evidence_unit:
             continue
@@ -2807,6 +2825,16 @@ def _answer_visual_citation_counts(citations: list[dict[str, Any]]) -> dict[str,
         "candidate_only_visual_citation_count": candidate_only_count,
         "timestamp_fallback_citation_count": timestamp_fallback_count,
     }
+
+
+def _claim_referenced_citation_ids(claims: list[dict[str, Any]]) -> set[str]:
+    citation_ids: set[str] = set()
+    for claim in claims:
+        for citation_id in claim.get("citation_ids") or []:
+            citation_id_text = str(citation_id or "").strip()
+            if citation_id_text:
+                citation_ids.add(citation_id_text)
+    return citation_ids
 
 
 def _expected_citation_units(
