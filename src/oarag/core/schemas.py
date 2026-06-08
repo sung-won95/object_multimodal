@@ -652,6 +652,14 @@ class EntityLink:
     mention_candidate: list[str]
     score_breakdown: dict[str, float] = field(default_factory=dict)
     reason_metadata: dict[str, Any] = field(default_factory=dict)
+    verified: bool | None = None
+    verification_status: str | None = None
+    status: str | None = None
+    alignment_status: str | None = None
+    verification_source: str | None = None
+    verified_by: str | None = None
+    verifier: str | None = None
+    source: str | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "EntityLink":
@@ -673,6 +681,18 @@ class EntityLink:
                 if _optional_float(value) is not None
             },
             reason_metadata=_mapping(payload.get("reason_metadata")),
+            verified=payload.get("verified") if isinstance(payload.get("verified"), bool) else None,
+            verification_status=_optional_str(payload.get("verification_status")),
+            status=_optional_str(payload.get("status")),
+            alignment_status=_optional_str(payload.get("alignment_status")),
+            verification_source=_optional_str(
+                payload.get("verification_source")
+                or payload.get("verified_source")
+                or payload.get("source_kind")
+            ),
+            verified_by=_optional_str(payload.get("verified_by")),
+            verifier=_optional_str(payload.get("verifier")),
+            source=_optional_str(payload.get("source")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -681,6 +701,18 @@ class EntityLink:
             payload.pop("score_breakdown")
         if not self.reason_metadata:
             payload.pop("reason_metadata")
+        for key in (
+            "verified",
+            "verification_status",
+            "status",
+            "alignment_status",
+            "verification_source",
+            "verified_by",
+            "verifier",
+            "source",
+        ):
+            if payload.get(key) in (None, ""):
+                payload.pop(key, None)
         return payload
 
 

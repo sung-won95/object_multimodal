@@ -162,8 +162,27 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     suite = payload["suites"][0]
     assert suite["build"]["counts"]["evidence_units_total"] == 2
     assert suite["build"]["alignment_status_counts"] == {"candidate": 2}
+    assert suite["build"]["source_quality_counts"]["units_with_candidate_link"] == 0
     assert suite["build"]["link_counts"]["verified_links"] == 0
     assert suite["build"]["link_counts"]["timestamp_fallback_links"] == 1
+    assert suite["build"]["link_diagnostics"]["candidate_visual_support"][
+        "units_with_candidate_visual_support"
+    ] == 2
+    assert suite["build"]["link_diagnostics"]["candidate_visual_support"][
+        "units_with_timestamp_fallback_link"
+    ] == 1
+    assert suite["build"]["link_diagnostics"]["candidate_link_signal_counts"][
+        "timestamp_fallback"
+    ] == 1
+    assert suite["build"]["link_diagnostics"]["verified_object_alignment"][
+        "units_with_verified_object_alignment"
+    ] == 0
+    assert suite["build"]["link_diagnostics"]["verified_object_alignment"][
+        "verified_links"
+    ] == 0
+    assert suite["build"]["link_diagnostics"]["verified_object_alignment"][
+        "timestamp_fallback_counted_as_verified"
+    ] is False
     assert suite["build"]["visual_state_coverage"]["source"] == "sampled_frame_midpoints"
     assert suite["build"]["visual_state_coverage"]["visual_states_total"] == 1
     assert suite["build"]["visual_state_coverage"]["evidence_units_with_visual_state"] == 2
@@ -181,6 +200,15 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert rows[0]["top_evidence_unit"]["alignment_status"] == "candidate"
     assert rows[0]["top_evidence_unit"]["source_quality"]["has_verified_link"] is False
     assert rows[0]["top_evidence_unit"]["source_quality"]["has_timestamp_fallback_link"] is False
+    assert rows[0]["top_evidence_unit"]["candidate_visual_support"][
+        "has_candidate_visual_support"
+    ] is True
+    assert rows[0]["top_evidence_unit"]["verified_object_alignment"][
+        "has_verified_object_alignment"
+    ] is False
+    assert rows[0]["top_evidence_unit"]["verified_object_alignment"][
+        "timestamp_fallback_counted_as_verified"
+    ] is False
     assert rows[0]["top_evidence_unit"]["content_coverage"]["semantic_text_char_count"] > 0
     assert rows[0]["top_evidence_unit"]["query_term_coverage"]["query_term_count"] > 0
     assert rows[0]["top_evidence_unit"]["query_term_coverage"]["combined_match_bucket"] in {
@@ -197,6 +225,12 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert rows[0]["target_diagnostics"]["target_rank_bucket"] == "top5"
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_verified_link"] is False
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_timestamp_fallback_link"] is True
+    assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"][
+        "candidate_visual_support"
+    ]["timestamp_fallback_link_count"] == 1
+    assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"][
+        "verified_object_alignment"
+    ]["verified_link_count"] == 0
     assert rows[0]["target_diagnostics"]["target_content_coverage"]["semantic_text_char_count"] > 0
     assert rows[0]["target_diagnostics"]["target_query_term_coverage"]["query_term_count"] > 0
     assert rows[0]["target_diagnostics"]["top_vs_target_quality_delta"]["status"] == "available"
@@ -211,6 +245,12 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert payload["target_rank_diagnostics"]["target_configured_count"] == 1
     assert payload["target_rank_diagnostics"]["target_found_in_top_k_count"] == 1
     assert payload["target_rank_diagnostics"]["rank_bucket_counts"] == {"top5": 1}
+    assert payload["target_rank_diagnostics"]["found_target_candidate_link_signal_counts"][
+        "timestamp_fallback"
+    ] == 1
+    assert payload["target_rank_diagnostics"]["found_target_verified_link_source_counts"][
+        "explicit_verified_flag"
+    ] == 0
     assert "found_target_query_term_bucket_counts" in payload["target_rank_diagnostics"]
     assert suite["target_rank_diagnostics"]["rank_bucket_counts"] == {"top5": 1}
 

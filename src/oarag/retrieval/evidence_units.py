@@ -19,12 +19,36 @@ EVIDENCE_UNITS_ARTIFACT_RELATIVE_PATH = Path("segments") / "evidence_units.jsonl
 VISUAL_STATES_ARTIFACT_RELATIVE_PATH = Path("manifests") / "visual_states.jsonl"
 VISUAL_STATES_SCHEMA_VERSION = "oarag-visual-states-jsonl-v1"
 VISUAL_STATE_COVERAGE_SCHEMA_VERSION = "oarag-visual-state-coverage-v1"
+LINK_DIAGNOSTICS_SCHEMA_VERSION = "oarag-object-link-diagnostics-public-v1"
 DEFAULT_STATE_PADDING_SECONDS = 15.0
 VISUAL_STATE_PUBLIC_NOTE = (
     "Visual states are candidate interval support derived from sampled-frame midpoints "
     "or an explicit visual_states artifact. First/last interval padding is a coverage "
     "fallback, not verified object persistence, and timestamp-only overlap is not "
     "counted as verified object alignment."
+)
+LINK_DIAGNOSTICS_PUBLIC_NOTE = (
+    "Candidate visual support is reported separately from verified object alignment. "
+    "Timestamp fallback links are candidate/fallback evidence only and are never "
+    "counted as verified object alignment unless an explicit verified field is present."
+)
+CANDIDATE_LINK_SIGNAL_KEYS = (
+    "temporal_overlap",
+    "lexical_overlap",
+    "mention_deictic_hook",
+    "spatial_position",
+    "visual_text_overlap",
+    "vlm_object_visual_description_overlap",
+    "semantic_domain_hint",
+    "timestamp_fallback",
+)
+VERIFIED_LINK_SOURCE_KEYS = (
+    "explicit_verified_flag",
+    "explicit_verified_status",
+    "human_gold",
+    "vlm_verifier",
+    "strict_deterministic_rule",
+    "unspecified_verified",
 )
 
 
@@ -219,7 +243,27 @@ def build_project_evidence_units(
         "units_with_visual_state": sum(1 for document in documents if document["source_quality"]["has_visual_state"]),
         "units_with_visual_entity": sum(1 for document in documents if document["source_quality"]["has_visual_entity"]),
         "units_with_vlm_entity": sum(1 for document in documents if document["source_quality"]["has_vlm_entity"]),
+        "units_with_candidate_link": sum(
+            1
+            for document in documents
+            if document["source_quality"]["candidate_link_count"] > 0
+        ),
         "units_with_verified_link": sum(1 for document in documents if document["source_quality"]["has_verified_link"]),
+        "units_with_timestamp_fallback_link": sum(
+            1
+            for document in documents
+            if document["source_quality"]["timestamp_fallback_link_count"] > 0
+        ),
+        "units_with_candidate_visual_support": sum(
+            1
+            for document in documents
+            if document["source_quality"]["candidate_visual_support"]["has_candidate_visual_support"]
+        ),
+        "units_with_verified_object_alignment": sum(
+            1
+            for document in documents
+            if document["source_quality"]["verified_object_alignment"]["has_verified_object_alignment"]
+        ),
         "units_with_detected_text": sum(1 for document in documents if document["source_quality"]["has_detected_text"]),
         "units_with_visual_description": sum(
             1 for document in documents if document["source_quality"]["has_visual_description"]
@@ -237,6 +281,7 @@ def build_project_evidence_units(
         min_unit_coverage_ratio=visual_state_min_coverage_ratio,
         min_visual_states=visual_state_min_total,
     )
+    link_diagnostics = _evidence_unit_link_diagnostics(documents)
     summary = {
         "project_dir": str(resolved_project_dir),
         "paths": {
@@ -274,6 +319,7 @@ def build_project_evidence_units(
         "visual_state_coverage": visual_state_coverage,
         "counts": counts,
         "alignment_status_counts": _status_counts(documents),
+        "link_diagnostics": link_diagnostics,
     }
     _update_project_manifest(
         manifest_path=resolved_manifest_path,
@@ -697,6 +743,7 @@ def _evidence_unit_document(
     source_quality = _source_quality(
         visual_states=window_states,
         visual_entities=visual_entity_rows,
+        links=window_links,
         link_statuses=link_statuses,
     )
     return {
@@ -824,6 +871,7 @@ def _source_quality(
     *,
     visual_states: list[dict[str, Any]],
     visual_entities: list[dict[str, Any]],
+    links: list[dict[str, Any]],
     link_statuses: dict[str, str],
 ) -> dict[str, Any]:
     has_vlm_entity = any(_is_vlm_entity(entity) for entity in visual_entities)
@@ -836,6 +884,26 @@ def _source_quality(
     visual_description_count = sum(
         1 for entity in visual_entities if _text(entity.get("visual_description"))
     )
+    candidate_link_count = sum(1 for status in link_statuses.values() if status == "candidate")
+    timestamp_fallback_link_count = sum(
+        1 for status in link_statuses.values() if status == "timestamp_fallback"
+    )
+    verified_link_count = sum(1 for status in link_statuses.values() if status == "verified")
+    candidate_signal_counts = _candidate_link_signal_counts(
+        links=links,
+        link_statuses=link_statuses,
+    )
+    verified_source_counts = _verified_link_source_counts(
+        links=links,
+        link_statuses=link_statuses,
+    )
+    has_candidate_visual_support = bool(
+        visual_states
+        or visual_entities
+        or candidate_link_count
+        or timestamp_fallback_link_count
+    )
+    has_verified_object_alignment = verified_link_count > 0
     return {
         "has_visual_state": bool(visual_states),
         "has_visual_entity": bool(visual_entities),
@@ -850,11 +918,27 @@ def _source_quality(
         "has_timestamp_fallback_link": any(
             status == "timestamp_fallback" for status in link_statuses.values()
         ),
-        "candidate_link_count": sum(1 for status in link_statuses.values() if status == "candidate"),
-        "timestamp_fallback_link_count": sum(
-            1 for status in link_statuses.values() if status == "timestamp_fallback"
-        ),
-        "verified_link_count": sum(1 for status in link_statuses.values() if status == "verified"),
+        "candidate_link_count": candidate_link_count,
+        "timestamp_fallback_link_count": timestamp_fallback_link_count,
+        "verified_link_count": verified_link_count,
+        "candidate_link_signal_counts": candidate_signal_counts,
+        "verified_link_source_counts": verified_source_counts,
+        "candidate_visual_support": {
+            "has_candidate_visual_support": has_candidate_visual_support,
+            "visual_state_count": len(visual_states),
+            "visual_entity_count": len(visual_entities),
+            "candidate_link_count": candidate_link_count,
+            "timestamp_fallback_link_count": timestamp_fallback_link_count,
+            "candidate_link_signal_counts": candidate_signal_counts,
+            "paper_claim_eligible": False,
+        },
+        "verified_object_alignment": {
+            "has_verified_object_alignment": has_verified_object_alignment,
+            "verified_link_count": verified_link_count,
+            "verified_link_source_counts": verified_source_counts,
+            "timestamp_fallback_counted_as_verified": False,
+            "paper_claim_eligible": has_verified_object_alignment,
+        },
     }
 
 
@@ -886,6 +970,171 @@ def _alignment_score(links: list[dict[str, Any]], statuses: dict[str, str]) -> f
         else:
             weighted_scores.append(min(score, 0.8))
     return round(max(weighted_scores), 3)
+
+
+def _candidate_link_signal_counts(
+    *,
+    links: list[dict[str, Any]],
+    link_statuses: dict[str, str],
+) -> dict[str, int]:
+    counts = _zero_count_map(CANDIDATE_LINK_SIGNAL_KEYS)
+    for link in links:
+        link_id = _text(link.get("link_id"))
+        status = link_statuses.get(link_id)
+        if status == "verified":
+            continue
+        evidence = _link_evidence(link)
+        if link.get("time_overlap") is True or "time_overlap" in evidence:
+            counts["temporal_overlap"] += 1
+        if _string_list(link.get("lexical_match")) or evidence & {
+            "lexical_match",
+            "visual_text_match",
+        }:
+            counts["lexical_overlap"] += 1
+        if _string_list(link.get("mention_candidate")) or evidence & {
+            "mention_candidate",
+            "reference_cue",
+        }:
+            counts["mention_deictic_hook"] += 1
+        if evidence & {"position_match", "relations_match"}:
+            counts["spatial_position"] += 1
+        if "visual_text_match" in evidence:
+            counts["visual_text_overlap"] += 1
+        if evidence & {"visual_description_match", "entity_type_match"}:
+            counts["vlm_object_visual_description_overlap"] += 1
+        if evidence & {"semantic_hint", "domain_lexicon_match"}:
+            counts["semantic_domain_hint"] += 1
+        if status == "timestamp_fallback" or "timestamp_fallback" in evidence:
+            counts["timestamp_fallback"] += 1
+    return counts
+
+
+def _verified_link_source_counts(
+    *,
+    links: list[dict[str, Any]],
+    link_statuses: dict[str, str],
+) -> dict[str, int]:
+    counts = _zero_count_map(VERIFIED_LINK_SOURCE_KEYS)
+    for link in links:
+        link_id = _text(link.get("link_id"))
+        if link_statuses.get(link_id) != "verified":
+            continue
+        matched = False
+        explicit_status = _text(
+            link.get("alignment_status")
+            or link.get("verification_status")
+            or link.get("status")
+        ).casefold()
+        if link.get("verified") is True:
+            counts["explicit_verified_flag"] += 1
+            matched = True
+        if explicit_status == "verified":
+            counts["explicit_verified_status"] += 1
+            matched = True
+        source_text = _verified_source_text(link)
+        if any(token in source_text for token in ("human", "gold", "annotator", "annotation")):
+            counts["human_gold"] += 1
+            matched = True
+        if any(token in source_text for token in ("vlm", "vision", "verifier", "validator", "model")):
+            counts["vlm_verifier"] += 1
+            matched = True
+        if any(token in source_text for token in ("strict", "deterministic", "rule")):
+            counts["strict_deterministic_rule"] += 1
+            matched = True
+        if not matched:
+            counts["unspecified_verified"] += 1
+    return counts
+
+
+def _verified_source_text(link: dict[str, Any]) -> str:
+    metadata = _mapping(link.get("reason_metadata"))
+    values = [
+        link.get("verification_source"),
+        link.get("verified_source"),
+        link.get("verified_by"),
+        link.get("verifier"),
+        link.get("source"),
+        link.get("source_model"),
+        metadata.get("verification_source"),
+        metadata.get("verified_by"),
+        metadata.get("verifier"),
+        metadata.get("source"),
+        metadata.get("source_model"),
+        metadata.get("summary"),
+    ]
+    return " ".join(_text_values(values)).casefold()
+
+
+def _link_evidence(link: dict[str, Any]) -> set[str]:
+    return {_text(item).casefold() for item in link.get("evidence") or [] if _text(item)}
+
+
+def _zero_count_map(keys: Iterable[str]) -> dict[str, int]:
+    return {key: 0 for key in keys}
+
+
+def _evidence_unit_link_diagnostics(documents: list[dict[str, Any]]) -> dict[str, Any]:
+    candidate_signal_counts = _zero_count_map(CANDIDATE_LINK_SIGNAL_KEYS)
+    verified_source_counts = _zero_count_map(VERIFIED_LINK_SOURCE_KEYS)
+    units_with_candidate_visual_support = 0
+    units_with_candidate_link = 0
+    units_with_timestamp_fallback_link = 0
+    units_with_verified_object_alignment = 0
+    candidate_links = 0
+    timestamp_fallback_links = 0
+    verified_links = 0
+    for document in documents:
+        source_quality = _mapping(document.get("source_quality"))
+        candidate_links += int(source_quality.get("candidate_link_count") or 0)
+        timestamp_fallback_links += int(source_quality.get("timestamp_fallback_link_count") or 0)
+        verified_links += int(source_quality.get("verified_link_count") or 0)
+        if int(source_quality.get("candidate_link_count") or 0) > 0:
+            units_with_candidate_link += 1
+        if int(source_quality.get("timestamp_fallback_link_count") or 0) > 0:
+            units_with_timestamp_fallback_link += 1
+
+        support = _mapping(source_quality.get("candidate_visual_support"))
+        verified = _mapping(source_quality.get("verified_object_alignment"))
+        if support.get("has_candidate_visual_support") is True:
+            units_with_candidate_visual_support += 1
+        if verified.get("has_verified_object_alignment") is True:
+            units_with_verified_object_alignment += 1
+        _add_counts(
+            candidate_signal_counts,
+            _mapping(source_quality.get("candidate_link_signal_counts")),
+        )
+        _add_counts(
+            verified_source_counts,
+            _mapping(source_quality.get("verified_link_source_counts")),
+        )
+    return {
+        "schema_version": LINK_DIAGNOSTICS_SCHEMA_VERSION,
+        "evidence_units_total": len(documents),
+        "candidate_visual_support": {
+            "units_with_candidate_visual_support": units_with_candidate_visual_support,
+            "units_with_candidate_link": units_with_candidate_link,
+            "units_with_timestamp_fallback_link": units_with_timestamp_fallback_link,
+            "candidate_links": candidate_links,
+            "timestamp_fallback_links": timestamp_fallback_links,
+            "candidate_link_signal_counts": candidate_signal_counts,
+            "paper_claim_eligible": False,
+        },
+        "verified_object_alignment": {
+            "units_with_verified_object_alignment": units_with_verified_object_alignment,
+            "verified_links": verified_links,
+            "verified_link_source_counts": verified_source_counts,
+            "timestamp_fallback_counted_as_verified": False,
+            "paper_claim_eligible_units": units_with_verified_object_alignment,
+        },
+        "candidate_link_signal_counts": candidate_signal_counts,
+        "verified_link_source_counts": verified_source_counts,
+        "public_note": LINK_DIAGNOSTICS_PUBLIC_NOTE,
+    }
+
+
+def _add_counts(target: dict[str, int], source: dict[str, Any]) -> None:
+    for key in target:
+        target[key] += int(source.get(key) or 0)
 
 
 def _is_vlm_entity(entity: dict[str, Any]) -> bool:
@@ -1065,6 +1314,7 @@ def _update_project_manifest(
         "visual_state_coverage": summary["visual_state_coverage"],
         "counts": summary["counts"],
         "alignment_status_counts": summary["alignment_status_counts"],
+        "link_diagnostics": summary["link_diagnostics"],
     }
     write_json(manifest_path, payload)
 
