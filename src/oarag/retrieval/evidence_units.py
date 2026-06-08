@@ -16,7 +16,93 @@ from oarag.vision.vlm_evidence_validator import is_paper_quality_vlm_entity
 
 
 EVIDENCE_UNITS_ARTIFACT_RELATIVE_PATH = Path("segments") / "evidence_units.jsonl"
+VISUAL_STATES_ARTIFACT_RELATIVE_PATH = Path("manifests") / "visual_states.jsonl"
+VISUAL_STATES_SCHEMA_VERSION = "oarag-visual-states-jsonl-v1"
+VISUAL_STATE_COVERAGE_SCHEMA_VERSION = "oarag-visual-state-coverage-v1"
 DEFAULT_STATE_PADDING_SECONDS = 15.0
+VISUAL_STATE_PUBLIC_NOTE = (
+    "Visual states are candidate interval support derived from sampled-frame midpoints "
+    "or an explicit visual_states artifact. First/last interval padding is a coverage "
+    "fallback, not verified object persistence, and timestamp-only overlap is not "
+    "counted as verified object alignment."
+)
+
+
+def build_project_visual_states(
+    *,
+    project_dir: Path,
+    output_path: Path | None = None,
+    frames_manifest: Path | None = None,
+    manifest_path: Path | None = None,
+    state_padding_seconds: float = DEFAULT_STATE_PADDING_SECONDS,
+    min_visual_states: int | None = None,
+    fail_on_visual_state_gate: bool = False,
+) -> dict[str, Any]:
+    resolved_project_dir = project_dir.expanduser().resolve()
+    frames_path = _optional_existing_project_path(
+        project_dir=resolved_project_dir,
+        path=frames_manifest,
+        default=resolved_project_dir / "manifests" / "frames_manifest.jsonl",
+        artifact_name="frames manifest",
+    )
+    resolved_output_path = _resolve_project_output_path(
+        project_dir=resolved_project_dir,
+        path=output_path,
+        default=resolved_project_dir / VISUAL_STATES_ARTIFACT_RELATIVE_PATH,
+    )
+    resolved_manifest_path = _resolve_project_output_path(
+        project_dir=resolved_project_dir,
+        path=manifest_path,
+        default=resolved_project_dir / "manifests" / "project_manifest.json",
+    )
+    defaults = _project_defaults_from_manifest(resolved_manifest_path)
+    frame_rows = list(iter_jsonl_documents(frames_path)) if frames_path else []
+    visual_states = build_visual_states(
+        frame_rows,
+        default_project_id=defaults.get("project_id"),
+        default_video_id=defaults.get("video_id"),
+        state_padding_seconds=state_padding_seconds,
+    )
+    write_visual_states_artifact(resolved_output_path, visual_states)
+    interval_summary = _interval_duration_summary(visual_states)
+    gate = _visual_state_gate_summary(
+        visual_states_total=len(visual_states),
+        evidence_units_total=None,
+        evidence_units_with_visual_state=None,
+        min_visual_states=min_visual_states,
+        min_unit_coverage_ratio=None,
+    )
+    summary = {
+        "schema_version": VISUAL_STATES_SCHEMA_VERSION,
+        "project_dir": str(resolved_project_dir),
+        "paths": {
+            "frames_manifest": str(frames_path) if frames_path else None,
+            "visual_states": str(resolved_output_path),
+            "project_manifest": str(resolved_manifest_path),
+        },
+        "source": "sampled_frame_midpoints",
+        "state_padding_seconds": _nonnegative_float(
+            state_padding_seconds,
+            default=DEFAULT_STATE_PADDING_SECONDS,
+        ),
+        "counts": {
+            "frames_total": len(frame_rows),
+            "visual_states_total": len(visual_states),
+        },
+        "interval_duration_seconds": interval_summary,
+        "coverage_gate": gate,
+        "public_note": VISUAL_STATE_PUBLIC_NOTE,
+    }
+    _update_visual_state_manifest(
+        manifest_path=resolved_manifest_path,
+        visual_states_path=resolved_output_path,
+        summary=summary,
+    )
+    _raise_for_failed_visual_state_gate(
+        gate=gate,
+        fail_on_visual_state_gate=fail_on_visual_state_gate,
+    )
+    return summary
 
 
 def build_project_evidence_units(
@@ -25,6 +111,8 @@ def build_project_evidence_units(
     output_path: Path | None = None,
     segments: Path | None = None,
     frames_manifest: Path | None = None,
+    visual_states: Path | None = None,
+    visual_states_output: Path | None = None,
     visual_entities: Path | None = None,
     entity_links: Path | None = None,
     manifest_path: Path | None = None,
@@ -35,6 +123,9 @@ def build_project_evidence_units(
     window_before_seconds: float | None = None,
     window_after_seconds: float | None = None,
     state_padding_seconds: float = DEFAULT_STATE_PADDING_SECONDS,
+    visual_state_min_coverage_ratio: float | None = None,
+    visual_state_min_total: int | None = None,
+    fail_on_visual_state_gate: bool = False,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     segments_path = segment_artifact_path(resolved_project_dir, segments=segments)
@@ -43,6 +134,25 @@ def build_project_evidence_units(
         path=frames_manifest,
         default=resolved_project_dir / "manifests" / "frames_manifest.jsonl",
         artifact_name="frames manifest",
+    )
+    visual_states_path = (
+        _optional_existing_project_path(
+            project_dir=resolved_project_dir,
+            path=visual_states,
+            default=resolved_project_dir / VISUAL_STATES_ARTIFACT_RELATIVE_PATH,
+            artifact_name="visual states",
+        )
+        if visual_states is not None
+        else None
+    )
+    resolved_visual_states_output_path = (
+        _resolve_project_output_path(
+            project_dir=resolved_project_dir,
+            path=visual_states_output,
+            default=resolved_project_dir / VISUAL_STATES_ARTIFACT_RELATIVE_PATH,
+        )
+        if visual_states_output is not None
+        else None
     )
     visual_entities_path = _optional_existing_project_path(
         project_dir=resolved_project_dir,
@@ -71,9 +181,23 @@ def build_project_evidence_units(
     frame_rows = list(iter_jsonl_documents(frames_path)) if frames_path else []
     visual_entity_rows = list(iter_jsonl_documents(visual_entities_path)) if visual_entities_path else []
     entity_link_rows = list(iter_jsonl_documents(entity_links_path)) if entity_links_path else []
+    if visual_states_path is not None:
+        visual_state_rows = load_visual_states_artifact(visual_states_path)
+        visual_state_source = "external_visual_states_artifact"
+    else:
+        visual_state_rows = build_visual_states(
+            frame_rows,
+            default_project_id=_first_text(segment_rows, "project_id"),
+            default_video_id=_first_text(segment_rows, "video_id"),
+            state_padding_seconds=state_padding_seconds,
+        )
+        visual_state_source = "sampled_frame_midpoints"
+    if resolved_visual_states_output_path is not None:
+        write_visual_states_artifact(resolved_visual_states_output_path, visual_state_rows)
     documents = build_evidence_unit_documents(
         segment_rows,
         frames=frame_rows,
+        visual_states=visual_state_rows,
         visual_entities=visual_entity_rows,
         entity_links=entity_link_rows,
         window_seconds=window_seconds,
@@ -106,11 +230,23 @@ def build_project_evidence_units(
         "candidate_links": sum(document["source_quality"]["candidate_link_count"] for document in documents),
         "verified_links": sum(document["source_quality"]["verified_link_count"] for document in documents),
     }
+    visual_state_coverage = _visual_state_coverage_summary(
+        visual_states=visual_state_rows,
+        documents=documents,
+        source=visual_state_source,
+        min_unit_coverage_ratio=visual_state_min_coverage_ratio,
+        min_visual_states=visual_state_min_total,
+    )
     summary = {
         "project_dir": str(resolved_project_dir),
         "paths": {
             "segments": str(segments_path),
             "frames_manifest": str(frames_path) if frames_path else None,
+            "visual_states": (
+                str(resolved_visual_states_output_path or visual_states_path)
+                if (resolved_visual_states_output_path or visual_states_path)
+                else None
+            ),
             "visual_entities": str(visual_entities_path) if visual_entities_path else None,
             "entity_links": str(entity_links_path) if entity_links_path else None,
             "evidence_units": str(resolved_output_path),
@@ -125,12 +261,17 @@ def build_project_evidence_units(
             window_after_seconds=window_after_seconds,
         ),
         "visual_state_config": {
-            "mode": "sampled_frame_midpoints",
+            "mode": visual_state_source,
+            "schema_version": VISUAL_STATES_SCHEMA_VERSION,
             "state_padding_seconds": _nonnegative_float(
                 state_padding_seconds,
                 default=DEFAULT_STATE_PADDING_SECONDS,
             ),
+            "artifact_loaded": visual_states_path is not None,
+            "artifact_written": resolved_visual_states_output_path is not None,
+            "public_note": VISUAL_STATE_PUBLIC_NOTE,
         },
+        "visual_state_coverage": visual_state_coverage,
         "counts": counts,
         "alignment_status_counts": _status_counts(documents),
     }
@@ -139,6 +280,10 @@ def build_project_evidence_units(
         evidence_units_path=resolved_output_path,
         summary=summary,
     )
+    _raise_for_failed_visual_state_gate(
+        gate=visual_state_coverage["coverage_gate"],
+        fail_on_visual_state_gate=fail_on_visual_state_gate,
+    )
     return summary
 
 
@@ -146,6 +291,7 @@ def build_evidence_unit_documents(
     segments: list[dict[str, Any]],
     *,
     frames: list[dict[str, Any]] | None = None,
+    visual_states: list[dict[str, Any]] | None = None,
     visual_entities: list[dict[str, Any]] | None = None,
     entity_links: list[dict[str, Any]] | None = None,
     window_seconds: float | None = None,
@@ -159,13 +305,17 @@ def build_evidence_unit_documents(
     sorted_segments = [
         segment for _, segment in sorted(enumerate(segments), key=lambda item: segment_sort_key(item[1], item[0]))
     ]
-    visual_states = build_visual_states(
-        frames or [],
-        default_project_id=_first_text(sorted_segments, "project_id"),
-        default_video_id=_first_text(sorted_segments, "video_id"),
-        state_padding_seconds=state_padding_seconds,
+    visual_state_rows = (
+        [_normalize_visual_state_record(state, row_number=index + 1) for index, state in enumerate(visual_states)]
+        if visual_states is not None
+        else build_visual_states(
+            frames or [],
+            default_project_id=_first_text(sorted_segments, "project_id"),
+            default_video_id=_first_text(sorted_segments, "video_id"),
+            state_padding_seconds=state_padding_seconds,
+        )
     )
-    states_by_id = {str(state["visual_state_id"]): state for state in visual_states}
+    states_by_id = {str(state["visual_state_id"]): state for state in visual_state_rows}
     entities_by_frame_id = _group_by_text(visual_entities or [], "frame_id")
     entities_by_id = {str(entity.get("entity_id")): entity for entity in visual_entities or []}
     links_by_segment_id = _group_by_text(entity_links or [], "segment_id")
@@ -198,7 +348,7 @@ def build_evidence_unit_documents(
                 target=target,
                 window_segments=window_segments,
                 states_by_id=states_by_id,
-                visual_states=visual_states,
+                visual_states=visual_state_rows,
                 entities_by_frame_id=entities_by_frame_id,
                 entities_by_id=entities_by_id,
                 links_by_segment_id=links_by_segment_id,
@@ -261,6 +411,7 @@ def build_visual_states(
             )
             states.append(
                 {
+                    "schema_version": VISUAL_STATES_SCHEMA_VERSION,
                     "visual_state_id": f"vstate_{slugify(video_id)}_{slugify(frame_id)}",
                     "project_id": _text(frame.get("project_id")) or default_project_id,
                     "video_id": video_id if video_id != "__default__" else default_video_id,
@@ -268,6 +419,7 @@ def build_visual_states(
                     "frame_ids": [frame_id],
                     "valid_start_time": round(start_time, 3),
                     "valid_end_time": round(end_time, 3),
+                    "interval_source": "sampled_frame_midpoint",
                     "state_summary": state_summary,
                     "detected_text": _text_values([frame.get("detected_text")]),
                     "source": "sampled_frame_interval",
@@ -275,6 +427,215 @@ def build_visual_states(
                 }
             )
     return states
+
+
+def write_visual_states_artifact(path: Path, visual_states: list[dict[str, Any]]) -> int:
+    return write_jsonl(
+        path,
+        [_visual_state_artifact_record(state) for state in visual_states],
+    )
+
+
+def load_visual_states_artifact(path: Path) -> list[dict[str, Any]]:
+    resolved_path = path.expanduser().resolve()
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"visual_states artifact not found: {resolved_path}")
+    return [
+        _normalize_visual_state_record(row, row_number=index + 1)
+        for index, row in enumerate(iter_jsonl_documents(resolved_path))
+    ]
+
+
+def _visual_state_artifact_record(state: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_visual_state_record(state)
+    return {
+        key: value
+        for key, value in {
+            "schema_version": VISUAL_STATES_SCHEMA_VERSION,
+            "visual_state_id": normalized["visual_state_id"],
+            "project_id": normalized.get("project_id"),
+            "video_id": normalized.get("video_id"),
+            "representative_frame_id": normalized.get("representative_frame_id"),
+            "frame_ids": normalized.get("frame_ids", []),
+            "valid_start_time": normalized["valid_start_time"],
+            "valid_end_time": normalized["valid_end_time"],
+            "interval_source": normalized.get("interval_source"),
+            "state_summary": normalized.get("state_summary", ""),
+            "detected_text": normalized.get("detected_text", []),
+            "source": normalized.get("source"),
+            "confidence": normalized.get("confidence"),
+        }.items()
+        if value not in (None, "", [])
+    }
+
+
+def _normalize_visual_state_record(
+    state: dict[str, Any],
+    *,
+    row_number: int | None = None,
+) -> dict[str, Any]:
+    prefix = f"visual_states row {row_number}" if row_number is not None else "visual state"
+    visual_state_id = _text(state.get("visual_state_id"))
+    if not visual_state_id:
+        raise ValueError(f"{prefix} is missing visual_state_id")
+    start_time = _optional_float(state.get("valid_start_time"))
+    end_time = _optional_float(state.get("valid_end_time"))
+    if start_time is None or end_time is None:
+        raise ValueError(f"{prefix} is missing valid_start_time/valid_end_time")
+    if end_time < start_time:
+        start_time, end_time = end_time, start_time
+    return {
+        "schema_version": VISUAL_STATES_SCHEMA_VERSION,
+        "visual_state_id": visual_state_id,
+        "project_id": _text(state.get("project_id")) or None,
+        "video_id": _text(state.get("video_id")) or None,
+        "representative_frame_id": _text(state.get("representative_frame_id")) or None,
+        "frame_ids": _string_list(state.get("frame_ids")),
+        "valid_start_time": round(start_time, 3),
+        "valid_end_time": round(end_time, 3),
+        "interval_source": _text(state.get("interval_source")) or _text(state.get("source")) or None,
+        "state_summary": _compact_text(_text(state.get("state_summary"))),
+        "detected_text": _text_values([state.get("detected_text")]),
+        "source": _text(state.get("source")) or None,
+        "confidence": _optional_float(state.get("confidence")),
+    }
+
+
+def _visual_state_coverage_summary(
+    *,
+    visual_states: list[dict[str, Any]],
+    documents: list[dict[str, Any]],
+    source: str,
+    min_unit_coverage_ratio: float | None,
+    min_visual_states: int | None,
+) -> dict[str, Any]:
+    units_with_visual_state = sum(
+        1 for document in documents if _mapping(document.get("source_quality")).get("has_visual_state") is True
+    )
+    evidence_units_total = len(documents)
+    transcript_only_units = sum(1 for document in documents if document.get("alignment_status") == "transcript_only")
+    coverage_ratio = (
+        round(units_with_visual_state / evidence_units_total, 6)
+        if evidence_units_total
+        else None
+    )
+    return {
+        "schema_version": VISUAL_STATE_COVERAGE_SCHEMA_VERSION,
+        "source": source,
+        "visual_states_total": len(visual_states),
+        "evidence_units_total": evidence_units_total,
+        "evidence_units_with_visual_state": units_with_visual_state,
+        "transcript_only_units": transcript_only_units,
+        "unit_coverage_ratio": coverage_ratio,
+        "interval_duration_seconds": _interval_duration_summary(visual_states),
+        "coverage_gate": _visual_state_gate_summary(
+            visual_states_total=len(visual_states),
+            evidence_units_total=evidence_units_total,
+            evidence_units_with_visual_state=units_with_visual_state,
+            min_visual_states=min_visual_states,
+            min_unit_coverage_ratio=min_unit_coverage_ratio,
+        ),
+        "public_note": VISUAL_STATE_PUBLIC_NOTE,
+    }
+
+
+def _interval_duration_summary(visual_states: list[dict[str, Any]]) -> dict[str, Any]:
+    durations = []
+    for state in visual_states:
+        start_time = _optional_float(state.get("valid_start_time"))
+        end_time = _optional_float(state.get("valid_end_time"))
+        if start_time is None or end_time is None:
+            continue
+        durations.append(abs(end_time - start_time))
+    buckets = {
+        "0-5s": 0,
+        "5-15s": 0,
+        "15-30s": 0,
+        "30-60s": 0,
+        "60s+": 0,
+    }
+    for duration in durations:
+        if duration < 5.0:
+            buckets["0-5s"] += 1
+        elif duration < 15.0:
+            buckets["5-15s"] += 1
+        elif duration < 30.0:
+            buckets["15-30s"] += 1
+        elif duration < 60.0:
+            buckets["30-60s"] += 1
+        else:
+            buckets["60s+"] += 1
+    if not durations:
+        return {
+            "count": 0,
+            "min": None,
+            "max": None,
+            "mean": None,
+            "buckets": buckets,
+        }
+    return {
+        "count": len(durations),
+        "min": round(min(durations), 3),
+        "max": round(max(durations), 3),
+        "mean": round(sum(durations) / len(durations), 3),
+        "buckets": buckets,
+    }
+
+
+def _visual_state_gate_summary(
+    *,
+    visual_states_total: int,
+    evidence_units_total: int | None,
+    evidence_units_with_visual_state: int | None,
+    min_visual_states: int | None,
+    min_unit_coverage_ratio: float | None,
+) -> dict[str, Any]:
+    thresholds: dict[str, Any] = {}
+    failures: list[dict[str, Any]] = []
+    if min_visual_states is not None:
+        threshold = max(0, int(min_visual_states))
+        thresholds["min_visual_states"] = threshold
+        if visual_states_total < threshold:
+            failures.append(
+                {
+                    "metric": "visual_states_total",
+                    "actual": visual_states_total,
+                    "minimum": threshold,
+                }
+            )
+    if min_unit_coverage_ratio is not None:
+        threshold = max(0.0, min(1.0, float(min_unit_coverage_ratio)))
+        actual = (
+            evidence_units_with_visual_state / evidence_units_total
+            if evidence_units_total
+            else 0.0
+        )
+        thresholds["min_unit_coverage_ratio"] = threshold
+        if actual < threshold:
+            failures.append(
+                {
+                    "metric": "unit_coverage_ratio",
+                    "actual": round(actual, 6),
+                    "minimum": threshold,
+                }
+            )
+    checked = bool(thresholds)
+    return {
+        "status": "passed" if checked and not failures else "failed" if failures else "not_configured",
+        "checked": checked,
+        "thresholds": thresholds,
+        "failure_count": len(failures),
+        "failures": failures,
+    }
+
+
+def _raise_for_failed_visual_state_gate(
+    *,
+    gate: dict[str, Any],
+    fail_on_visual_state_gate: bool,
+) -> None:
+    if fail_on_visual_state_gate and gate.get("status") == "failed":
+        raise ValueError("visual state coverage gate failed")
 
 
 def _evidence_unit_document(
@@ -685,20 +1046,74 @@ def _update_project_manifest(
         artifacts = {}
         payload["artifacts"] = artifacts
     artifacts["evidence_units"] = str(evidence_units_path)
+    visual_states_path = _text(_mapping(summary.get("paths")).get("visual_states"))
+    if visual_states_path:
+        artifacts["visual_states"] = visual_states_path
 
     counts = payload.setdefault("counts", {})
     if not isinstance(counts, dict):
         counts = {}
         payload["counts"] = counts
     counts["evidence_units"] = int(summary["counts"]["evidence_units_total"])
+    visual_states_total = _mapping(summary.get("visual_state_coverage")).get("visual_states_total")
+    if visual_states_total is not None:
+        counts["visual_states"] = int(visual_states_total)
 
     payload["evidence_unit_storage"] = {
         "window_config": summary["window_config"],
         "visual_state_config": summary["visual_state_config"],
+        "visual_state_coverage": summary["visual_state_coverage"],
         "counts": summary["counts"],
         "alignment_status_counts": summary["alignment_status_counts"],
     }
     write_json(manifest_path, payload)
+
+
+def _update_visual_state_manifest(
+    *,
+    manifest_path: Path,
+    visual_states_path: Path,
+    summary: dict[str, Any],
+) -> None:
+    if manifest_path.exists():
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload = loaded if isinstance(loaded, dict) else {}
+    else:
+        payload = {}
+
+    artifacts = payload.setdefault("artifacts", {})
+    if not isinstance(artifacts, dict):
+        artifacts = {}
+        payload["artifacts"] = artifacts
+    artifacts["visual_states"] = str(visual_states_path)
+
+    counts = payload.setdefault("counts", {})
+    if not isinstance(counts, dict):
+        counts = {}
+        payload["counts"] = counts
+    counts["visual_states"] = int(_mapping(summary.get("counts")).get("visual_states_total") or 0)
+
+    payload["visual_state_storage"] = {
+        "schema_version": VISUAL_STATES_SCHEMA_VERSION,
+        "source": summary.get("source"),
+        "state_padding_seconds": summary.get("state_padding_seconds"),
+        "counts": summary.get("counts", {}),
+        "interval_duration_seconds": summary.get("interval_duration_seconds", {}),
+        "coverage_gate": summary.get("coverage_gate", {}),
+        "public_note": VISUAL_STATE_PUBLIC_NOTE,
+    }
+    write_json(manifest_path, payload)
+
+
+def _project_defaults_from_manifest(manifest_path: Path) -> dict[str, str | None]:
+    if not manifest_path.exists():
+        return {"project_id": None, "video_id": None}
+    loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload = loaded if isinstance(loaded, dict) else {}
+    return {
+        "project_id": _text(payload.get("project_id")) or None,
+        "video_id": _text(payload.get("video_id")) or None,
+    }
 
 
 def _group_by_text(rows: Iterable[dict[str, Any]], key: str) -> dict[str, list[dict[str, Any]]]:

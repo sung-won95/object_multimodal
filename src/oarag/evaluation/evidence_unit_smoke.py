@@ -135,6 +135,8 @@ def _run_suite(
     suite_id = str(suite.get("suite_id") or suite.get("project_id") or "lecture_suite")
     project_dir = _project_dir_from_suite(suite=suite, base_dir=base_dir, repo_root=repo_root)
     evidence_units_path = _optional_path(suite.get("evidence_units"))
+    visual_states_path = _optional_path(suite.get("visual_states"))
+    visual_states_output_path = _optional_path(suite.get("visual_states_output"))
     index_uid = str(suite.get("index") or _default_index_uid(run_id, suite_id))
     segment_index_uid = _optional_str(suite.get("segment_index"))
     limit = _positive_int(suite.get("limit", 5), field_name="limit")
@@ -153,6 +155,8 @@ def _run_suite(
             output_path=evidence_units_path,
             segments=_optional_path(suite.get("segments")),
             frames_manifest=_optional_path(suite.get("frames_manifest")),
+            visual_states=visual_states_path,
+            visual_states_output=visual_states_output_path,
             visual_entities=_optional_path(suite.get("visual_entities")),
             entity_links=_optional_path(suite.get("entity_links")),
             manifest_path=_optional_path(suite.get("project_manifest")),
@@ -163,12 +167,20 @@ def _run_suite(
             window_before_seconds=_optional_float(suite.get("window_before_seconds")),
             window_after_seconds=_optional_float(suite.get("window_after_seconds")),
             state_padding_seconds=float(suite.get("state_padding_seconds", 15.0)),
+            visual_state_min_coverage_ratio=_optional_float(
+                suite.get("visual_state_min_coverage_ratio")
+                if suite.get("visual_state_min_coverage_ratio") is not None
+                else suite.get("visual_state_min_unit_coverage_ratio")
+            ),
+            visual_state_min_total=_optional_int(suite.get("visual_state_min_total")),
+            fail_on_visual_state_gate=bool(suite.get("fail_on_visual_state_gate", False)),
         )
         evidence_units_path = _path_from_build_summary(build_summary)
 
     artifact_summary = _artifact_summary(
         project_dir=project_dir,
         evidence_units=evidence_units_path,
+        visual_states=visual_states_path or visual_states_output_path,
         build_summary=build_summary,
         dry_run=dry_run,
     )
@@ -454,6 +466,7 @@ def _artifact_summary(
     *,
     project_dir: Path,
     evidence_units: Path | None,
+    visual_states: Path | None,
     build_summary: dict[str, Any] | None,
     dry_run: bool,
 ) -> dict[str, Any]:
@@ -464,6 +477,7 @@ def _artifact_summary(
             "alignment_status_counts": {},
             "source_quality_counts": {},
             "link_counts": {},
+            "visual_state_coverage": {},
             "vlm_object_evidence_coverage": {
                 "status": "dry_run",
                 "skip_reason": "dry_run_requested",
@@ -492,6 +506,9 @@ def _artifact_summary(
                 "verified_links": int(counts.get("verified_links") or 0),
                 "timestamp_fallback_links": int(counts.get("timestamp_fallback_links") or 0),
             },
+            "visual_state_coverage": _public_visual_state_coverage(
+                build_summary.get("visual_state_coverage")
+            ),
             "verified_alignment_note": _verified_alignment_note(counts),
             "vlm_object_evidence_coverage": vlm_object_evidence_coverage,
         }
@@ -511,6 +528,7 @@ def _artifact_summary(
         source_quality["candidate_links"] += int(quality.get("candidate_link_count") or 0)
         source_quality["verified_links"] += int(quality.get("verified_link_count") or 0)
         source_quality["timestamp_fallback_links"] += int(quality.get("timestamp_fallback_link_count") or 0)
+    visual_state_rows = _visual_state_rows(project_dir=project_dir, visual_states=visual_states)
     return {
         "status": "loaded_existing",
         "counts": {"evidence_units_total": len(rows)},
@@ -528,6 +546,10 @@ def _artifact_summary(
             "verified_links": source_quality["verified_links"],
             "timestamp_fallback_links": source_quality["timestamp_fallback_links"],
         },
+        "visual_state_coverage": _loaded_visual_state_coverage(
+            evidence_units=rows,
+            visual_states=visual_state_rows,
+        ),
         "verified_alignment_note": _verified_alignment_note(source_quality),
         "vlm_object_evidence_coverage": vlm_object_evidence_coverage,
     }
@@ -968,6 +990,10 @@ def _summary_payload(
             "timestamp-only overlap is reported as candidate/fallback evidence only; "
             "it is not counted as verified object alignment"
         ),
+        "visual_state_note": (
+            "visual_state intervals are candidate support from sampled-frame midpoint "
+            "coverage or an explicit artifact; interval overlap is not verified object alignment"
+        ),
     }
 
 
@@ -979,6 +1005,7 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
         "",
         "This public-safe report redacts raw query text, transcripts, local paths, and raw IDs.",
         "Timestamp-only overlap is not counted as verified object alignment.",
+        "Visual-state interval overlap is reported as candidate support, not verified object alignment.",
         "",
         "## Meilisearch",
         "",
@@ -994,6 +1021,9 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
         vlm_coverage = _mapping(build.get("vlm_object_evidence_coverage"))
         entity_coverage = _mapping(vlm_coverage.get("visual_entity_coverage"))
         unit_coverage = _mapping(vlm_coverage.get("evidence_unit_coverage"))
+        visual_coverage = _mapping(build.get("visual_state_coverage"))
+        interval_summary = _mapping(visual_coverage.get("interval_duration_seconds"))
+        coverage_gate = _mapping(visual_coverage.get("coverage_gate"))
         lines.extend(
             [
                 f"### {suite.get('suite_id')}",
@@ -1001,6 +1031,10 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- evidence units: `{_mapping(build.get('counts')).get('evidence_units_total', 0)}`",
                 f"- alignment statuses: `{json.dumps(build.get('alignment_status_counts', {}), sort_keys=True)}`",
                 f"- link counts: `{json.dumps(build.get('link_counts', {}), sort_keys=True)}`",
+                f"- visual state source: `{visual_coverage.get('source') or 'unknown'}`",
+                f"- visual state coverage: `{visual_coverage.get('evidence_units_with_visual_state', 0)}`/`{visual_coverage.get('evidence_units_total', 0)}`",
+                f"- visual state duration buckets: `{json.dumps(interval_summary.get('buckets', {}), sort_keys=True)}`",
+                f"- visual state gate: `{coverage_gate.get('status') or 'not_configured'}`",
                 f"- index status: `{index.get('status')}`",
                 f"- RAG input inspectable top hits: `{suite.get('rag_input_inspection', {}).get('inspectable_top_hit_count', 0)}`",
                 f"- target rank buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('rank_bucket_counts', {}), sort_keys=True)}`",
@@ -1177,6 +1211,115 @@ def _public_build_counts(counts: dict[str, Any]) -> dict[str, int]:
         "evidence_units_total",
     ]
     return {key: int(counts.get(key) or 0) for key in keys}
+
+
+def _public_visual_state_coverage(value: Any) -> dict[str, Any]:
+    coverage = _mapping(value)
+    gate = _mapping(coverage.get("coverage_gate"))
+    interval = _mapping(coverage.get("interval_duration_seconds"))
+    return {
+        "schema_version": coverage.get("schema_version"),
+        "source": coverage.get("source"),
+        "visual_states_total": int(coverage.get("visual_states_total") or 0),
+        "evidence_units_total": int(coverage.get("evidence_units_total") or 0),
+        "evidence_units_with_visual_state": int(
+            coverage.get("evidence_units_with_visual_state") or 0
+        ),
+        "transcript_only_units": int(coverage.get("transcript_only_units") or 0),
+        "unit_coverage_ratio": coverage.get("unit_coverage_ratio"),
+        "interval_duration_seconds": {
+            "count": int(interval.get("count") or 0),
+            "min": interval.get("min"),
+            "max": interval.get("max"),
+            "mean": interval.get("mean"),
+            "buckets": dict(_mapping(interval.get("buckets"))),
+        },
+        "coverage_gate": {
+            "status": gate.get("status"),
+            "checked": bool(gate.get("checked")),
+            "thresholds": dict(_mapping(gate.get("thresholds"))),
+            "failure_count": int(gate.get("failure_count") or 0),
+        },
+        "public_note": coverage.get("public_note"),
+    }
+
+
+def _loaded_visual_state_coverage(
+    *,
+    evidence_units: list[dict[str, Any]],
+    visual_states: list[dict[str, Any]],
+) -> dict[str, Any]:
+    units_with_visual_state = sum(
+        1
+        for row in evidence_units
+        if _mapping(row.get("source_quality")).get("has_visual_state") is True
+        or bool(_string_list(row.get("visual_state_ids")))
+    )
+    total = len(evidence_units)
+    return {
+        "schema_version": "oarag-visual-state-coverage-v1",
+        "source": "loaded_existing",
+        "visual_states_total": len(visual_states),
+        "evidence_units_total": total,
+        "evidence_units_with_visual_state": units_with_visual_state,
+        "transcript_only_units": sum(
+            1 for row in evidence_units if row.get("alignment_status") == "transcript_only"
+        ),
+        "unit_coverage_ratio": round(units_with_visual_state / total, 6) if total else None,
+        "interval_duration_seconds": _visual_state_interval_summary(visual_states),
+        "coverage_gate": {
+            "status": "not_configured",
+            "checked": False,
+            "thresholds": {},
+            "failure_count": 0,
+        },
+        "public_note": (
+            "Visual states are candidate interval support; timestamp-only overlap is not "
+            "counted as verified object alignment."
+        ),
+    }
+
+
+def _visual_state_rows(*, project_dir: Path, visual_states: Path | None) -> list[dict[str, Any]]:
+    if visual_states is None:
+        return []
+    path = visual_states
+    if not path.is_absolute():
+        path = project_dir / path
+    if not path.exists():
+        return []
+    return list(iter_jsonl_documents(path))
+
+
+def _visual_state_interval_summary(visual_states: list[dict[str, Any]]) -> dict[str, Any]:
+    durations = []
+    for state in visual_states:
+        start_time = _optional_float(_mapping(state).get("valid_start_time"))
+        end_time = _optional_float(_mapping(state).get("valid_end_time"))
+        if start_time is None or end_time is None:
+            continue
+        durations.append(abs(end_time - start_time))
+    buckets = {"0-5s": 0, "5-15s": 0, "15-30s": 0, "30-60s": 0, "60s+": 0}
+    for duration in durations:
+        if duration < 5.0:
+            buckets["0-5s"] += 1
+        elif duration < 15.0:
+            buckets["5-15s"] += 1
+        elif duration < 30.0:
+            buckets["15-30s"] += 1
+        elif duration < 60.0:
+            buckets["30-60s"] += 1
+        else:
+            buckets["60s+"] += 1
+    if not durations:
+        return {"count": 0, "min": None, "max": None, "mean": None, "buckets": buckets}
+    return {
+        "count": len(durations),
+        "min": round(min(durations), 3),
+        "max": round(max(durations), 3),
+        "mean": round(sum(durations) / len(durations), 3),
+        "buckets": buckets,
+    }
 
 
 def _evidence_unit_rows(*, project_dir: Path, evidence_units: Path | None) -> list[dict[str, Any]]:
