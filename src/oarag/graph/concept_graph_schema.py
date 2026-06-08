@@ -31,9 +31,17 @@ CONCEPT_SOURCE_SIGNAL_CONTRACT = {
         "status": "candidate_or_verified",
         "description": "A relation or concept was stated in transcript text.",
     },
+    "transcript_mention": {
+        "status": "candidate_or_verified",
+        "description": "A concept candidate was mentioned in transcript text.",
+    },
     "slide_text": {
         "status": "candidate_or_verified",
         "description": "A concept was observed in slide or OCR text.",
+    },
+    "detected_text": {
+        "status": "candidate_or_verified",
+        "description": "A concept candidate was observed in detected visual text.",
     },
     "slide_cooccurrence": {
         "status": "candidate",
