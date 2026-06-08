@@ -29,6 +29,7 @@ from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
 from oarag.evaluation.eval import candidate_diagnostics, evaluate_query, summarize
 from oarag.vision.entity_links import link_entities
 from oarag.retrieval.evidence import build_evidence_response
+from oarag.graph.concept_extraction import extract_project_concept_candidates
 from oarag.graph.graph_ingest import ingest_project_graph
 from oarag.graph.graph_query import GraphTraversalConfig, graph_query
 from oarag.ingestion.ingest import (
@@ -216,6 +217,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build and summarize Cypher merge plan without connecting to Neo4j.",
     )
     graph_ingest.set_defaults(func=cmd_graph_ingest)
+
+    concept_candidates = subparsers.add_parser(
+        "extract-concept-candidates",
+        help="Extract lecture-local concept candidate nodes from evidence units",
+    )
+    location = concept_candidates.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    concept_candidates.add_argument(
+        "--evidence-units",
+        type=Path,
+        help="Optional evidence_units JSONL path. Relative paths are resolved from project dir.",
+    )
+    concept_candidates.add_argument(
+        "--output",
+        type=Path,
+        help="Output concept_graph JSONL path. Relative paths are resolved from project dir.",
+    )
+    concept_candidates.add_argument(
+        "--manifest",
+        type=Path,
+        help="Project manifest JSON path. Relative paths are resolved from project dir.",
+    )
+    concept_candidates.add_argument(
+        "--lecture-id",
+        help="Optional lecture id override. Defaults to manifest/video/project id.",
+    )
+    concept_candidates.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.0,
+        help="Minimum concept candidate confidence to write.",
+    )
+    concept_candidates.set_defaults(func=cmd_extract_concept_candidates)
 
     index = subparsers.add_parser("index-eduvidqa", help="Index normalized EDUVIDQA JSONL")
     index.add_argument("--input", required=True, type=Path)
@@ -2067,6 +2102,19 @@ def cmd_build_project_evidence_units(args: argparse.Namespace) -> None:
         visual_state_min_coverage_ratio=args.visual_state_min_coverage_ratio,
         visual_state_min_total=args.visual_state_min_total,
         fail_on_visual_state_gate=args.fail_on_visual_state_gate,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_extract_concept_candidates(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = extract_project_concept_candidates(
+        project_dir=project_dir,
+        evidence_units=args.evidence_units,
+        output_path=args.output,
+        manifest_path=args.manifest,
+        lecture_id=args.lecture_id,
+        min_confidence=args.min_confidence,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

@@ -1,0 +1,9 @@
+{
+  "project_id": "public_concept_candidate_fixture",
+  "lecture_id": "public_concept_candidate_lecture",
+  "fixture_type": "public_synthetic",
+  "description": "Synthetic evidence unit fixture for concept candidate extraction smoke tests.",
+  "artifacts": {
+    "evidence_units": "segments/evidence_units.jsonl"
+  }
+}
