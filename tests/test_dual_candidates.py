@@ -165,6 +165,77 @@ def test_graph_only_target_recall_fixture_records_source_recall(tmp_path: Path) 
     assert graph_session.calls[0]["parameters"]["concept_terms"][0] == "step size diagram"
 
 
+def test_graph_aware_rerank_fixture_lifts_graph_relation_over_generic_hit(
+    tmp_path: Path,
+) -> None:
+    project_dir = _write_project(tmp_path)
+    graph_session = FakeGraphSession(
+        [
+            {
+                "evidence_unit_id": "evu_graph_target",
+                "project_id": "public_project",
+                "matched_concept": {
+                    "concept_id": "concept_step_size",
+                    "label": "Step size",
+                    "lecture_id": "lecture_public",
+                },
+                "related_concept": {
+                    "concept_id": "concept_gradient_descent",
+                    "label": "Gradient descent",
+                    "lecture_id": "lecture_public",
+                },
+                "graph_path": [
+                    "concept:lecture_public:concept_step_size",
+                    "concept:lecture_public:concept_gradient_descent",
+                    "evidence_unit:lecture_public:evu_graph_target",
+                ],
+                "relationships": ["USES", "CONCEPT_SOURCE_EVIDENCE"],
+                "graph_match_type": "related_concept_evidence",
+                "score": 0.7,
+            }
+        ]
+    )
+
+    response = query_project_dual_candidates(
+        client=QueryAwareEvidenceClient(
+            {
+                "Which diagram explains gradient descent step size?": [
+                    {
+                        **_hit("evu_meili_only", "seg_meili", score=0.98),
+                        "evidence_text": "A generic public hit mentions gradient descent.",
+                    }
+                ]
+            }
+        ),
+        index_uid="sample_evidence_units",
+        project_dir=project_dir,
+        query="Which diagram explains gradient descent step size?",
+        limit=2,
+        candidate_pool_limit=2,
+        graph_session=graph_session,
+        target_evidence_unit_ids=["evu_graph_target"],
+        graph_aware_rerank=True,
+    )
+
+    candidate_ids = [candidate["evidence_unit_id"] for candidate in response["candidates"]]
+    assert candidate_ids == ["evu_graph_target", "evu_meili_only"]
+    rerank = response["candidates"][0]["graph_aware_rerank"]
+    assert rerank["original_rank"] == 2
+    assert rerank["components"]["related_concept_graph_path"] > 0
+    assert rerank["components"]["relation_type_match"] > 0
+    diagnostics = response["diagnostics"]["graph_aware_rerank"]
+    assert diagnostics["public_safe"] is True
+    assert diagnostics["top_changed"] is True
+    assert diagnostics["returned_breakdowns"][0]["source_ids"] == [
+        "evidence_unit:evu_graph_target",
+        "evu_graph_target",
+        "seg_graph",
+    ]
+    rendered_diagnostics = json.dumps(diagnostics, ensure_ascii=False)
+    assert "Which diagram explains gradient descent step size?" not in rendered_diagnostics
+    assert "A generic public hit" not in rendered_diagnostics
+
+
 def test_graph_candidate_cypher_supports_global_concept_merge_paths() -> None:
     cypher = graph_candidate_cypher()
 

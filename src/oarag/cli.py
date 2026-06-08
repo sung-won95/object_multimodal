@@ -1323,6 +1323,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip Graph DB traversal and return Meilisearch-only candidates.",
     )
+    dual_candidates.add_argument(
+        "--graph-aware-rerank",
+        action="store_true",
+        help="Rerank the union with deterministic graph relation and object-evidence signals.",
+    )
     dual_candidates.add_argument("--output", type=Path, help="Optional JSON output path.")
     dual_candidates.set_defaults(func=cmd_query_project_dual_candidates)
 
@@ -2626,6 +2631,7 @@ def cmd_query_project_dual_candidates(args: argparse.Namespace) -> None:
         target_evidence_unit_ids=args.target_evidence_unit_ids,
         target_segment_ids=args.target_segment_ids,
         enable_graph=not args.disable_graph,
+        graph_aware_rerank=args.graph_aware_rerank,
     )
     if args.output is not None:
         output_path = args.output

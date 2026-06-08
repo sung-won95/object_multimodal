@@ -1287,6 +1287,7 @@ def test_query_project_dual_candidates_cli_defaults() -> None:
     assert args.target_evidence_unit_ids is None
     assert args.target_segment_ids is None
     assert args.disable_graph is False
+    assert args.graph_aware_rerank is False
     assert args.output is None
 
 
@@ -1332,6 +1333,7 @@ def test_cmd_query_project_dual_candidates_forwards_inputs(monkeypatch, capsys) 
             "--target-segment-id",
             "seg_target",
             "--disable-graph",
+            "--graph-aware-rerank",
         ]
     )
 
@@ -1349,6 +1351,7 @@ def test_cmd_query_project_dual_candidates_forwards_inputs(monkeypatch, capsys) 
     assert calls["query_kwargs"]["target_evidence_unit_ids"] == ["evu_target"]
     assert calls["query_kwargs"]["target_segment_ids"] == ["seg_target"]
     assert calls["query_kwargs"]["enable_graph"] is False
+    assert calls["query_kwargs"]["graph_aware_rerank"] is True
     assert json.loads(capsys.readouterr().out)["query"] == "step size diagram"
 
 

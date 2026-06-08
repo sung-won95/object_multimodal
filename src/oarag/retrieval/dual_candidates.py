@@ -13,6 +13,11 @@ from oarag.retrieval.evidence_unit_index import (
     _escape_meili_filter_string,
     _project_id_from_evidence_units,
 )
+from oarag.retrieval.graph_rerank import (
+    graph_aware_rerank_candidates,
+    graph_aware_rerank_context,
+    graph_aware_rerank_diagnostics,
+)
 from oarag.retrieval.project_index import evidence_unit_artifact_path, iter_jsonl_documents
 from oarag.retrieval.project_query import _search_hit_records, _search_with_expanded_queries
 
@@ -144,6 +149,7 @@ def query_project_dual_candidates(
     target_evidence_unit_ids: list[str] | None = None,
     target_segment_ids: list[str] | None = None,
     enable_graph: bool = True,
+    graph_aware_rerank: bool = False,
     graph_session: GraphCandidateSession | None = None,
     neo4j_config: Neo4jConfig | None = None,
 ) -> dict[str, Any]:
@@ -207,15 +213,37 @@ def query_project_dual_candidates(
 
     merged_entries = _merge_candidate_entries([*raw_entries, *expanded_entries, *graph_entries])
     ranked_entries = sorted(merged_entries.values(), key=_candidate_entry_sort_key)
-    returned_entries = ranked_entries[:result_limit]
-    candidates = [_serialize_candidate_entry(entry, rank) for rank, entry in enumerate(returned_entries, 1)]
-    all_candidates = [_serialize_candidate_entry(entry, rank) for rank, entry in enumerate(ranked_entries, 1)]
+    base_candidates = [
+        _serialize_candidate_entry(entry, rank) for rank, entry in enumerate(ranked_entries, 1)
+    ]
+    rerank_context = {"enabled": False, "strategy": None}
+    if graph_aware_rerank:
+        all_candidates = graph_aware_rerank_candidates(
+            base_candidates,
+            query=query,
+            query_analysis=analysis.to_dict(),
+        )
+        rerank_context = graph_aware_rerank_context(
+            base_candidates=base_candidates,
+            reranked_candidates=all_candidates,
+            query_analysis=analysis.to_dict(),
+        )
+    else:
+        all_candidates = base_candidates
+    candidates = all_candidates[:result_limit]
     diagnostics = dual_candidate_diagnostics(
         candidates=all_candidates,
         returned_candidates=candidates,
         target_evidence_unit_ids=target_evidence_unit_ids,
         target_segment_ids=target_segment_ids,
     )
+    if graph_aware_rerank:
+        diagnostics["graph_aware_rerank"] = graph_aware_rerank_diagnostics(
+            base_candidates=base_candidates,
+            reranked_candidates=all_candidates,
+            returned_candidates=candidates,
+            query_analysis=analysis.to_dict(),
+        )
     elapsed_ms = round((time.monotonic() - started_at) * 1000, 2)
 
     return {
@@ -241,6 +269,7 @@ def query_project_dual_candidates(
                 "expanded": expanded_context,
             },
             "graph": graph_status,
+            "graph_aware_rerank": rerank_context,
         },
         "diagnostics": diagnostics,
         "counts": {
