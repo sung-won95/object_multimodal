@@ -11,6 +11,7 @@ from oarag.cli import (
     cmd_build_project_windows,
     cmd_concept_graph_ingest,
     cmd_extract_concept_candidates,
+    cmd_merge_cross_lecture_concepts,
     cmd_index_project_evidence_units,
     cmd_index_project,
     cmd_index_project_visual_entities,
@@ -260,6 +261,53 @@ def test_cmd_concept_graph_ingest_forwards_public_safe_options(monkeypatch, caps
         "skip_unavailable_runtime": False,
     }
     assert json.loads(capsys.readouterr().out) == {"ok": True, "dry_run": True}
+
+
+def test_cmd_merge_cross_lecture_concepts_forwards_public_safe_options(
+    monkeypatch,
+    capsys,
+) -> None:
+    calls = {}
+
+    def fake_merge_cross_lecture_concepts(**kwargs):
+        calls["merge_kwargs"] = kwargs
+        return {"counts": {"merge_decisions": 1, "conflicts": 1}}
+
+    monkeypatch.setattr(
+        "oarag.cli.merge_cross_lecture_concepts",
+        fake_merge_cross_lecture_concepts,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "merge-cross-lecture-concepts",
+            "--concept-graph",
+            "manifests/lecture_a_concept_graph.jsonl",
+            "--concept-graph",
+            "manifests/lecture_b_concept_graph.jsonl",
+            "--output",
+            "manifests/global_concept_graph.json",
+            "--summary",
+            "manifests/global_concept_merge_summary.json",
+            "--project-id",
+            "public_project",
+        ]
+    )
+
+    cmd_merge_cross_lecture_concepts(args)
+
+    assert calls["merge_kwargs"] == {
+        "concept_graph_paths": [
+            Path("manifests/lecture_a_concept_graph.jsonl"),
+            Path("manifests/lecture_b_concept_graph.jsonl"),
+        ],
+        "output_path": Path("manifests/global_concept_graph.json"),
+        "summary_path": Path("manifests/global_concept_merge_summary.json"),
+        "project_id": "public_project",
+    }
+    assert json.loads(capsys.readouterr().out) == {
+        "counts": {"merge_decisions": 1, "conflicts": 1}
+    }
 
 
 def test_cmd_extract_concept_candidates_forwards_project_options(monkeypatch, capsys) -> None:

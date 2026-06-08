@@ -31,6 +31,7 @@ from oarag.vision.entity_links import link_entities
 from oarag.retrieval.evidence import build_evidence_response
 from oarag.graph.concept_extraction import extract_project_concept_candidates
 from oarag.graph.concept_graph_ingest import ingest_concept_graph
+from oarag.graph.cross_lecture_merge import merge_cross_lecture_concepts
 from oarag.graph.graph_ingest import ingest_project_graph
 from oarag.graph.graph_query import GraphTraversalConfig, graph_query
 from oarag.ingestion.ingest import (
@@ -277,6 +278,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Raise an error instead of returning an explicit skip summary when Neo4j is unavailable.",
     )
     concept_graph_ingest.set_defaults(func=cmd_concept_graph_ingest)
+
+    cross_lecture_merge = subparsers.add_parser(
+        "merge-cross-lecture-concepts",
+        help="Merge multiple lecture-local concept graphs into a global graph document.",
+    )
+    cross_lecture_merge.add_argument(
+        "--concept-graph",
+        action="append",
+        required=True,
+        type=Path,
+        dest="concept_graphs",
+        help="Lecture-local concept graph JSONL path. Repeat for each lecture.",
+    )
+    cross_lecture_merge.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Output global concept graph document JSON path.",
+    )
+    cross_lecture_merge.add_argument(
+        "--summary",
+        type=Path,
+        help="Optional counts-only public-safe summary JSON path.",
+    )
+    cross_lecture_merge.add_argument(
+        "--project-id",
+        help="Optional project id to store in the global graph document.",
+    )
+    cross_lecture_merge.set_defaults(func=cmd_merge_cross_lecture_concepts)
 
     index = subparsers.add_parser("index-eduvidqa", help="Index normalized EDUVIDQA JSONL")
     index.add_argument("--input", required=True, type=Path)
@@ -2046,6 +2076,16 @@ def cmd_concept_graph_ingest(args: argparse.Namespace) -> None:
         create_schema=not args.skip_schema,
         dry_run=args.dry_run,
         skip_unavailable_runtime=not args.fail_on_unavailable_runtime,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_merge_cross_lecture_concepts(args: argparse.Namespace) -> None:
+    summary = merge_cross_lecture_concepts(
+        concept_graph_paths=args.concept_graphs,
+        output_path=args.output,
+        summary_path=args.summary,
+        project_id=args.project_id,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
