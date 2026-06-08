@@ -126,6 +126,7 @@ class DualCandidateConfig:
     candidate_pool_limit: int
     graph_limit: int
     max_expanded_queries: int = 6
+    enable_meili: bool = True
     enable_graph: bool = True
 
 
@@ -148,6 +149,7 @@ def query_project_dual_candidates(
     evidence_units: Path | None = None,
     target_evidence_unit_ids: list[str] | None = None,
     target_segment_ids: list[str] | None = None,
+    enable_meili: bool = True,
     enable_graph: bool = True,
     graph_aware_rerank: bool = False,
     graph_session: GraphCandidateSession | None = None,
@@ -174,6 +176,7 @@ def query_project_dual_candidates(
     config = DualCandidateConfig(
         candidate_pool_limit=pool_limit,
         graph_limit=resolved_graph_limit,
+        enable_meili=enable_meili,
         enable_graph=enable_graph,
     )
     evidence_lookup = _load_evidence_unit_lookup(
@@ -182,25 +185,31 @@ def query_project_dual_candidates(
     )
 
     started_at = time.monotonic()
-    raw_entries, raw_context = _meili_candidate_entries(
-        client=client,
-        index_uid=index_uid,
-        queries=[query],
-        query_role="raw",
-        source_type=MEILI_RAW_SOURCE,
-        limit=pool_limit,
-        filter=filter_expr,
-    )
     expanded_queries = _expanded_queries(query=query, analysis=analysis, max_queries=config.max_expanded_queries)
-    expanded_entries, expanded_context = _meili_candidate_entries(
-        client=client,
-        index_uid=index_uid,
-        queries=expanded_queries,
-        query_role="concept_expanded",
-        source_type=MEILI_EXPANDED_SOURCE,
-        limit=pool_limit,
-        filter=filter_expr,
-    )
+    if config.enable_meili:
+        raw_entries, raw_context = _meili_candidate_entries(
+            client=client,
+            index_uid=index_uid,
+            queries=[query],
+            query_role="raw",
+            source_type=MEILI_RAW_SOURCE,
+            limit=pool_limit,
+            filter=filter_expr,
+        )
+        expanded_entries, expanded_context = _meili_candidate_entries(
+            client=client,
+            index_uid=index_uid,
+            queries=expanded_queries,
+            query_role="concept_expanded",
+            source_type=MEILI_EXPANDED_SOURCE,
+            limit=pool_limit,
+            filter=filter_expr,
+        )
+    else:
+        raw_entries = []
+        expanded_entries = []
+        raw_context = _meili_skip_context(source_type=MEILI_RAW_SOURCE)
+        expanded_context = _meili_skip_context(source_type=MEILI_EXPANDED_SOURCE)
     graph_entries, graph_status = _graph_candidate_entries(
         query=query,
         project_id=project_id,
@@ -259,7 +268,7 @@ def query_project_dual_candidates(
         "retrieval_context": {
             "candidate_generation": {
                 "mode": "meili_graph_dual",
-                "sources": [MEILI_RAW_SOURCE, MEILI_EXPANDED_SOURCE, GRAPH_TRAVERSAL_SOURCE],
+                "sources": _configured_sources(enable_meili=config.enable_meili, enable_graph=config.enable_graph),
                 "candidate_pool_limit": pool_limit,
                 "graph_limit": resolved_graph_limit,
                 "expanded_queries": expanded_queries,
@@ -796,6 +805,27 @@ def _meili_context(
         "raw_hit_count_before_dedupe": response.get("rawHitCountBeforeDedupe"),
         "processing_time_ms": response.get("processingTimeMs"),
     }
+
+
+def _meili_skip_context(*, source_type: str) -> dict[str, Any]:
+    return {
+        "attempted": False,
+        "available": False,
+        "status": "skipped",
+        "source_type": source_type,
+        "queries": [],
+        "hit_count": 0,
+        "skip_reason": "meili_disabled",
+    }
+
+
+def _configured_sources(*, enable_meili: bool, enable_graph: bool) -> list[str]:
+    sources: list[str] = []
+    if enable_meili:
+        sources.extend([MEILI_RAW_SOURCE, MEILI_EXPANDED_SOURCE])
+    if enable_graph:
+        sources.append(GRAPH_TRAVERSAL_SOURCE)
+    return sources
 
 
 def _graph_status(

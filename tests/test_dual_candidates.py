@@ -268,6 +268,50 @@ def test_graph_unavailable_falls_back_to_meili_only_with_skip_reason(tmp_path: P
     assert response["candidates"][0]["candidate_source_types"] == [MEILI_RAW_SOURCE]
 
 
+def test_graph_only_can_skip_meili_candidate_generation(tmp_path: Path) -> None:
+    project_dir = _write_project(tmp_path)
+    client = QueryAwareEvidenceClient(
+        {"Where is the step size diagram?": [_hit("evu_meili_only", "seg_meili", score=0.9)]}
+    )
+    graph_session = FakeGraphSession(
+        [
+            {
+                "evidence_unit_id": "evu_graph_target",
+                "project_id": "public_project",
+                "matched_concept": {"concept_id": "concept_step_size", "label": "Step size"},
+                "graph_path": ["concept:step_size", "evidence_unit:evu_graph_target"],
+                "relationships": ["MENTIONS"],
+                "graph_match_type": "direct_mention",
+                "score": 0.7,
+            }
+        ]
+    )
+
+    response = query_project_dual_candidates(
+        client=client,
+        index_uid="sample_evidence_units",
+        project_dir=project_dir,
+        query="Where is the step size diagram?",
+        limit=2,
+        candidate_pool_limit=2,
+        enable_meili=False,
+        graph_session=graph_session,
+        target_evidence_unit_ids=["evu_graph_target"],
+    )
+
+    assert client.searches == []
+    assert [candidate["evidence_unit_id"] for candidate in response["candidates"]] == [
+        "evu_graph_target"
+    ]
+    assert response["retrieval_context"]["candidate_generation"]["sources"] == [
+        GRAPH_TRAVERSAL_SOURCE
+    ]
+    assert response["retrieval_context"]["meilisearch"]["raw"]["skip_reason"] == "meili_disabled"
+    assert response["diagnostics"]["source_recall"]["by_source"][GRAPH_TRAVERSAL_SOURCE][
+        "recalled_count"
+    ] == 1
+
+
 def test_serialize_graph_candidate_record_keeps_public_safe_graph_metadata() -> None:
     serialized = serialize_graph_candidate_record(
         {
