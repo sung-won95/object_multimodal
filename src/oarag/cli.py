@@ -47,6 +47,7 @@ from oarag.ingestion.ingest import (
 from oarag.core.io import write_json
 from oarag.evaluation.lecture_smoke import run_lecture_smoke
 from oarag.evaluation.evidence_unit_smoke import run_evidence_unit_smoke
+from oarag.evaluation.cross_lecture_retrieval_smoke import run_cross_lecture_retrieval_smoke
 from oarag.integrations.meili import (
     EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_SEGMENT_DEFAULT_SETTINGS_PROFILE,
@@ -1792,6 +1793,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evidence_unit_smoke.set_defaults(func=cmd_evidence_unit_smoke)
 
+    cross_lecture_retrieval_smoke = subparsers.add_parser(
+        "cross-lecture-retrieval-smoke",
+        help="Compare Meili, graph, and graph-aware cross-lecture retrieval variants",
+    )
+    cross_lecture_retrieval_smoke.add_argument("--manifest", required=True, type=Path)
+    cross_lecture_retrieval_smoke.add_argument(
+        "--output-dir",
+        type=Path,
+        help=(
+            "Optional public output directory. Writes sanitized metrics.json, "
+            "query_results.jsonl, and summary.md."
+        ),
+    )
+    cross_lecture_retrieval_smoke.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate manifest/output wiring without querying Meilisearch or Neo4j.",
+    )
+    cross_lecture_retrieval_smoke.set_defaults(func=cmd_cross_lecture_retrieval_smoke)
+
     return parser
 
 
@@ -3015,6 +3036,30 @@ def cmd_evidence_unit_smoke(args: argparse.Namespace) -> None:
         dry_run=args.dry_run,
         quality_rerank=args.quality_rerank,
         modality_aware_rerank=args.modality_aware_rerank,
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": run.run_id,
+                "output_dir": str(run.output_dir),
+                "metrics": str(run.metrics_path),
+                "query_results": str(run.query_results_path),
+                "summary": str(run.summary_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+def cmd_cross_lecture_retrieval_smoke(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    run = run_cross_lecture_retrieval_smoke(
+        client=client,
+        manifest_path=args.manifest,
+        output_dir=args.output_dir,
+        repo_root=default_paths().repo_root,
+        dry_run=args.dry_run,
     )
     print(
         json.dumps(
