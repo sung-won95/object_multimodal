@@ -235,17 +235,20 @@ def build_global_concept_graph_document(
         clusters,
         local_concepts,
         scored_pairs,
+        project_id=project_id,
     )
-    local_nodes = [_local_concept_node(item) for item in local_concepts.values()]
+    local_nodes = [_local_concept_node(item, project_id=project_id) for item in local_concepts.values()]
     mapping_relationships = _mapping_relationships(
         local_concepts=local_concepts,
         global_id_by_local_key=global_id_by_local_key,
         scored_pairs=scored_pairs,
+        project_id=project_id,
     )
     global_relationships = _global_relation_relationships(
         relations=relations,
         global_id_by_local_key=global_id_by_local_key,
         local_concepts=local_concepts,
+        project_id=project_id,
     )
     nodes = sorted([*global_nodes, *local_nodes], key=lambda row: row["key"])
     relationships = sorted(
@@ -478,6 +481,8 @@ def _build_global_nodes_and_decisions(
     clusters: list[list[str]],
     local_concepts: dict[str, _LocalConcept],
     scored_pairs: list[tuple[str, str, MergeScore]],
+    *,
+    project_id: str | None,
 ) -> tuple[dict[str, str], list[dict[str, Any]], list[MergeDecision]]:
     pair_scores = {
         frozenset((left, right)): score
@@ -507,6 +512,7 @@ def _build_global_nodes_and_decisions(
                 labels=("GraphNode", "GlobalConcept"),
                 properties=_compact(
                     {
+                        "project_id": project_id,
                         "global_concept_id": global_concept_id,
                         "canonical_label": canonical_label,
                         "aliases": _global_aliases(concepts),
@@ -553,13 +559,14 @@ def _build_global_nodes_and_decisions(
     return global_id_by_local_key, nodes, decisions
 
 
-def _local_concept_node(local: _LocalConcept) -> dict[str, Any]:
+def _local_concept_node(local: _LocalConcept, *, project_id: str | None) -> dict[str, Any]:
     concept = local.concept
     return _node(
         key=_local_concept_key(concept.lecture_id, concept.concept_id),
         labels=("GraphNode", "Concept"),
         properties=_compact(
             {
+                "project_id": project_id,
                 "concept_id": concept.concept_id,
                 "lecture_id": concept.lecture_id,
                 "label": concept.label,
@@ -578,6 +585,7 @@ def _mapping_relationships(
     local_concepts: dict[str, _LocalConcept],
     global_id_by_local_key: dict[str, str],
     scored_pairs: list[tuple[str, str, MergeScore]],
+    project_id: str | None,
 ) -> list[dict[str, Any]]:
     score_by_key = _best_score_by_local_key(scored_pairs)
     relationships: list[dict[str, Any]] = []
@@ -595,6 +603,7 @@ def _mapping_relationships(
                 end_node_key=_global_concept_key(global_concept_id),
                 properties=_compact(
                     {
+                        "project_id": project_id,
                         "lecture_id": local.concept.lecture_id,
                         "concept_id": local.concept.concept_id,
                         "global_concept_id": global_concept_id,
@@ -619,6 +628,7 @@ def _global_relation_relationships(
     relations: list[ConceptGraphRelationEdge],
     global_id_by_local_key: dict[str, str],
     local_concepts: dict[str, _LocalConcept],
+    project_id: str | None,
 ) -> list[dict[str, Any]]:
     aggregate: dict[tuple[str, str, str], dict[str, Any]] = {}
     for relation in relations:
@@ -674,6 +684,7 @@ def _global_relation_relationships(
                 start_node_key=_global_concept_key(source_global),
                 end_node_key=_global_concept_key(target_global),
                 properties={
+                    "project_id": project_id,
                     "relation_type": item["relation_type"],
                     "global_source_concept_id": source_global,
                     "global_target_concept_id": target_global,

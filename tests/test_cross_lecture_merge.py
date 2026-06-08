@@ -96,6 +96,35 @@ def test_same_alias_with_different_context_is_recorded_as_conflict() -> None:
     assert len(kernel_targets) == 2
 
 
+def test_project_id_is_propagated_to_all_graph_properties() -> None:
+    records = [load_concept_graph_artifact(path) for path in FIXTURE_PATHS]
+
+    document = build_global_concept_graph_document(records, project_id="public_cross_merge")
+
+    assert document["project_id"] == "public_cross_merge"
+    assert {tuple(node["labels"]) for node in document["nodes"]} >= {
+        ("GraphNode", "GlobalConcept"),
+        ("GraphNode", "Concept"),
+    }
+    assert {
+        relationship["type"]
+        for relationship in document["relationships"]
+        if relationship["type"].startswith("GLOBAL_")
+    } == {"GLOBAL_USES"}
+    assert any(
+        relationship["type"] == "INSTANCE_OF_GLOBAL_CONCEPT"
+        for relationship in document["relationships"]
+    )
+    assert all(
+        node["properties"].get("project_id") == "public_cross_merge"
+        for node in document["nodes"]
+    )
+    assert all(
+        relationship["properties"].get("project_id") == "public_cross_merge"
+        for relationship in document["relationships"]
+    )
+
+
 def test_merge_cross_lecture_concepts_writes_counts_only_summary(tmp_path: Path) -> None:
     output_path = tmp_path / "global_concept_graph.json"
     summary_path = tmp_path / "global_concept_merge_summary.json"
