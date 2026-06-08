@@ -30,6 +30,7 @@ from oarag.evaluation.eval import candidate_diagnostics, evaluate_query, summari
 from oarag.vision.entity_links import link_entities
 from oarag.retrieval.evidence import build_evidence_response
 from oarag.graph.concept_extraction import extract_project_concept_candidates
+from oarag.graph.concept_graph_ingest import ingest_concept_graph
 from oarag.graph.graph_ingest import ingest_project_graph
 from oarag.graph.graph_query import GraphTraversalConfig, graph_query
 from oarag.ingestion.ingest import (
@@ -251,6 +252,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum concept candidate confidence to write.",
     )
     concept_candidates.set_defaults(func=cmd_extract_concept_candidates)
+
+    concept_graph_ingest = subparsers.add_parser(
+        "concept-graph-ingest",
+        help="Ingest a concept graph artifact into Neo4j with idempotent merges.",
+    )
+    location = concept_graph_ingest.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    location.add_argument("--concept-graph", type=Path, help="Concept graph JSONL artifact path")
+    concept_graph_ingest.add_argument(
+        "--skip-schema",
+        action="store_true",
+        help="Skip idempotent Neo4j constraint/index creation.",
+    )
+    concept_graph_ingest.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build and summarize Cypher merge plan without connecting to Neo4j.",
+    )
+    concept_graph_ingest.add_argument(
+        "--fail-on-unavailable-runtime",
+        action="store_true",
+        help="Raise an error instead of returning an explicit skip summary when Neo4j is unavailable.",
+    )
+    concept_graph_ingest.set_defaults(func=cmd_concept_graph_ingest)
 
     index = subparsers.add_parser("index-eduvidqa", help="Index normalized EDUVIDQA JSONL")
     index.add_argument("--input", required=True, type=Path)
@@ -2004,6 +2030,22 @@ def cmd_graph_ingest(args: argparse.Namespace) -> None:
         graph_document_path=args.graph_document,
         create_schema=not args.skip_schema,
         dry_run=args.dry_run,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_concept_graph_ingest(args: argparse.Namespace) -> None:
+    project_dir = None
+    project_id = args.project_id
+    if args.project_id is not None or args.project_dir is not None:
+        project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = ingest_concept_graph(
+        project_dir=project_dir,
+        concept_graph_path=args.concept_graph,
+        project_id=project_id,
+        create_schema=not args.skip_schema,
+        dry_run=args.dry_run,
+        skip_unavailable_runtime=not args.fail_on_unavailable_runtime,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
