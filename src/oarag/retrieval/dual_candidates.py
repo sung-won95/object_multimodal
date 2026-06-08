@@ -446,8 +446,12 @@ def serialize_graph_candidate_record(record: Any, *, rank: int) -> dict[str, Any
             "source_segment_ids": _string_list(
                 row.get("source_segment_ids") or evidence_unit.get("source_segment_ids")
             ),
-            "start_time": _optional_float(row.get("start_time") or evidence_unit.get("start_time")),
-            "end_time": _optional_float(row.get("end_time") or evidence_unit.get("end_time")),
+            "start_time": _optional_float(
+                _first_present(row.get("start_time"), evidence_unit.get("start_time"))
+            ),
+            "end_time": _optional_float(
+                _first_present(row.get("end_time"), evidence_unit.get("end_time"))
+            ),
             "score": score,
             "rank": rank,
         }
@@ -1009,6 +1013,13 @@ def _merge_missing_values(base: dict[str, Any], fallback: dict[str, Any]) -> dic
         if key not in merged or merged[key] in (None, "", [], {}):
             merged[key] = value
     return merged
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
 
 
 def _compact(payload: dict[str, Any]) -> dict[str, Any]:

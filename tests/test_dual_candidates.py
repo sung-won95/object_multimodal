@@ -224,6 +224,21 @@ def test_serialize_graph_candidate_record_keeps_public_safe_graph_metadata() -> 
     assert "metadata" not in rendered
 
 
+def test_serialize_graph_candidate_record_preserves_zero_timestamps() -> None:
+    serialized = serialize_graph_candidate_record(
+        {
+            "evidence_unit_id": "evu_zero",
+            "start_time": 0.0,
+            "end_time": 0.0,
+            "score": 0.5,
+        },
+        rank=1,
+    )
+
+    assert serialized["candidate"]["start_time"] == 0.0
+    assert serialized["candidate"]["end_time"] == 0.0
+
+
 def _write_project(tmp_path: Path) -> Path:
     project_dir = tmp_path / "project"
     _write_jsonl(
