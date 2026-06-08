@@ -8,7 +8,7 @@ content, candidate evidence text, private eval values, or absolute local paths.
 
 - `seed_v1/`: seed retrieval benchmark aggregates and failure-analysis summaries.
 - `paper_matrix_v1/`: runbook and skeleton configuration for the MIT paper bundle
-  retrieval-answer ablation matrix.
+  retrieval-answer ablation matrix and the dynamic concept graph smoke matrix.
 
 ## Paper Bundle
 
@@ -30,6 +30,11 @@ guard for bundle continuity, not a final paper performance threshold. Treat a bu
 as paper-ready only when the generated registry, readiness audit, claim matrix, and
 robustness intervals all support the intended claim.
 
+For dynamic concept graph diagnostics, use `cross-lecture-retrieval-smoke` and keep
+Meili-only, Graph-only, Meili+Graph, and graph-aware rerank results separate from the
+retrieval-answer bundle. Those rows support candidate recall, source contribution,
+rerank delta, and skip-reason diagnostics only.
+
 ## Current Claim Boundary
 
 As of the current repository state, this directory should be read as a public-safe
@@ -38,5 +43,6 @@ claim boundary is maintained in `../paper/current_claim_status.md`.
 
 Do not claim provider-backed hybrid retrieval gains, VLM-over-OCR improvements, frame
 coverage improvement, or aggregate timestamp-only link reduction from the skeleton
-files alone. Those claims require a fresh local bundle run and privacy-checked
-aggregate artifacts.
+files alone. Do not claim that Graph DB availability proves verified object alignment.
+Those claims require a fresh local bundle or cross-lecture smoke run and
+privacy-checked aggregate artifacts.

@@ -8,6 +8,20 @@ ratio claims.
 
 ## Matrix Contract
 
+This folder tracks two public-safe paper-facing matrices:
+
+- The `run-paper-bundle` retrieval-answer matrix, which remains the final aggregate
+  bundle path for answer/citation metrics.
+- The `cross-lecture-retrieval-smoke` dynamic concept graph matrix, which is the
+  public-safe diagnostic path for Meili, graph, combined candidate recall, and
+  graph-aware rerank behavior.
+
+Do not merge these claims in paper prose. The graph matrix can support candidate
+recall, source contribution, rerank delta, and skip-reason diagnostics. It does not
+prove verified object alignment or final answer quality.
+
+## Retrieval-answer Matrix
+
 The bundle manifest compares these nine variants for every MIT lecture suite:
 
 - `segment_lexical`
@@ -62,6 +76,36 @@ Use the matrix to separate bottlenecks:
   skipped, the likely bottleneck is evidence coverage/index readiness rather than
   ranking.
 
+## Dynamic Concept Graph Matrix
+
+The dynamic concept graph smoke compares these variants from #222:
+
+| Variant | Candidate source | Implementation issue | Paper-facing diagnostic |
+| --- | --- | --- | --- |
+| `meili_only` | Meilisearch lexical/semantic candidate retrieval | #220, #222 | Meili candidate recall and Meili skip reasons |
+| `graph_only` | Graph traversal over dynamic concept graph evidence | #217, #219, #220, #222 | Graph candidate recall and graph skip reasons |
+| `meili_graph` | Combined Meili and graph candidate pool | #213, #214, #217, #219, #220, #222 | Source contribution counts and combined recall buckets |
+| `graph_aware_rerank` | Combined pool plus deterministic graph-aware rerank | #221, #222 | Rank deltas and rerank diagnostics |
+
+The graph matrix is connected to the implementation issues as follows:
+
+| Axis | Linked issues | Public-safe evidence |
+| --- | --- | --- |
+| Architecture direction | #213 | Method scope: dynamic concept graph guided candidate recall, not final performance |
+| Concept-aware evidence units | #214 | Counts of concept/evidence-unit coverage, never raw transcript or evidence text |
+| Graph ingest | #217 | Aggregate graph availability/status and skip reasons |
+| Cross-lecture concept merge | #219 | Hashed concept/evidence refs and source-type counts |
+| Dual Meili+Graph candidates | #220 | Source contribution counts, ranks, and recall buckets |
+| Graph-aware rerank | #221 | Rerank deltas and deterministic rerank diagnostics |
+| Cross-lecture smoke/report | #222 | Public-safe `metrics.json`, `query_results.jsonl`, and `summary.md` |
+
+Public result tables for this matrix may contain only `query_id`, hashed refs,
+source types, ranks, counts, recall buckets, rerank deltas, and skip reasons. Raw
+query text, answer text, transcript content, candidate evidence text, private eval
+values, raw vectors, local absolute paths, and raw private identifiers are excluded.
+Timestamp-only overlap remains candidate/fallback evidence and must stay separate
+from verified object alignment.
+
 ## Prerequisites
 
 Build and index the shared window corpus before running the bundle:
@@ -75,6 +119,14 @@ For `window_hybrid`, pass the same hybrid embedder profile and dimensions used b
 the segment index when required by the local Meilisearch configuration.
 For the evidence-unit variants, build and index `segments/evidence_units.jsonl`
 into `mit_deep_learning_stt_evidence_units` before a full claim-bearing run.
+For the dynamic concept graph matrix, prepare public-safe cross-lecture smoke
+manifests with graph artifacts and Meili indexes available, then run:
+
+```bash
+PYTHONPATH=src python3 -m oarag cross-lecture-retrieval-smoke \
+  --manifest <cross_lecture_smoke_manifest.json> \
+  --output-dir <cross_lecture_output_dir>
+```
 
 ## Full Bundle Command
 

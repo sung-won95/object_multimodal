@@ -14,6 +14,12 @@
     "evidence_unit_verified",
     "evidence_unit_quality_rerank"
   ],
+  "dynamic_concept_graph_variants": [
+    "meili_only",
+    "graph_only",
+    "meili_graph",
+    "graph_aware_rerank"
+  ],
   "expected_outputs": [
     "metrics.json",
     "metrics_summary.csv",
@@ -28,6 +34,21 @@
     "paper_claims/claim_evidence_matrix.json",
     "paper_artifact_registry.json",
     "paper_bundle_result.json"
+  ],
+  "cross_lecture_smoke_outputs": [
+    "metrics.json",
+    "query_results.jsonl",
+    "summary.md"
+  ],
+  "allowed_public_result_fields": [
+    "query_id",
+    "hashed_refs",
+    "source_types",
+    "ranks",
+    "counts",
+    "recall_buckets",
+    "rerank_deltas",
+    "skip_reasons"
   ],
   "privacy": {
     "payload": "artifact_filenames_variant_ids_and_status_fields_only",
