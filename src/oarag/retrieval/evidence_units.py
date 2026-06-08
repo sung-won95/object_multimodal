@@ -12,6 +12,7 @@ from oarag.retrieval.evidence import (
     select_window_segments,
 )
 from oarag.retrieval.project_index import iter_jsonl_documents, segment_artifact_path
+from oarag.vision.vlm_evidence_validator import is_paper_quality_vlm_entity
 
 
 EVIDENCE_UNITS_ARTIFACT_RELATIVE_PATH = Path("segments") / "evidence_units.jsonl"
@@ -527,12 +528,7 @@ def _alignment_score(links: list[dict[str, Any]], statuses: dict[str, str]) -> f
 
 
 def _is_vlm_entity(entity: dict[str, Any]) -> bool:
-    source = _text(entity.get("source")).casefold()
-    return bool(
-        "vlm" in source
-        or _text(entity.get("source_model"))
-        or _text(entity.get("visual_description"))
-    )
+    return is_paper_quality_vlm_entity(entity)
 
 
 def _visual_state_context(state: dict[str, Any]) -> dict[str, Any]:

@@ -736,6 +736,36 @@ def test_run_vlm_cli_accepts_jsonl_and_mock_backend_choices() -> None:
     assert mock_args.vlm_backend == "mock"
 
 
+def test_validate_vlm_evidence_cli_accepts_artifact_paths() -> None:
+    args = build_parser().parse_args(
+        [
+            "validate-vlm-evidence",
+            "--project-id",
+            "sample_project",
+            "--visual-entities",
+            "manifests/visual_entities.jsonl",
+            "--evidence-units",
+            "segments/evidence_units.jsonl",
+            "--vlm-observations",
+            "manifests/vlm_visual_observations.jsonl",
+            "--vlm-jsonl",
+            "manifests/vlm_parser_output.jsonl",
+            "--output",
+            "reports/vlm_coverage.json",
+            "--summary",
+            "reports/vlm_coverage.md",
+        ]
+    )
+
+    assert args.project_id == "sample_project"
+    assert args.visual_entities.as_posix() == "manifests/visual_entities.jsonl"
+    assert args.evidence_units.as_posix() == "segments/evidence_units.jsonl"
+    assert args.vlm_observations.as_posix() == "manifests/vlm_visual_observations.jsonl"
+    assert args.vlm_jsonl.as_posix() == "manifests/vlm_parser_output.jsonl"
+    assert args.output.as_posix() == "reports/vlm_coverage.json"
+    assert args.summary.as_posix() == "reports/vlm_coverage.md"
+
+
 def test_run_vlm_alignment_cli_accepts_pipeline_options() -> None:
     args = build_parser().parse_args(
         [

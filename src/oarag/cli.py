@@ -80,6 +80,7 @@ from oarag.core.schemas import SearchCandidate
 from oarag.ingestion.stt import DEFAULT_MLX_WHISPER_MODEL
 from oarag.vision.visual_entities import DEFAULT_VISUAL_ENTITY_BACKEND, extract_visual_entities
 from oarag.vision.vlm import DEFAULT_VLM_BACKEND, available_vlm_backends, run_vlm
+from oarag.vision.vlm_evidence_validator import validate_vlm_object_evidence
 from oarag.vision.audio_visual_consistency import AudioVisualConsistencyConfig
 from oarag.vision.vlm_alignment_pipeline import VLMAlignmentPipelineConfig, run_vlm_alignment_pipeline
 from oarag.vision.vlm_frame_candidates import VLMFrameCandidateConfig
@@ -873,6 +874,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Project manifest JSON path. Relative paths are resolved from project dir.",
     )
     vlm.set_defaults(func=cmd_run_vlm)
+
+    validate_vlm = subparsers.add_parser(
+        "validate-vlm-evidence",
+        help="Write a public-safe VLM object evidence coverage report",
+    )
+    location = validate_vlm.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    validate_vlm.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="visual_entities JSONL path. Defaults to manifests/visual_entities.jsonl.",
+    )
+    validate_vlm.add_argument(
+        "--evidence-units",
+        type=Path,
+        help="evidence_units JSONL path. Defaults to segments/evidence_units.jsonl.",
+    )
+    validate_vlm.add_argument(
+        "--vlm-observations",
+        type=Path,
+        help="VLM visual observations JSONL path used for artifact presence checks.",
+    )
+    validate_vlm.add_argument(
+        "--vlm-jsonl",
+        type=Path,
+        help="Structured VLM parser JSONL path used for artifact presence checks.",
+    )
+    validate_vlm.add_argument("--output", type=Path, help="Optional public-safe JSON report path.")
+    validate_vlm.add_argument(
+        "--summary",
+        type=Path,
+        help="Optional public-safe Markdown summary path.",
+    )
+    validate_vlm.set_defaults(func=cmd_validate_vlm_evidence)
 
     vlm_alignment = subparsers.add_parser(
         "run-vlm-alignment",
@@ -2143,6 +2179,20 @@ def cmd_run_vlm(args: argparse.Namespace) -> None:
         output_path=args.output,
         manifest_path=args.manifest,
         resume=args.resume,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_validate_vlm_evidence(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = validate_vlm_object_evidence(
+        project_dir=project_dir,
+        visual_entities_path=args.visual_entities,
+        evidence_units_path=args.evidence_units,
+        vlm_observations_path=args.vlm_observations,
+        vlm_jsonl_path=args.vlm_jsonl,
+        output_path=args.output,
+        summary_path=args.summary,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

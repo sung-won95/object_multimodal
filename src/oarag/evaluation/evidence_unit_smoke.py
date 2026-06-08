@@ -15,6 +15,7 @@ from oarag.integrations.meili import EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE
 from oarag.retrieval.evidence_unit_index import query_project_evidence_units
 from oarag.retrieval.evidence_units import build_project_evidence_units
 from oarag.retrieval.project_index import index_project_evidence_units, iter_jsonl_documents
+from oarag.vision.vlm_evidence_validator import validate_vlm_object_evidence
 
 
 PUBLIC_SCHEMA_VERSION = "evidence-unit-retrieval-smoke-public-v1"
@@ -463,7 +464,15 @@ def _artifact_summary(
             "alignment_status_counts": {},
             "source_quality_counts": {},
             "link_counts": {},
+            "vlm_object_evidence_coverage": {
+                "status": "dry_run",
+                "skip_reason": "dry_run_requested",
+            },
         }
+    vlm_object_evidence_coverage = validate_vlm_object_evidence(
+        project_dir=project_dir,
+        evidence_units_path=evidence_units,
+    )
     if build_summary is not None:
         counts = _mapping(build_summary.get("counts"))
         return {
@@ -484,6 +493,7 @@ def _artifact_summary(
                 "timestamp_fallback_links": int(counts.get("timestamp_fallback_links") or 0),
             },
             "verified_alignment_note": _verified_alignment_note(counts),
+            "vlm_object_evidence_coverage": vlm_object_evidence_coverage,
         }
 
     rows = _evidence_unit_rows(project_dir=project_dir, evidence_units=evidence_units)
@@ -519,6 +529,7 @@ def _artifact_summary(
             "timestamp_fallback_links": source_quality["timestamp_fallback_links"],
         },
         "verified_alignment_note": _verified_alignment_note(source_quality),
+        "vlm_object_evidence_coverage": vlm_object_evidence_coverage,
     }
 
 
@@ -980,6 +991,9 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
     for suite in payload.get("suites", []):
         build = suite.get("build", {})
         index = suite.get("index", {})
+        vlm_coverage = _mapping(build.get("vlm_object_evidence_coverage"))
+        entity_coverage = _mapping(vlm_coverage.get("visual_entity_coverage"))
+        unit_coverage = _mapping(vlm_coverage.get("evidence_unit_coverage"))
         lines.extend(
             [
                 f"### {suite.get('suite_id')}",
@@ -994,6 +1008,12 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- top-vs-target coverage flags: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('quality_delta_flag_counts', {}), sort_keys=True)}`",
                 f"- reranked target rank buckets: `{json.dumps(suite.get('rerank_diagnostics', {}).get('reranked_target_rank_bucket_counts', {}), sort_keys=True)}`",
                 f"- reranked top-hit matches: `{suite.get('rerank_diagnostics', {}).get('reranked_top_match_count', 0)}`",
+                f"- VLM evidence status: `{vlm_coverage.get('status')}`",
+                f"- paper-quality VLM entities: `{entity_coverage.get('paper_quality_vlm_entity_count', 0)}`",
+                f"- OCR-only entities: `{entity_coverage.get('ocr_only_entity_count', 0)}`",
+                f"- units with VLM entity: `{unit_coverage.get('units_with_vlm_entity', 0)}`",
+                f"- units with visual description: `{unit_coverage.get('units_with_visual_description', 0)}`",
+                f"- units with detected text: `{unit_coverage.get('units_with_detected_text', 0)}`",
                 "",
             ]
         )

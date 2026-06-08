@@ -435,6 +435,7 @@ class VisualEntity:
     confidence: float | None
     source: str
     visual_description: str | None = None
+    detected_text: str | None = None
     position: dict[str, Any] | None = None
     relations: list[dict[str, Any]] = field(default_factory=list)
     parser_version: str | None = None
@@ -462,6 +463,7 @@ class VisualEntity:
             relations = [dict(item) for item in raw_relations if isinstance(item, dict)]
 
         visual_description = payload.get("visual_description")
+        detected_text = payload.get("detected_text")
         parser_version = payload.get("parser_version")
         source_model = payload.get("source_model")
 
@@ -479,6 +481,7 @@ class VisualEntity:
             visual_description=(
                 str(visual_description) if visual_description is not None else None
             ),
+            detected_text=str(detected_text) if detected_text is not None else None,
             position=position,
             relations=relations,
             parser_version=str(parser_version) if parser_version is not None else None,
@@ -486,7 +489,10 @@ class VisualEntity:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if self.detected_text is None:
+            payload.pop("detected_text", None)
+        return payload
 
 
 @dataclass(frozen=True)
