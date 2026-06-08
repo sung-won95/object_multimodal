@@ -16,6 +16,7 @@ from oarag.cli import (
     cmd_index_project,
     cmd_index_project_visual_entities,
     cmd_index_project_windows,
+    cmd_query_project_dual_candidates,
     cmd_query_project_evidence_units,
     parse_vlm_options,
 )
@@ -1260,6 +1261,95 @@ def test_cmd_query_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
     assert calls["query_kwargs"]["limit"] == 3
     assert calls["query_kwargs"]["evidence_units"].as_posix() == "segments/evidence_units.jsonl"
     assert json.loads(capsys.readouterr().out)["query"] == "gradient arrow"
+
+
+def test_query_project_dual_candidates_cli_defaults() -> None:
+    args = build_parser().parse_args(
+        [
+            "query-project-dual-candidates",
+            "--index",
+            "sample_evidence_units",
+            "--project-id",
+            "sample_project",
+            "--query",
+            "step size diagram",
+        ]
+    )
+
+    assert args.index == "sample_evidence_units"
+    assert args.project_id == "sample_project"
+    assert args.project_dir is None
+    assert args.query == "step size diagram"
+    assert args.limit == 5
+    assert args.candidate_pool_limit is None
+    assert args.graph_limit is None
+    assert args.evidence_units is None
+    assert args.target_evidence_unit_ids is None
+    assert args.target_segment_ids is None
+    assert args.disable_graph is False
+    assert args.output is None
+
+
+def test_cmd_query_project_dual_candidates_forwards_inputs(monkeypatch, capsys) -> None:
+    calls = {}
+    fake_client = object()
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_query_project_dual_candidates(**kwargs):
+        calls["query_kwargs"] = kwargs
+        return {"query": kwargs["query"], "candidates": [], "diagnostics": {}}
+
+    monkeypatch.setattr("oarag.cli.client_from_args", lambda args: fake_client)
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr(
+        "oarag.cli.query_project_dual_candidates",
+        fake_query_project_dual_candidates,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "query-project-dual-candidates",
+            "--index",
+            "sample_evidence_units",
+            "--project-dir",
+            str(project_dir),
+            "--query",
+            "step size diagram",
+            "--limit",
+            "4",
+            "--candidate-pool-limit",
+            "8",
+            "--graph-limit",
+            "6",
+            "--evidence-units",
+            "segments/evidence_units.jsonl",
+            "--target-evidence-unit-id",
+            "evu_target",
+            "--target-segment-id",
+            "seg_target",
+            "--disable-graph",
+        ]
+    )
+
+    cmd_query_project_dual_candidates(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["query_kwargs"]["client"] is fake_client
+    assert calls["query_kwargs"]["index_uid"] == "sample_evidence_units"
+    assert calls["query_kwargs"]["project_dir"] == Path("/tmp/project")
+    assert calls["query_kwargs"]["query"] == "step size diagram"
+    assert calls["query_kwargs"]["limit"] == 4
+    assert calls["query_kwargs"]["candidate_pool_limit"] == 8
+    assert calls["query_kwargs"]["graph_limit"] == 6
+    assert calls["query_kwargs"]["evidence_units"].as_posix() == "segments/evidence_units.jsonl"
+    assert calls["query_kwargs"]["target_evidence_unit_ids"] == ["evu_target"]
+    assert calls["query_kwargs"]["target_segment_ids"] == ["seg_target"]
+    assert calls["query_kwargs"]["enable_graph"] is False
+    assert json.loads(capsys.readouterr().out)["query"] == "step size diagram"
 
 
 def test_ask_project_cli_defaults() -> None:

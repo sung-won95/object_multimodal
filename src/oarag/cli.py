@@ -78,6 +78,7 @@ from oarag.retrieval.project_index import (
     project_dir_from_args,
 )
 from oarag.retrieval.evidence_units import build_project_evidence_units, build_project_visual_states
+from oarag.retrieval.dual_candidates import query_project_dual_candidates
 from oarag.retrieval.evidence_unit_index import query_project_evidence_units
 from oarag.core.schemas import SearchCandidate
 from oarag.ingestion.stt import DEFAULT_MLX_WHISPER_MODEL
@@ -1279,6 +1280,51 @@ def build_parser() -> argparse.ArgumentParser:
     )
     query_evidence_units.add_argument("--output", type=Path, help="Optional JSON output path.")
     query_evidence_units.set_defaults(func=cmd_query_project_evidence_units)
+
+    dual_candidates = subparsers.add_parser(
+        "query-project-dual-candidates",
+        help="Union Meilisearch raw/expanded evidence-unit candidates with graph traversal",
+    )
+    dual_candidates.add_argument("--index", required=True)
+    location = dual_candidates.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    dual_candidates.add_argument("--query", required=True)
+    dual_candidates.add_argument("--limit", type=int, default=5)
+    dual_candidates.add_argument(
+        "--candidate-pool-limit",
+        type=int,
+        help="Candidates to request per Meilisearch source before union and final limiting.",
+    )
+    dual_candidates.add_argument(
+        "--graph-limit",
+        type=int,
+        help="Maximum graph traversal candidate rows to request.",
+    )
+    dual_candidates.add_argument(
+        "--evidence-units",
+        type=Path,
+        help="Optional evidence_units JSONL path used for project_id and graph candidate enrichment.",
+    )
+    dual_candidates.add_argument(
+        "--target-evidence-unit-id",
+        action="append",
+        dest="target_evidence_unit_ids",
+        help="Optional target evidence_unit_id for public-safe source recall diagnostics.",
+    )
+    dual_candidates.add_argument(
+        "--target-segment-id",
+        action="append",
+        dest="target_segment_ids",
+        help="Optional target segment id for public-safe source recall diagnostics.",
+    )
+    dual_candidates.add_argument(
+        "--disable-graph",
+        action="store_true",
+        help="Skip Graph DB traversal and return Meilisearch-only candidates.",
+    )
+    dual_candidates.add_argument("--output", type=Path, help="Optional JSON output path.")
+    dual_candidates.set_defaults(func=cmd_query_project_dual_candidates)
 
     ask_project_parser = subparsers.add_parser(
         "ask-project",
@@ -2556,6 +2602,30 @@ def cmd_query_project_evidence_units(args: argparse.Namespace) -> None:
         query=args.query,
         limit=args.limit,
         evidence_units=args.evidence_units,
+    )
+    if args.output is not None:
+        output_path = args.output
+        if not output_path.is_absolute():
+            output_path = project_dir / output_path
+        write_json(output_path, response)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+
+
+def cmd_query_project_dual_candidates(args: argparse.Namespace) -> None:
+    client = client_from_args(args)
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    response = query_project_dual_candidates(
+        client=client,
+        index_uid=args.index,
+        project_dir=project_dir,
+        query=args.query,
+        limit=args.limit,
+        candidate_pool_limit=args.candidate_pool_limit,
+        graph_limit=args.graph_limit,
+        evidence_units=args.evidence_units,
+        target_evidence_unit_ids=args.target_evidence_unit_ids,
+        target_segment_ids=args.target_segment_ids,
+        enable_graph=not args.disable_graph,
     )
     if args.output is not None:
         output_path = args.output
