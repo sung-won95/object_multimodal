@@ -12,7 +12,10 @@ from typing import Any, Protocol
 from oarag.core.config import default_paths
 from oarag.core.io import write_json, write_jsonl
 from oarag.integrations.meili import EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE
-from oarag.retrieval.evidence_unit_index import query_project_evidence_units
+from oarag.retrieval.evidence_unit_index import (
+    MODALITY_AWARE_RERANK,
+    query_project_evidence_units,
+)
 from oarag.retrieval.evidence_units import (
     CANDIDATE_LINK_SIGNAL_KEYS,
     LINK_DIAGNOSTICS_PUBLIC_NOTE,
@@ -61,6 +64,7 @@ def run_evidence_unit_smoke(
     repo_root: Path | None = None,
     dry_run: bool = False,
     quality_rerank: bool = False,
+    modality_aware_rerank: bool = False,
 ) -> EvidenceUnitSmokeRun:
     manifest = _read_json(manifest_path)
     base_dir = manifest_path.expanduser().resolve().parent
@@ -96,6 +100,7 @@ def run_evidence_unit_smoke(
             health=health,
             dry_run=dry_run,
             quality_rerank=quality_rerank,
+            modality_aware_rerank=modality_aware_rerank,
         )
         suite_summaries.append(suite_summary)
         query_rows.extend(rows)
@@ -108,6 +113,7 @@ def run_evidence_unit_smoke(
         health=health,
         dry_run=dry_run,
         quality_rerank=quality_rerank,
+        modality_aware_rerank=modality_aware_rerank,
     )
     metrics_path = resolved_output_dir / "metrics.json"
     query_results_path = resolved_output_dir / "query_results.jsonl"
@@ -137,6 +143,7 @@ def _run_suite(
     health: dict[str, Any],
     dry_run: bool,
     quality_rerank: bool,
+    modality_aware_rerank: bool,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     suite_id = str(suite.get("suite_id") or suite.get("project_id") or "lecture_suite")
     project_dir = _project_dir_from_suite(suite=suite, base_dir=base_dir, repo_root=repo_root)
@@ -152,6 +159,10 @@ def _run_suite(
     )
     target_rank_limit = max(limit, target_rank_limit)
     suite_quality_rerank = bool(suite.get("quality_rerank", quality_rerank))
+    suite_modality_aware_rerank = _suite_modality_aware_rerank(
+        suite,
+        default=modality_aware_rerank,
+    )
     queries = _read_queries(base_dir=base_dir, suite=suite)
 
     build_summary = None
@@ -237,6 +248,7 @@ def _run_suite(
                         limit=limit,
                         target_rank_limit=target_rank_limit,
                         quality_rerank=suite_quality_rerank,
+                        modality_aware_rerank=suite_modality_aware_rerank,
                     )
                 )
         except Exception as exc:  # noqa: BLE001 - smoke runner should record skip/failure context.
@@ -271,8 +283,21 @@ def _run_suite(
         "rag_input_inspection": _rag_input_inspection(query_rows, artifact_summary),
         "target_rank_diagnostics": _target_rank_inspection(query_rows),
         "rerank_diagnostics": _rerank_inspection(query_rows),
+        "modality_aware_rerank_diagnostics": _modality_aware_rerank_inspection(query_rows),
     }
     return suite_summary, query_rows
+
+
+def _suite_modality_aware_rerank(suite: dict[str, Any], *, default: bool) -> bool:
+    if "modality_aware_rerank" in suite:
+        return bool(suite.get("modality_aware_rerank"))
+    configured = _optional_str(suite.get("evidence_unit_rerank"))
+    if configured is not None:
+        return configured.casefold().replace("-", "_") in {
+            "modality_aware",
+            "modality",
+        }
+    return default
 
 
 def _query_row(
@@ -288,6 +313,7 @@ def _query_row(
     limit: int,
     target_rank_limit: int,
     quality_rerank: bool,
+    modality_aware_rerank: bool,
 ) -> dict[str, Any]:
     query_id = _query_id(query_row)
     query_text = _query_text(query_row)
@@ -303,12 +329,20 @@ def _query_row(
         query=query_text,
         limit=target_rank_limit,
         evidence_units=evidence_units,
+        evidence_unit_rerank=MODALITY_AWARE_RERANK if modality_aware_rerank else None,
     )
     candidates = _list_of_dicts(response.get("candidates"))
+    base_candidates = _list_of_dicts(response.get("base_candidates")) or candidates
     top_candidate = candidates[0] if candidates else {}
     expected_match = _candidate_matches_expected(top_candidate, expected_segment_ids)
     target_diagnostics = _target_diagnostics(
         candidates=candidates,
+        expected_segment_ids=expected_segment_ids,
+        search_depth=target_rank_limit,
+        query_text=query_text,
+    )
+    base_target_diagnostics = _target_diagnostics(
+        candidates=base_candidates,
         expected_segment_ids=expected_segment_ids,
         search_depth=target_rank_limit,
         query_text=query_text,
@@ -357,6 +391,7 @@ def _query_row(
             target_rank_bucket=str(target_diagnostics.get("target_rank_bucket") or ""),
         ),
         "target_diagnostics": target_diagnostics,
+        "base_target_diagnostics": base_target_diagnostics if modality_aware_rerank else None,
         "reranked_top_evidence_unit": (
             _public_candidate(reranked_top_candidate, query_text=query_text) if quality_rerank else None
         ),
@@ -377,6 +412,11 @@ def _query_row(
             expected_segment_ids=expected_segment_ids,
             base_target_diagnostics=target_diagnostics,
             reranked_target_diagnostics=reranked_target_diagnostics,
+        ),
+        "modality_aware_rerank": _public_modality_aware_rerank(
+            response.get("retrieval_context"),
+            base_target_diagnostics=base_target_diagnostics,
+            reranked_target_diagnostics=target_diagnostics,
         ),
         "segment_baseline": baseline,
         "rag_input_inspectable": _candidate_is_rag_inspectable(top_candidate),
@@ -459,7 +499,12 @@ def _skipped_query_row(
             "target_rank_bucket": "not_queried",
             "target_search_depth": 0,
         },
+        "base_target_diagnostics": None,
         "rerank_diagnostics": {
+            "enabled": False,
+            "status": "not_queried",
+        },
+        "modality_aware_rerank": {
             "enabled": False,
             "status": "not_queried",
         },
@@ -642,6 +687,7 @@ def _public_candidate(candidate: dict[str, Any], *, query_text: str | None = Non
             query_text=query_text or "",
             candidate=candidate,
         ),
+        "modality_aware_rerank": _public_candidate_modality_rerank(candidate),
     }
 
 
@@ -999,6 +1045,88 @@ def _quality_rerank_breakdown(candidate: dict[str, Any], *, original_rank: int) 
     }
 
 
+def _public_candidate_modality_rerank(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    rerank = _mapping(candidate.get("modality_aware_rerank"))
+    if not rerank:
+        return None
+    return {
+        "strategy": rerank.get("strategy"),
+        "query_type": rerank.get("query_type"),
+        "original_rank": rerank.get("original_rank"),
+        "reranked_rank": rerank.get("reranked_rank"),
+        "score": rerank.get("score"),
+        "score_bucket": _score_bucket(_optional_float(rerank.get("score"))),
+        "score_components": _mapping(rerank.get("components")),
+        "flags": _mapping(rerank.get("flags")),
+        "query_term_overlap": _mapping(rerank.get("query_term_overlap")),
+    }
+
+
+def _public_modality_aware_rerank(
+    retrieval_context: Any,
+    *,
+    base_target_diagnostics: dict[str, Any],
+    reranked_target_diagnostics: dict[str, Any],
+) -> dict[str, Any]:
+    context = _mapping(retrieval_context)
+    rerank = _mapping(context.get("evidence_unit_rerank"))
+    if not rerank or rerank.get("enabled") is not True:
+        return {"enabled": False, "status": "disabled"}
+    return {
+        "enabled": True,
+        "status": "computed",
+        "strategy": rerank.get("strategy"),
+        "query_type": rerank.get("query_type"),
+        "candidate_count": int(rerank.get("candidate_count") or 0),
+        "top_changed": bool(rerank.get("top_changed")),
+        "base_top_ref": rerank.get("base_top_ref"),
+        "reranked_top_ref": rerank.get("reranked_top_ref"),
+        "reranked_top_score": rerank.get("reranked_top_score"),
+        "reranked_top_score_bucket": _score_bucket(
+            _optional_float(rerank.get("reranked_top_score"))
+        ),
+        "reranked_top_original_rank": rerank.get("reranked_top_original_rank"),
+        "reranked_top_rank": rerank.get("reranked_top_rank"),
+        "component_names": [
+            str(name)
+            for name in rerank.get("component_names", [])
+            if isinstance(name, str)
+        ],
+        "base_target_rank": base_target_diagnostics.get("target_rank"),
+        "base_target_rank_bucket": base_target_diagnostics.get("target_rank_bucket"),
+        "reranked_target_rank": reranked_target_diagnostics.get("target_rank"),
+        "reranked_target_rank_bucket": reranked_target_diagnostics.get("target_rank_bucket"),
+        "failure_mode": _modality_rerank_failure_mode(
+            base_target_diagnostics=base_target_diagnostics,
+            reranked_target_diagnostics=reranked_target_diagnostics,
+        ),
+        "public_note": (
+            "Modality-aware rerank is an opt-in retrieval path. It reports feature "
+            "names, counts, buckets, scores, and hashed refs only."
+        ),
+    }
+
+
+def _modality_rerank_failure_mode(
+    *,
+    base_target_diagnostics: dict[str, Any],
+    reranked_target_diagnostics: dict[str, Any],
+) -> str:
+    if base_target_diagnostics.get("target_configured") is not True:
+        return "target_not_configured"
+    if base_target_diagnostics.get("target_found_in_top_k") is not True:
+        return "candidate_recall_failure"
+    if reranked_target_diagnostics.get("target_found_in_top_k") is not True:
+        return "rerank_regression"
+    base_rank = _optional_int(base_target_diagnostics.get("target_rank"))
+    reranked_rank = _optional_int(reranked_target_diagnostics.get("target_rank"))
+    if base_rank is not None and reranked_rank is not None and reranked_rank < base_rank:
+        return "ranking_improved"
+    if reranked_rank == 1:
+        return "ranking_success"
+    return "evidence_quality_or_ranking_tie"
+
+
 def _rerank_diagnostics(
     *,
     enabled: bool,
@@ -1075,6 +1203,7 @@ def _summary_payload(
     health: dict[str, Any],
     dry_run: bool,
     quality_rerank: bool,
+    modality_aware_rerank: bool,
 ) -> dict[str, Any]:
     status_counts = Counter(str(row.get("status") or "unknown") for row in query_rows)
     return {
@@ -1095,7 +1224,9 @@ def _summary_payload(
         "rag_input_inspection": _rag_input_inspection(query_rows, {}),
         "target_rank_diagnostics": _target_rank_inspection(query_rows),
         "rerank_diagnostics": _rerank_inspection(query_rows),
+        "modality_aware_rerank_diagnostics": _modality_aware_rerank_inspection(query_rows),
         "quality_rerank_requested": quality_rerank,
+        "modality_aware_rerank_requested": modality_aware_rerank,
         "object_alignment_note": (
             "timestamp-only overlap is reported as candidate/fallback evidence only; "
             "it is not counted as verified object alignment"
@@ -1159,6 +1290,9 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- top-vs-target coverage flags: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('quality_delta_flag_counts', {}), sort_keys=True)}`",
                 f"- reranked target rank buckets: `{json.dumps(suite.get('rerank_diagnostics', {}).get('reranked_target_rank_bucket_counts', {}), sort_keys=True)}`",
                 f"- reranked top-hit matches: `{suite.get('rerank_diagnostics', {}).get('reranked_top_match_count', 0)}`",
+                f"- modality-aware query types: `{json.dumps(suite.get('modality_aware_rerank_diagnostics', {}).get('query_type_counts', {}), sort_keys=True)}`",
+                f"- modality-aware failure modes: `{json.dumps(suite.get('modality_aware_rerank_diagnostics', {}).get('failure_mode_counts', {}), sort_keys=True)}`",
+                f"- modality-aware top changes: `{suite.get('modality_aware_rerank_diagnostics', {}).get('top_changed_count', 0)}`",
                 f"- VLM evidence status: `{vlm_coverage.get('status')}`",
                 f"- paper-quality VLM entities: `{entity_coverage.get('paper_quality_vlm_entity_count', 0)}`",
                 f"- OCR-only entities: `{entity_coverage.get('ocr_only_entity_count', 0)}`",
@@ -1305,6 +1439,40 @@ def _rerank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
         "public_note": (
             "Rerank diagnostics compare base and deterministic quality-aware ordering using "
             "only candidate metadata. Expected targets are evaluation-only labels."
+        ),
+    }
+
+
+def _modality_aware_rerank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    diagnostics = [_mapping(row.get("modality_aware_rerank")) for row in query_rows]
+    enabled = [diag for diag in diagnostics if diag.get("enabled") is True]
+    computed = [diag for diag in enabled if diag.get("status") == "computed"]
+    query_types = Counter(str(diag.get("query_type") or "unknown") for diag in computed)
+    failure_modes = Counter(str(diag.get("failure_mode") or "unknown") for diag in computed)
+    component_presence = Counter()
+    top_changed_count = 0
+    base_buckets = Counter()
+    reranked_buckets = Counter()
+    for diag in computed:
+        if diag.get("top_changed") is True:
+            top_changed_count += 1
+        base_buckets[str(diag.get("base_target_rank_bucket") or "unknown")] += 1
+        reranked_buckets[str(diag.get("reranked_target_rank_bucket") or "unknown")] += 1
+        for name in diag.get("component_names", []):
+            if isinstance(name, str):
+                component_presence[name] += 1
+    return {
+        "enabled_query_count": len(enabled),
+        "computed_query_count": len(computed),
+        "top_changed_count": top_changed_count,
+        "query_type_counts": dict(query_types),
+        "failure_mode_counts": dict(failure_modes),
+        "base_target_rank_bucket_counts": dict(base_buckets),
+        "reranked_target_rank_bucket_counts": dict(reranked_buckets),
+        "score_component_presence_counts": dict(component_presence),
+        "public_note": (
+            "Failure modes separate candidate recall failure, rerank regression, "
+            "ranking improvement/success, and remaining evidence-quality or ranking-tie cases."
         ),
     }
 
@@ -1674,6 +1842,20 @@ def _ratio_bucket(numerator: int, denominator: int) -> str:
     if ratio < 0.5:
         return "medium"
     if ratio < 0.75:
+        return "high"
+    return "very_high"
+
+
+def _score_bucket(score: float | None) -> str:
+    if score is None:
+        return "not_available"
+    if score < 0:
+        return "negative"
+    if score < 0.5:
+        return "low"
+    if score < 1.0:
+        return "medium"
+    if score < 1.5:
         return "high"
     return "very_high"
 

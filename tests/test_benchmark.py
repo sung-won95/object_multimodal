@@ -832,6 +832,9 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["evidence_unit_quality_rerank"]["config"][
         "evidence_unit_priority"
     ] == "quality"
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"]["config"][
+        "evidence_unit_rerank"
+    ] == "modality_aware"
     assert suite["variant_metrics"]["window"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["rerank"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["evidence_unit_candidate"]["hit_at_10s"] == 1.0
@@ -853,6 +856,15 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     ] == 1.0
     assert suite["variant_metrics"]["evidence_unit_verified"]["vlm_entity_coverage_ratio"] == 1.0
     assert suite["variant_metrics"]["evidence_unit_candidate"]["ocr_only_coverage_ratio"] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
+        "modality_aware_rerank"
+    ]["enabled_query_count"] == 1
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
+        "modality_aware_rerank"
+    ]["top_changed_count"] == 1
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
+        "modality_aware_rerank"
+    ]["score_component_presence_counts"]["verified_link"] == 1
     assert suite["variant_metrics"]["evidence_unit_candidate"]["skipped_count"] == 0
     assert suite["variant_metrics"]["evidence_unit_candidate"][
         "candidate_link_signal_counts"
@@ -933,6 +945,9 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     evidence_verified_row = next(
         row for row in rows if row["variant_id"] == "evidence_unit_verified"
     )
+    evidence_quality_row = next(
+        row for row in rows if row["variant_id"] == "evidence_unit_quality_rerank"
+    )
     assert evidence_candidate_row["status"] == "queried"
     assert evidence_candidate_row["top_candidate"]["source"] == "evidence_unit"
     assert evidence_candidate_row["verified_object_alignment"]["verified_link_count"] == 0
@@ -955,6 +970,16 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     ] == 1
     assert evidence_verified_row["target_rank_bucket"] == "top1"
     assert evidence_verified_row["object_evidence_coverage"]["has_vlm_entity"] is True
+    assert evidence_quality_row["config"]["evidence_unit_rerank"] == "modality_aware"
+    assert evidence_quality_row["modality_aware_rerank"]["enabled"] is True
+    assert evidence_quality_row["modality_aware_rerank"]["strategy"] == "modality_aware"
+    assert evidence_quality_row["modality_aware_rerank"]["top_changed"] is True
+    assert evidence_quality_row["top_candidate"]["modality_aware_rerank"]["score_components"][
+        "verified_link"
+    ] > 0
+    assert evidence_quality_row["top_candidate"]["object_evidence_coverage"][
+        "has_verified_link"
+    ] is True
 
     metrics_csv = run.metrics_csv_path.read_text(encoding="utf-8")
     assert "variant,segment_lexical" in metrics_csv
