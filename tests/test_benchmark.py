@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 
 from oarag.benchmark import parse_time_hint, run_benchmark
-from oarag.evaluation.benchmark import _answer_grounding_metrics, _public_answer_summary
+from oarag.evaluation.benchmark import (
+    _answer_failure_reason,
+    _answer_grounding_metrics,
+    _public_answer_summary,
+)
 from oarag.evaluation.quality_gate import evaluate_retrieval_quality_gate
 
 
@@ -405,16 +409,20 @@ def _public_evidence_unit_hits() -> list[dict]:
     ]
 
 
-MIT_PAPER_MATRIX_VARIANTS = [
+MIT_ANSWER_MATRIX_VARIANTS = [
+    "segment_lexical",
+    "evidence_unit_candidate",
+    "evidence_unit_verified",
+    "evidence_unit_quality_rerank",
+]
+DEFAULT_MATRIX_VARIANTS = [
     "segment_lexical",
     "domain_lexicon",
     "hybrid",
     "window",
     "window_hybrid",
     "rerank",
-    "evidence_unit_candidate",
-    "evidence_unit_verified",
-    "evidence_unit_quality_rerank",
+    *MIT_ANSWER_MATRIX_VARIANTS[1:],
 ]
 
 
@@ -490,6 +498,72 @@ def test_answer_visual_citation_metrics_count_only_claim_references() -> None:
     assert abstained_grounding["answer_uses_verified_visual_evidence"] is False
 
 
+def test_answer_failure_reason_codes_split_retrieval_grounding_and_abstention() -> None:
+    base_row = {
+        "status": "queried",
+        "evidence_covered": True,
+        "bundle_count": 1,
+        "answer": {
+            "enabled": True,
+            "citation_count": 1,
+            "insufficient_evidence": False,
+        },
+        "answer_grounding": {
+            "enabled": True,
+            "expected_available": True,
+            "expected_citation_hit": True,
+            "unsupported_claim_count": 0,
+        },
+    }
+
+    assert _answer_failure_reason(base_row) == "grounded_expected_citation"
+
+    retrieval_miss = {
+        **base_row,
+        "answer_grounding": {
+            **base_row["answer_grounding"],
+            "expected_citation_hit": False,
+            "unsupported_claim_count": 1,
+        },
+    }
+    assert _answer_failure_reason(retrieval_miss) == "retrieval_miss"
+
+    unsupported_claims = {
+        **base_row,
+        "answer_grounding": {
+            **base_row["answer_grounding"],
+            "unsupported_claim_count": 1,
+        },
+    }
+    assert _answer_failure_reason(unsupported_claims) == "unsupported_claims"
+
+    abstention = {
+        **base_row,
+        "answer": {
+            **base_row["answer"],
+            "citation_count": 0,
+            "insufficient_evidence": True,
+        },
+    }
+    assert _answer_failure_reason(abstention) == "insufficient_evidence"
+
+    abstained_retrieval_miss = {
+        **abstention,
+        "answer_grounding": {
+            **base_row["answer_grounding"],
+            "expected_citation_hit": False,
+        },
+    }
+    assert _answer_failure_reason(abstained_retrieval_miss) == "retrieval_miss"
+
+    abstained_empty_retrieval = {
+        **abstention,
+        "evidence_covered": False,
+        "bundle_count": 0,
+    }
+    assert _answer_failure_reason(abstained_empty_retrieval) == "retrieval_miss"
+
+
 def test_mit_deep_learning_matrix_manifest_schema_smoke() -> None:
     manifest_path = Path("eval/mit_deep_learning_stt/benchmark_matrix_manifest.json")
     manifest_text = manifest_path.read_text(encoding="utf-8")
@@ -498,7 +572,8 @@ def test_mit_deep_learning_matrix_manifest_schema_smoke() -> None:
 
     assert manifest["run_id"] == "mit_deep_learning_stt_paper_matrix_v1"
     assert manifest["output_dir"] == "../../reports/mit_deep_learning_eval/paper_matrix_v1"
-    assert manifest["paper_matrix"]["required_variants"] == MIT_PAPER_MATRIX_VARIANTS
+    assert manifest["paper_matrix"]["required_variants"] == DEFAULT_MATRIX_VARIANTS
+    assert manifest["paper_matrix"]["answer_matrix_variant_ids"] == MIT_ANSWER_MATRIX_VARIANTS
     assert manifest["paper_matrix"]["baseline_variant_id"] == "segment_lexical"
     assert manifest["paper_matrix"]["domain_lexicon"] == "domain_lexicon.json"
     assert len(suites) == 24
@@ -513,7 +588,7 @@ def test_mit_deep_learning_matrix_manifest_schema_smoke() -> None:
     }
 
     for suite in suites:
-        assert suite["variants"] == MIT_PAPER_MATRIX_VARIANTS
+        assert suite["variants"] == DEFAULT_MATRIX_VARIANTS
         assert suite["domain_lexicon"] == "domain_lexicon.json"
         assert suite["hybrid_query_vector_dimensions"] == 384
         assert suite["hybrid_query_vector_embedder"] == "default"
@@ -884,8 +959,25 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["schema_version"] == "retrieval-answer-ablation-matrix-v1"
     assert suite["query_count"] == 1
     assert suite["variant_count"] == 9
-    assert set(suite["variant_metrics"]) == set(MIT_PAPER_MATRIX_VARIANTS)
+    assert set(suite["variant_metrics"]) == set(DEFAULT_MATRIX_VARIANTS)
+    assert suite["answer_matrix"]["schema_version"] == (
+        "retrieval-answer-citation-public-aggregate-v1"
+    )
+    assert suite["answer_matrix"]["variant_ids"] == MIT_ANSWER_MATRIX_VARIANTS
+    assert [
+        row["answer_matrix_role"] for row in suite["answer_matrix"]["variants"]
+    ] == [
+        "segment_baseline",
+        "evidence_unit_meili_only",
+        "evidence_unit_meili_graph",
+        "evidence_unit_quality_rerank",
+    ]
+    assert suite["answer_matrix"]["privacy"]["raw_queries"] == "excluded"
+    assert suite["answer_matrix"]["privacy"]["full_evidence_text"] == "excluded"
     assert suite["variant_metrics"]["segment_lexical"]["config"]["domain_lexicon"] is False
+    assert suite["variant_metrics"]["segment_lexical"]["config"]["answer_matrix_role"] == (
+        "segment_baseline"
+    )
     assert suite["variant_metrics"]["domain_lexicon"]["config"]["domain_lexicon"] is True
     assert suite["variant_metrics"]["hybrid"]["config"]["hybrid_retrieval"] is True
     assert suite["variant_metrics"]["window"]["config"]["index_kind"] == "window"
@@ -895,15 +987,24 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["evidence_unit_candidate"]["config"][
         "evidence_unit_priority"
     ] == "candidate"
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["config"][
+        "answer_matrix_role"
+    ] == "evidence_unit_meili_only"
     assert suite["variant_metrics"]["evidence_unit_verified"]["config"][
         "evidence_unit_priority"
     ] == "verified"
+    assert suite["variant_metrics"]["evidence_unit_verified"]["config"][
+        "answer_matrix_role"
+    ] == "evidence_unit_meili_graph"
     assert suite["variant_metrics"]["evidence_unit_quality_rerank"]["config"][
         "evidence_unit_priority"
     ] == "quality"
     assert suite["variant_metrics"]["evidence_unit_quality_rerank"]["config"][
         "evidence_unit_rerank"
     ] == "modality_aware"
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"]["config"][
+        "answer_matrix_role"
+    ] == "evidence_unit_quality_rerank"
     assert suite["variant_metrics"]["window"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["rerank"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["evidence_unit_candidate"]["hit_at_10s"] == 1.0
@@ -992,9 +1093,13 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["segment_lexical"]["answer_grounding_gap_counts"] == {
         "unsupported_claims": 1
     }
+    assert suite["variant_metrics"]["segment_lexical"]["answer_failure_reason_counts"] == {
+        "unsupported_claims": 1
+    }
     assert suite["variant_metrics"]["segment_lexical"]["answer_policy_reason_counts"] == {
         "query_terms_grounded_in_candidate": 1
     }
+    assert suite["answer_failure_reason_counts"]["unsupported_claims"] >= 1
     assert any(search[2] == "semantic" for search in client.searches)
     semantic_smoke = json.loads(run.semantic_smoke_path.read_text(encoding="utf-8"))
     assert semantic_smoke["schema_version"] == "semantic-live-smoke-aggregate-v1"
@@ -1024,6 +1129,9 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     )
     assert all("candidate_visual_support" in row["top_candidate"] for row in rows)
     assert all("verified_object_alignment" in row["top_candidate"] for row in rows)
+    assert next(row for row in rows if row["variant_id"] == "segment_lexical")[
+        "answer_failure_reason"
+    ] == "unsupported_claims"
     rerank_row = next(row for row in rows if row["variant_id"] == "rerank")
     assert rerank_row["config"]["candidate_pool_limit"] == 30
     evidence_candidate_row = next(
@@ -1099,10 +1207,13 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert "answer_uses_verified_visual_evidence_count" in metrics_csv
     assert "answer_uses_candidate_only_visual_evidence_count" in metrics_csv
     assert "verified_object_alignment_ratio" in metrics_csv
+    assert "abstention_ratio" in metrics_csv
+    assert "answer_failure_reason_counts" in metrics_csv
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "Retrieval/Answer Matrix" in summary
     assert "candidate support" in summary
     assert "verified align" in summary
+    assert "primary failures" in summary
     assert "deterministic expected hint overlap" in summary
 
     gate_config = json.loads(
