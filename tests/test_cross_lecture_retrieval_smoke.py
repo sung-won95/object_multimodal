@@ -452,6 +452,34 @@ def test_score_component_presence_uses_public_component_names_only() -> None:
     assert "evidence text" not in rendered.casefold()
 
 
+def test_score_component_presence_counts_verified_link_from_verified_alignment_only() -> None:
+    candidate_only_link = _score_component_presence(
+        [
+            {
+                "components": {
+                    "candidate_link_quality": 0.3,
+                    "verified_alignment": 0.0,
+                },
+            }
+        ]
+    )
+    verified_alignment = _score_component_presence(
+        [
+            {
+                "components": {
+                    "candidate_link_quality": 0.0,
+                    "verified_alignment": 0.46,
+                },
+            }
+        ]
+    )
+
+    assert candidate_only_link["verified_link"]["candidate_count"] == 0
+    assert candidate_only_link["verified_link"]["positive_count"] == 0
+    assert verified_alignment["verified_link"]["candidate_count"] == 1
+    assert verified_alignment["verified_link"]["positive_count"] == 1
+
+
 def test_cross_lecture_smoke_separates_meili_and_graph_unavailable_skips(
     tmp_path: Path,
 ) -> None:

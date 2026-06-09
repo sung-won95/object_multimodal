@@ -1339,7 +1339,7 @@ _SCORE_COMPONENT_GROUPS = {
         "visual_object_support",
         "vlm_visual_entity",
     ),
-    "verified_link": ("verified_alignment", "candidate_link_quality"),
+    "verified_link": ("verified_alignment",),
     "timestamp_fallback_penalty": ("timestamp_fallback_penalty",),
     "ocr_only_penalty": ("ocr_only_penalty",),
 }
