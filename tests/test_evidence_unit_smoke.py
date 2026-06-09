@@ -517,6 +517,83 @@ def test_evidence_unit_smoke_dry_run_does_not_contact_meilisearch(tmp_path: Path
     assert payload["suites"][0]["index"]["status"] == "dry_run"
 
 
+def test_evidence_unit_smoke_public_safe_slice_dry_run_records_targets(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_public_safe_slice_manifest(tmp_path, query_count=20)
+
+    run = run_evidence_unit_smoke(
+        client=UnavailableFakeClient(),
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "public",
+        repo_root=tmp_path,
+        dry_run=True,
+    )
+
+    payload = json.loads(run.metrics_path.read_text(encoding="utf-8"))
+    rows = [
+        json.loads(line)
+        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert payload["query_count"] == 20
+    assert payload["query_status_counts"] == {"dry_run": 20}
+    assert payload["evaluation_slice"]["enabled"] is True
+    assert payload["evaluation_slice"]["query_target_count"] == 20
+    assert payload["evaluation_slice"]["target_configured_count"] == 20
+    assert payload["evaluation_slice"]["expected_modality_counts"] == {
+        "audio": 10,
+        "both": 10,
+    }
+    assert payload["evaluation_slice"]["query_type_counts"] == {
+        "concept_explanation": 10,
+        "multimodal_grounded": 10,
+    }
+    assert payload["evaluation_slice"]["concept_alias_coverage"][
+        "queries_with_aliases"
+    ] == 20
+    assert payload["target_rank_diagnostics"]["target_configured_count"] == 20
+    assert payload["target_rank_diagnostics"]["rank_bucket_counts"] == {
+        "not_queried": 20
+    }
+    assert rows[0]["status"] == "dry_run"
+    assert rows[0]["evaluation_target"]["target_configured"] is True
+    assert rows[0]["evaluation_target"]["concept_alias_count"] == 2
+    assert rows[0]["target_diagnostics"]["target_rank_bucket"] == "not_queried"
+    assert "Evaluation Slice" in run.summary_path.read_text(encoding="utf-8")
+
+    public_text = _public_text(run)
+    for sensitive in [
+        "PRIVATE RAW",
+        "raw fallback query",
+        "SECRET",
+        str(tmp_path),
+    ]:
+        assert sensitive not in public_text
+
+
+def test_evidence_unit_smoke_public_safe_slice_rejects_raw_query_text(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_public_safe_slice_manifest(tmp_path, query_count=20)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["suites"][0]["queries"][0]["query_text"] = "PRIVATE RAW QUERY"
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    try:
+        run_evidence_unit_smoke(
+            client=UnavailableFakeClient(),
+            manifest_path=manifest_path,
+            output_dir=tmp_path / "public",
+            repo_root=tmp_path,
+            dry_run=True,
+        )
+    except ValueError as exc:
+        assert "raw/private fields" in str(exc)
+    else:
+        raise AssertionError("public-safe slice accepted raw query_text")
+
+
 def _write_manifest(tmp_path: Path, *, project_dir: Path, extra_suite: dict[str, Any] | None = None) -> Path:
     suite = {
         "suite_id": "private_suite",
@@ -537,6 +614,54 @@ def _write_manifest(tmp_path: Path, *, project_dir: Path, extra_suite: dict[str,
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(
         json.dumps({"run_id": "run_private", "suites": [suite]}),
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
+def _write_public_safe_slice_manifest(tmp_path: Path, *, query_count: int) -> Path:
+    queries = []
+    for index in range(1, query_count + 1):
+        queries.append(
+            {
+                "query_id": f"public_safe_q{index:03d}",
+                "query_label": f"public target {index:03d}",
+                "concept_aliases": [f"public concept {index:03d}", "shared alias"],
+                "expected_modality": "audio" if index % 2 else "both",
+                "query_type": "concept_explanation"
+                if index % 2
+                else "multimodal_grounded",
+                "target_kind": "segment",
+                "expected_segment_id": f"seg_public_{index:03d}",
+                "timestamp_hint_bucket": "00-05m" if index <= 10 else "05-10m",
+            }
+        )
+    manifest_path = tmp_path / "public_safe_slice.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "evidence-unit-public-safe-slice-v1",
+                "run_id": "public_safe_slice_test",
+                "min_query_targets": 20,
+                "evaluation_slice": {
+                    "slice_id": "public_safe_fixture",
+                    "lecture_count": 1,
+                    "privacy": {
+                        "raw_query_text": "excluded",
+                        "transcript_excerpt": "excluded",
+                        "raw_answer_text": "excluded",
+                    },
+                },
+                "suites": [
+                    {
+                        "suite_id": "public_safe_suite",
+                        "project_id": "public_safe_project",
+                        "index": "public_safe_index",
+                        "queries": queries,
+                    }
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     return manifest_path
