@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -29,6 +30,7 @@ VISUAL_STATES_SCHEMA_VERSION = "oarag-visual-states-jsonl-v1"
 VISUAL_STATE_COVERAGE_SCHEMA_VERSION = "oarag-visual-state-coverage-v1"
 LINK_DIAGNOSTICS_SCHEMA_VERSION = "oarag-object-link-diagnostics-public-v1"
 CONCEPT_FIELD_COVERAGE_SCHEMA_VERSION = "oarag-evidence-unit-concept-field-coverage-v1"
+SEARCH_FIELD_COVERAGE_SCHEMA_VERSION = "oarag-evidence-unit-search-field-coverage-v1"
 DEFAULT_STATE_PADDING_SECONDS = 15.0
 VISUAL_STATE_PUBLIC_NOTE = (
     "Visual states are candidate interval support derived from sampled-frame midpoints "
@@ -45,6 +47,11 @@ CONCEPT_FIELD_PUBLIC_NOTE = (
     "Concept field coverage reports public-safe counts only. Concept graph labels, "
     "aliases, and relation text may enrich local evidence-unit search, but timestamp-only "
     "concept relation signals remain candidate-only and are not verified object alignment."
+)
+SEARCH_FIELD_PUBLIC_NOTE = (
+    "Search-field coverage reports public-safe availability counts only. Local evidence "
+    "unit artifacts may contain transcript/evidence text for retrieval, but public reports "
+    "must expose counts, buckets, hashes, and flags instead of raw text."
 )
 CANDIDATE_LINK_SIGNAL_KEYS = (
     "temporal_overlap",
@@ -64,6 +71,39 @@ VERIFIED_LINK_SOURCE_KEYS = (
     "strict_deterministic_rule",
     "unspecified_verified",
 )
+TRANSCRIPT_KEYWORD_STOPWORDS = {
+    "about",
+    "after",
+    "again",
+    "also",
+    "because",
+    "before",
+    "between",
+    "from",
+    "here",
+    "into",
+    "just",
+    "like",
+    "more",
+    "next",
+    "only",
+    "over",
+    "that",
+    "then",
+    "there",
+    "these",
+    "this",
+    "those",
+    "through",
+    "with",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "will",
+    "would",
+}
 
 
 def build_project_visual_states(
@@ -282,6 +322,17 @@ def build_project_evidence_units(
             1 for document in documents if document["source_quality"]["has_concept_relation"]
         ),
         "units_with_concept_search_text": sum(1 for document in documents if _has_concept_search_text(document)),
+        "units_with_evidence_text": sum(1 for document in documents if _text(document.get("evidence_text"))),
+        "units_with_semantic_text": sum(1 for document in documents if _text(document.get("semantic_text"))),
+        "units_with_transcript_keywords": sum(1 for document in documents if _string_list(document.get("transcript_keywords"))),
+        "units_with_visual_state_search_text": sum(1 for document in documents if _text(document.get("visual_state_text"))),
+        "units_with_visual_entity_search_text": sum(1 for document in documents if _text(document.get("visual_entity_text"))),
+        "units_with_link_signal_search_text": sum(
+            1
+            for document in documents
+            if _text(document.get("candidate_link_signal_summary"))
+            or _text(document.get("verified_link_signal_summary"))
+        ),
         "units_with_candidate_link": sum(
             1
             for document in documents
@@ -330,6 +381,7 @@ def build_project_evidence_units(
         concept_graph_records=concept_graph_records,
         source="concept_graph_artifact" if concept_graph_path is not None else "not_available",
     )
+    search_field_coverage = _search_field_coverage_summary(documents)
     summary = {
         "project_dir": str(resolved_project_dir),
         "paths": {
@@ -370,6 +422,7 @@ def build_project_evidence_units(
         "alignment_status_counts": _status_counts(documents),
         "link_diagnostics": link_diagnostics,
         "concept_field_coverage": concept_field_coverage,
+        "search_field_coverage": search_field_coverage,
     }
     _update_project_manifest(
         manifest_path=resolved_manifest_path,
@@ -786,26 +839,65 @@ def _evidence_unit_document(
         link_id for link_id, status in link_statuses.items() if status != "verified"
     ]
     transcript_window_text = _transcript_window_text(window_segments)
-    visual_text = _visual_summary_text(window_states=window_states, visual_entities=visual_entity_rows)
+    transcript_keywords = _transcript_keywords(transcript_window_text)
+    visual_state_text = _visual_state_summary_text(window_states)
+    visual_entity_text = _visual_entity_summary_text(visual_entity_rows)
+    visual_text = _compact_text(
+        " ".join(_unique_text_values([visual_state_text, visual_entity_text]))
+    )
     concept_context = concept_context_by_evidence_unit.get(evidence_unit_id) or _empty_concept_context()
     concept_text = _concept_summary_text(concept_context)
-    evidence_text = _compact_text(
-        " ".join(
-            part
-            for part in (
-                f"Transcript: {transcript_window_text}" if transcript_window_text else "",
-                f"Visual: {visual_text}" if visual_text else "",
-                f"Concepts: {concept_text}" if concept_text else "",
-            )
-            if part
-        )
-    )
     source_quality = _source_quality(
         visual_states=window_states,
         visual_entities=visual_entity_rows,
         links=window_links,
         link_statuses=link_statuses,
         concept_context=concept_context,
+    )
+    candidate_link_signal_summary = _link_signal_summary_text(
+        source_quality.get("candidate_link_signal_counts"),
+        prefix="candidate",
+    )
+    verified_link_signal_summary = _link_signal_summary_text(
+        source_quality.get("verified_link_source_counts"),
+        prefix="verified",
+    )
+    link_signal_text = _compact_text(
+        " ".join(
+            _unique_text_values(
+                [candidate_link_signal_summary, verified_link_signal_summary]
+            )
+        )
+    )
+    evidence_text = _compact_text(
+        " ".join(
+            part
+            for part in (
+                f"Transcript: {transcript_window_text}" if transcript_window_text else "",
+                f"Transcript keywords: {' '.join(transcript_keywords)}" if transcript_keywords else "",
+                f"Visual: {visual_text}" if visual_text else "",
+                f"Concepts: {concept_text}" if concept_text else "",
+                f"Link signals: {link_signal_text}" if link_signal_text else "",
+            )
+            if part
+        )
+    )
+    semantic_text = _compact_text(
+        f"{transcript_window_text} {' '.join(transcript_keywords)} "
+        f"{visual_text} {concept_text} {link_signal_text}"
+    )
+    source_quality = dict(source_quality)
+    source_quality["search_field_coverage"] = _search_field_coverage(
+        {
+            "evidence_text": evidence_text,
+            "semantic_text": semantic_text,
+            "transcript_keywords": transcript_keywords,
+            "concept_search_text": concept_text,
+            "visual_state_text": visual_state_text,
+            "visual_entity_text": visual_entity_text,
+            "candidate_link_signal_summary": candidate_link_signal_summary,
+            "verified_link_signal_summary": verified_link_signal_summary,
+        }
     )
     return {
         "evidence_unit_id": evidence_unit_id,
@@ -816,10 +908,13 @@ def _evidence_unit_document(
         "start_time": start_time,
         "end_time": end_time,
         "transcript_window_text": transcript_window_text,
+        "transcript_keywords": transcript_keywords,
         "visual_state_ids": window_state_ids,
         "visual_states": [_visual_state_context(state) for state in window_states],
+        "visual_state_text": visual_state_text,
         "visual_entity_ids": visual_entity_ids,
         "visual_entities": [_visual_entity_context(entity) for entity in visual_entity_rows],
+        "visual_entity_text": visual_entity_text,
         "verified_entity_link_ids": verified_link_ids,
         "candidate_entity_link_ids": candidate_link_ids,
         "candidate_entity_link_statuses": {
@@ -829,11 +924,14 @@ def _evidence_unit_document(
         "concept_labels": concept_context["concept_labels"],
         "concept_aliases": concept_context["concept_aliases"],
         "concept_relation_text": concept_context["concept_relation_text"],
+        "concept_search_text": concept_text,
         "concepts": concept_context["concepts"],
         "concept_relations": concept_context["concept_relations"],
+        "candidate_link_signal_summary": candidate_link_signal_summary,
+        "verified_link_signal_summary": verified_link_signal_summary,
         "modality": ["speech", "visual"] if source_quality["has_visual_state"] or source_quality["has_visual_entity"] else ["speech"],
         "evidence_text": evidence_text,
-        "semantic_text": _compact_text(f"{transcript_window_text} {visual_text} {concept_text}"),
+        "semantic_text": semantic_text,
         "alignment_score": _alignment_score(window_links, link_statuses),
         "alignment_status": _alignment_status(source_quality),
         "source_quality": source_quality,
@@ -1286,6 +1384,61 @@ def _concept_field_coverage_summary(
     }
 
 
+def _search_field_coverage_summary(documents: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(documents)
+    keys = (
+        "evidence_text",
+        "semantic_text",
+        "transcript_keywords",
+        "concept_search_text",
+        "visual_state_text",
+        "visual_entity_text",
+        "candidate_link_signal_summary",
+        "verified_link_signal_summary",
+    )
+    field_counts = {key: 0 for key in keys}
+    units_with_link_signal_search_text = 0
+    for document in documents:
+        coverage = _search_field_coverage(document)
+        for key in keys:
+            if coverage.get(key):
+                field_counts[key] += 1
+        if coverage.get("link_signal_search_text"):
+            units_with_link_signal_search_text += 1
+    return {
+        "schema_version": SEARCH_FIELD_COVERAGE_SCHEMA_VERSION,
+        "evidence_units_total": total,
+        "field_unit_counts": field_counts,
+        "field_unit_ratios": {
+            key: _ratio_or_none(count, total) for key, count in field_counts.items()
+        },
+        "units_with_link_signal_search_text": units_with_link_signal_search_text,
+        "unit_link_signal_search_text_ratio": _ratio_or_none(
+            units_with_link_signal_search_text,
+            total,
+        ),
+        "public_note": SEARCH_FIELD_PUBLIC_NOTE,
+    }
+
+
+def _search_field_coverage(document: dict[str, Any]) -> dict[str, bool]:
+    candidate_link_text = _text(document.get("candidate_link_signal_summary"))
+    verified_link_text = _text(document.get("verified_link_signal_summary"))
+    return {
+        "evidence_text": bool(_text(document.get("evidence_text"))),
+        "semantic_text": bool(_text(document.get("semantic_text"))),
+        "transcript_keywords": bool(_string_list(document.get("transcript_keywords"))),
+        "concept_search_text": bool(
+            _text(document.get("concept_search_text")) or _has_concept_search_text(document)
+        ),
+        "visual_state_text": bool(_text(document.get("visual_state_text"))),
+        "visual_entity_text": bool(_text(document.get("visual_entity_text"))),
+        "candidate_link_signal_summary": bool(candidate_link_text),
+        "verified_link_signal_summary": bool(verified_link_text),
+        "link_signal_search_text": bool(candidate_link_text or verified_link_text),
+    }
+
+
 def _add_counts(target: dict[str, int], source: dict[str, Any]) -> None:
     for key in target:
         target[key] += int(source.get(key) or 0)
@@ -1338,9 +1491,27 @@ def _visual_summary_text(
     window_states: list[dict[str, Any]],
     visual_entities: list[dict[str, Any]],
 ) -> str:
+    return _compact_text(
+        " ".join(
+            _unique_text_values(
+                [
+                    _visual_state_summary_text(window_states),
+                    _visual_entity_summary_text(visual_entities),
+                ]
+            )
+        )
+    )
+
+
+def _visual_state_summary_text(window_states: list[dict[str, Any]]) -> str:
     values: list[Any] = []
     for state in window_states:
         values.extend([state.get("state_summary"), state.get("detected_text")])
+    return _compact_text(" ".join(_unique_text_values(values)))
+
+
+def _visual_entity_summary_text(visual_entities: list[dict[str, Any]]) -> str:
+    values: list[Any] = []
     for entity in visual_entities:
         values.extend(
             [
@@ -1353,6 +1524,16 @@ def _visual_summary_text(
             ]
         )
     return _compact_text(" ".join(_unique_text_values(values)))
+
+
+def _link_signal_summary_text(value: Any, *, prefix: str) -> str:
+    counts = _mapping(value)
+    labels = [
+        f"{prefix} {_humanize_snake(key)}"
+        for key, count in sorted(counts.items())
+        if int(count or 0) > 0
+    ]
+    return _compact_text(" ".join(labels))
 
 
 def _concept_context_by_evidence_unit(
@@ -1436,15 +1617,27 @@ def _empty_concept_context() -> dict[str, Any]:
 
 
 def _concept_context(concept: ConceptGraphConceptNode) -> dict[str, Any]:
+    source_signals = _unique_text_values(
+        source.source_signal for source in concept.evidence_sources
+    )
+    source_types = _unique_text_values(
+        source.source_type for source in concept.evidence_sources
+    )
     return {
         key: value
         for key, value in {
             "concept_id": concept.concept_id,
             "label": concept.label,
+            "canonical_label": _concept_canonical_label(concept),
             "aliases": list(concept.aliases),
             "concept_type": concept.concept_type,
             "confidence": concept.confidence,
             "description": concept.description,
+            "definition": _metadata_text(concept.metadata, ("definition", "defines", "meaning")),
+            "example": _metadata_text(concept.metadata, ("example", "examples")),
+            "formula": _metadata_text(concept.metadata, ("formula", "equation", "math")),
+            "source_signals": source_signals,
+            "source_types": source_types,
         }.items()
         if value not in (None, "", [])
     }
@@ -1468,6 +1661,9 @@ def _concept_relation_context(
             "target_label": target.label if target is not None else relation.target_concept_id,
             "relation_status": relation.relation_status,
             "source_signals": list(relation.source_signals),
+            "evidence_source_types": _unique_text_values(
+                source.source_type for source in relation.evidence_sources
+            ),
             "confidence": relation.confidence,
             "description": relation.description,
             "relation_text": _concept_relation_text(relation, concepts_by_id),
@@ -1500,6 +1696,8 @@ def _concept_relation_text(
 
 
 def _concept_summary_text(concept_context: dict[str, Any]) -> str:
+    concepts = _list_of_dicts(concept_context.get("concepts"))
+    relations = _list_of_dicts(concept_context.get("concept_relations"))
     return _compact_text(
         " ".join(
             _unique_text_values(
@@ -1507,10 +1705,51 @@ def _concept_summary_text(concept_context: dict[str, Any]) -> str:
                     concept_context.get("concept_labels"),
                     concept_context.get("concept_aliases"),
                     concept_context.get("concept_relation_text"),
+                    [concept.get("canonical_label") for concept in concepts],
+                    [concept.get("description") for concept in concepts],
+                    [concept.get("definition") for concept in concepts],
+                    [concept.get("example") for concept in concepts],
+                    [concept.get("formula") for concept in concepts],
+                    [concept.get("source_signals") for concept in concepts],
+                    [relation.get("source_signals") for relation in relations],
+                    [relation.get("evidence_source_types") for relation in relations],
                 ]
             )
         )
     )
+
+
+def _concept_canonical_label(concept: ConceptGraphConceptNode) -> str:
+    metadata = concept.metadata
+    return (
+        _metadata_text(metadata, ("canonical_label", "canonical", "canonical_name"))
+        or concept.label
+    )
+
+
+def _metadata_text(metadata: dict[str, Any], keys: tuple[str, ...]) -> str:
+    if not metadata:
+        return ""
+    values: list[Any] = []
+    for key in keys:
+        if key in metadata:
+            values.append(metadata.get(key))
+    return _compact_text(" ".join(_unique_text_values(values)))
+
+
+def _transcript_keywords(text: str, *, limit: int = 32) -> list[str]:
+    tokens = [
+        token
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_+-]{2,}", text.casefold())
+        if token not in TRANSCRIPT_KEYWORD_STOPWORDS
+    ]
+    counts: dict[str, int] = {}
+    first_seen: dict[str, int] = {}
+    for index, token in enumerate(tokens):
+        counts[token] = counts.get(token, 0) + 1
+        first_seen.setdefault(token, index)
+    ranked = sorted(counts, key=lambda token: (-counts[token], first_seen[token], token))
+    return ranked[: max(0, int(limit))]
 
 
 def _timestamp_only_concept_relation(relation: ConceptGraphRelationEdge) -> bool:
@@ -1638,6 +1877,7 @@ def _update_project_manifest(
         "alignment_status_counts": summary["alignment_status_counts"],
         "link_diagnostics": summary["link_diagnostics"],
         "concept_field_coverage": summary["concept_field_coverage"],
+        "search_field_coverage": summary["search_field_coverage"],
     }
     write_json(manifest_path, payload)
 
@@ -1761,6 +2001,8 @@ def _compact_text(value: str) -> str:
 
 def _has_concept_search_text(document: dict[str, Any]) -> bool:
     return bool(
+        _text(document.get("concept_search_text"))
+        or
         _string_list(document.get("concept_labels"))
         or _string_list(document.get("concept_aliases"))
         or _text(document.get("concept_relation_text"))

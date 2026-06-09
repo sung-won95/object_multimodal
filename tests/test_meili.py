@@ -15,8 +15,10 @@ from oarag.meili import (
     LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE,
     LECTURE_SEGMENT_PRE_SEMANTIC_SETTINGS_PROFILE,
     MeiliClient,
+    EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
     LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE,
     VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE,
+    evidence_unit_settings,
     hybrid_embedder_settings,
     hybrid_embedder_settings_hash,
     hybrid_embedder_settings_profile_names,
@@ -372,6 +374,38 @@ def test_lecture_window_settings_hash_is_a_regression_guard() -> None:
     assert snapshot["hash"] == EXPECTED_WINDOW_SETTINGS_HASH
     assert snapshot["settings"] == lecture_window_settings()
     assert LECTURE_WINDOW_DEFAULT_SETTINGS_PROFILE in lecture_window_settings_profile_names()
+
+
+def test_evidence_unit_settings_payload_indexes_enriched_search_fields() -> None:
+    settings = evidence_unit_settings(EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE)
+
+    assert settings["searchableAttributes"][:6] == [
+        "semantic_text",
+        "evidence_text",
+        "concept_search_text",
+        "concept_labels",
+        "concept_aliases",
+        "concept_relation_text",
+    ]
+    for field in [
+        "transcript_keywords",
+        "visual_state_text",
+        "visual_entity_text",
+        "visual_entities.detected_text",
+        "visual_states.detected_text",
+        "candidate_link_signal_summary",
+        "verified_link_signal_summary",
+    ]:
+        assert field in settings["searchableAttributes"]
+    assert "source_video_path" not in settings["displayedAttributes"]
+    assert settings["rankingRules"] == [
+        "words",
+        "typo",
+        "proximity",
+        "attribute",
+        "sort",
+        "exactness",
+    ]
 
 
 def test_unknown_lecture_window_settings_profile_is_rejected() -> None:

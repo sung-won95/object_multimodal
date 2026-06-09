@@ -22,6 +22,8 @@ from oarag.retrieval.evidence_units import (
     CONCEPT_FIELD_PUBLIC_NOTE,
     LINK_DIAGNOSTICS_PUBLIC_NOTE,
     LINK_DIAGNOSTICS_SCHEMA_VERSION,
+    SEARCH_FIELD_COVERAGE_SCHEMA_VERSION,
+    SEARCH_FIELD_PUBLIC_NOTE,
     VERIFIED_LINK_SOURCE_KEYS,
     build_project_evidence_units,
 )
@@ -308,6 +310,7 @@ def _run_suite(
         },
         "rag_input_inspection": _rag_input_inspection(query_rows, artifact_summary),
         "target_rank_diagnostics": _target_rank_inspection(query_rows),
+        "recall_coverage_diagnostics": _recall_coverage_diagnostics(query_rows, artifact_summary),
         "rerank_diagnostics": _rerank_inspection(query_rows),
         "modality_aware_rerank_diagnostics": _modality_aware_rerank_inspection(query_rows),
         "evaluation_slice": _suite_public_safe_slice_summary(
@@ -551,6 +554,7 @@ def _skipped_query_row(
             "target_rank_bucket": "not_queried",
             "target_found_bucket": "not_queried",
             "target_search_depth": 0,
+            "target_found@10": None,
             "target_found@50": None,
             "target_found@100": None,
             "public_safe_reason_codes": ["not_queried"],
@@ -607,6 +611,7 @@ def _dry_run_query_row(
             "target_rank_bucket": "not_queried" if target_configured else "not_configured",
             "target_found_bucket": "not_queried" if target_configured else "not_configured",
             "target_search_depth": target_rank_limit,
+            "target_found@10": None,
             "target_found@50": None,
             "target_found@100": None,
             "public_safe_reason_codes": ["not_queried"],
@@ -644,6 +649,7 @@ def _artifact_summary(
             "link_diagnostics": _empty_public_link_diagnostics(),
             "visual_state_coverage": {},
             "concept_field_coverage": _empty_public_concept_field_coverage(),
+            "search_field_coverage": _empty_public_search_field_coverage("dry_run"),
             "vlm_object_evidence_coverage": {
                 "status": "dry_run",
                 "skip_reason": "dry_run_requested",
@@ -701,6 +707,9 @@ def _artifact_summary(
             ),
             "concept_field_coverage": _public_concept_field_coverage(
                 build_summary.get("concept_field_coverage")
+            ),
+            "search_field_coverage": _public_search_field_coverage(
+                build_summary.get("search_field_coverage")
             ),
             "visual_state_coverage": _public_visual_state_coverage(
                 build_summary.get("visual_state_coverage")
@@ -783,6 +792,7 @@ def _artifact_summary(
         },
         "link_diagnostics": link_diagnostics,
         "concept_field_coverage": _loaded_concept_field_coverage(rows),
+        "search_field_coverage": _loaded_search_field_coverage(rows),
         "visual_state_coverage": _loaded_visual_state_coverage(
             evidence_units=rows,
             visual_states=visual_state_rows,
@@ -872,6 +882,13 @@ def _public_candidate(candidate: dict[str, Any], *, query_text: str | None = Non
             "evidence_text_available": bool(candidate.get("evidence_text")),
             "semantic_text_available": bool(candidate.get("semantic_text")),
             "concept_search_text_available": _has_concept_search_text(candidate, source_quality),
+            "transcript_keywords_available": bool(_string_list(candidate.get("transcript_keywords"))),
+            "visual_state_text_available": bool(candidate.get("visual_state_text")),
+            "visual_entity_text_available": bool(candidate.get("visual_entity_text")),
+            "link_signal_search_text_available": bool(
+                candidate.get("candidate_link_signal_summary")
+                or candidate.get("verified_link_signal_summary")
+            ),
         },
         "concept_field_coverage": _public_candidate_concept_field_coverage(candidate),
         "content_coverage": _candidate_content_coverage(candidate),
@@ -958,6 +975,7 @@ def _target_diagnostics(
             "target_rank_bucket": "not_configured",
             "target_found_bucket": "not_configured",
             "target_search_depth": search_depth,
+            "target_found@10": None,
             "target_found@50": None,
             "target_found@100": None,
             "public_safe_reason_codes": ["target_not_configured"],
@@ -994,6 +1012,7 @@ def _target_diagnostics(
         "target_rank_bucket": _target_rank_bucket(target_rank),
         "target_found_bucket": _target_rank_bucket(target_rank),
         "target_search_depth": search_depth,
+        "target_found@10": _target_found_at(target_rank, search_depth=search_depth, k=10),
         "target_found@50": _target_found_at(target_rank, search_depth=search_depth, k=50),
         "target_found@100": _target_found_at(target_rank, search_depth=search_depth, k=100),
         "target_evidence_unit_ref": _id_ref(
@@ -1206,6 +1225,13 @@ def _candidate_quality_summary(candidate: dict[str, Any]) -> dict[str, Any]:
             "evidence_text_available": bool(candidate.get("evidence_text")),
             "semantic_text_available": bool(candidate.get("semantic_text")),
             "concept_search_text_available": _has_concept_search_text(candidate, source_quality),
+            "transcript_keywords_available": bool(_string_list(candidate.get("transcript_keywords"))),
+            "visual_state_text_available": bool(candidate.get("visual_state_text")),
+            "visual_entity_text_available": bool(candidate.get("visual_entity_text")),
+            "link_signal_search_text_available": bool(
+                candidate.get("candidate_link_signal_summary")
+                or candidate.get("verified_link_signal_summary")
+            ),
         },
         "content_coverage": _candidate_content_coverage(candidate),
     }
@@ -1218,15 +1244,35 @@ def _candidate_content_coverage(candidate: dict[str, Any]) -> dict[str, Any]:
     semantic_text = _text_for_coverage(candidate.get("semantic_text"))
     transcript_text = _text_for_coverage(candidate.get("transcript_window_text"))
     concept_relation_text = _text_for_coverage(candidate.get("concept_relation_text"))
+    concept_search_text = _text_for_coverage(candidate.get("concept_search_text"))
+    visual_state_text = _text_for_coverage(candidate.get("visual_state_text"))
+    visual_entity_text = _text_for_coverage(candidate.get("visual_entity_text"))
+    link_signal_text = _text_for_coverage(
+        " ".join(
+            [
+                str(candidate.get("candidate_link_signal_summary") or ""),
+                str(candidate.get("verified_link_signal_summary") or ""),
+            ]
+        )
+    )
     source_quality = _mapping(candidate.get("source_quality"))
     return {
         "evidence_text_char_count": len(evidence_text),
         "semantic_text_char_count": len(semantic_text),
         "transcript_window_char_count": len(transcript_text),
+        "transcript_keyword_count": len(_string_list(candidate.get("transcript_keywords"))),
         "concept_relation_text_char_count": len(concept_relation_text),
+        "concept_search_text_char_count": len(concept_search_text),
+        "visual_state_text_char_count": len(visual_state_text),
+        "visual_entity_text_char_count": len(visual_entity_text),
+        "link_signal_text_char_count": len(link_signal_text),
         "evidence_text_bucket": _char_count_bucket(len(evidence_text)),
         "semantic_text_bucket": _char_count_bucket(len(semantic_text)),
         "transcript_window_bucket": _char_count_bucket(len(transcript_text)),
+        "concept_search_text_bucket": _char_count_bucket(len(concept_search_text)),
+        "visual_state_text_bucket": _char_count_bucket(len(visual_state_text)),
+        "visual_entity_text_bucket": _char_count_bucket(len(visual_entity_text)),
+        "link_signal_text_bucket": _char_count_bucket(len(link_signal_text)),
         "concept_relation_text_bucket": _char_count_bucket(len(concept_relation_text)),
         "visual_state_count": len(_string_list(candidate.get("visual_state_ids"))),
         "visual_entity_count": len(_string_list(candidate.get("visual_entity_ids"))),
@@ -1261,23 +1307,59 @@ def _query_term_coverage(*, query_text: str, candidate: dict[str, Any]) -> dict[
                     *_string_list(candidate.get("concept_labels")),
                     *_string_list(candidate.get("concept_aliases")),
                     _text_for_coverage(candidate.get("concept_relation_text")),
+                    _text_for_coverage(candidate.get("concept_search_text")),
                 ]
             )
         )
     )
-    combined_terms = evidence_terms | semantic_terms | transcript_terms | concept_terms
+    transcript_keyword_terms = set(_coverage_terms(" ".join(_string_list(candidate.get("transcript_keywords")))))
+    visual_terms = set(
+        _coverage_terms(
+            " ".join(
+                [
+                    _text_for_coverage(candidate.get("visual_state_text")),
+                    _text_for_coverage(candidate.get("visual_entity_text")),
+                ]
+            )
+        )
+    )
+    link_signal_terms = set(
+        _coverage_terms(
+            " ".join(
+                [
+                    _text_for_coverage(candidate.get("candidate_link_signal_summary")),
+                    _text_for_coverage(candidate.get("verified_link_signal_summary")),
+                ]
+            )
+        )
+    )
+    combined_terms = (
+        evidence_terms
+        | semantic_terms
+        | transcript_terms
+        | transcript_keyword_terms
+        | concept_terms
+        | visual_terms
+        | link_signal_terms
+    )
     query_term_count = len(query_terms)
     evidence_matches = len(query_terms & evidence_terms)
     semantic_matches = len(query_terms & semantic_terms)
     transcript_matches = len(query_terms & transcript_terms)
+    transcript_keyword_matches = len(query_terms & transcript_keyword_terms)
     concept_matches = len(query_terms & concept_terms)
+    visual_matches = len(query_terms & visual_terms)
+    link_signal_matches = len(query_terms & link_signal_terms)
     combined_matches = len(query_terms & combined_terms)
     return {
         "query_term_count": query_term_count,
         "evidence_text_match_count": evidence_matches,
         "semantic_text_match_count": semantic_matches,
         "transcript_window_match_count": transcript_matches,
+        "transcript_keyword_match_count": transcript_keyword_matches,
         "concept_search_text_match_count": concept_matches,
+        "visual_search_text_match_count": visual_matches,
+        "link_signal_text_match_count": link_signal_matches,
         "combined_match_count": combined_matches,
         "combined_match_ratio": _ratio(combined_matches, query_term_count),
         "combined_match_bucket": _ratio_bucket(combined_matches, query_term_count),
@@ -1736,6 +1818,7 @@ def _summary_payload(
         "suites": suites,
         "rag_input_inspection": _rag_input_inspection(query_rows, {}),
         "target_rank_diagnostics": _target_rank_inspection(query_rows),
+        "recall_coverage_diagnostics": _recall_coverage_diagnostics(query_rows, {}),
         "rerank_diagnostics": _rerank_inspection(query_rows),
         "modality_aware_rerank_diagnostics": _modality_aware_rerank_inspection(query_rows),
         "quality_rerank_requested": quality_rerank,
@@ -1802,8 +1885,13 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
         object_link_coverage = _mapping(visual_vlm_summary.get("object_link_coverage"))
         visual_coverage = _mapping(build.get("visual_state_coverage"))
         concept_coverage = _mapping(build.get("concept_field_coverage"))
+        search_coverage = _mapping(build.get("search_field_coverage"))
+        search_field_counts = _mapping(search_coverage.get("field_unit_counts"))
         interval_summary = _mapping(visual_coverage.get("interval_duration_seconds"))
         coverage_gate = _mapping(visual_coverage.get("coverage_gate"))
+        recall_coverage = _mapping(suite.get("recall_coverage_diagnostics"))
+        current_recall = _mapping(recall_coverage.get("current"))
+        baseline_recall = _mapping(recall_coverage.get("baseline"))
         lines.extend(
             [
                 f"### {suite.get('suite_id')}",
@@ -1816,6 +1904,7 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- visual state source: `{visual_coverage.get('source') or 'unknown'}`",
                 f"- visual state coverage: `{visual_coverage.get('evidence_units_with_visual_state', 0)}`/`{visual_coverage.get('evidence_units_total', 0)}`",
                 f"- concept field coverage: `{concept_coverage.get('evidence_units_with_concept_search_text', 0)}`/`{concept_coverage.get('evidence_units_total', 0)}`",
+                f"- search field coverage: `{json.dumps(search_field_counts, sort_keys=True)}`",
                 f"- visual state duration buckets: `{json.dumps(interval_summary.get('buckets', {}), sort_keys=True)}`",
                 f"- visual state gate: `{coverage_gate.get('status') or 'not_configured'}`",
                 f"- index status: `{index.get('status')}`",
@@ -1823,7 +1912,10 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- target rank buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('rank_bucket_counts', {}), sort_keys=True)}`",
                 f"- target found buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('target_found_bucket_counts', {}), sort_keys=True)}`",
                 f"- target_found@50: `{suite.get('target_rank_diagnostics', {}).get('target_found@50')}`",
+                f"- target_found@10: `{suite.get('target_rank_diagnostics', {}).get('target_found@10')}`",
                 f"- target_found@100: `{suite.get('target_rank_diagnostics', {}).get('target_found@100')}`",
+                f"- recall/coverage current @10/@50: `{current_recall.get('target_found@10')}` / `{current_recall.get('target_found@50')}`",
+                f"- recall/coverage baseline kind: `{baseline_recall.get('kind')}`",
                 f"- not_found reason codes: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('not_found_reason_code_counts', {}), sort_keys=True)}`",
                 f"- target evidence-text buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('target_evidence_text_bucket_counts', {}), sort_keys=True)}`",
                 f"- target semantic-text buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('target_semantic_text_bucket_counts', {}), sort_keys=True)}`",
@@ -1903,11 +1995,17 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
     semantic_text_buckets = Counter()
     query_term_buckets_all = Counter()
     target_feature_coverage = Counter()
+    target_found_at_10 = 0
     target_found_at_50 = 0
     target_found_at_100 = 0
+    target_found_at_10_available = 0
     target_found_at_50_available = 0
     target_found_at_100_available = 0
     for diag in configured:
+        if diag.get("target_found@10") is not None:
+            target_found_at_10_available += 1
+            if diag.get("target_found@10") is True:
+                target_found_at_10 += 1
         if diag.get("target_found@50") is not None:
             target_found_at_50_available += 1
             if diag.get("target_found@50") is True:
@@ -1999,8 +2097,10 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "target_configured_count": len(configured),
         "target_found_in_top_k_count": len(found),
+        "target_found_at_10_count": target_found_at_10,
         "target_found_at_50_count": target_found_at_50,
         "target_found_at_100_count": target_found_at_100,
+        "target_found@10": _ratio_or_none(target_found_at_10, target_found_at_10_available),
         "target_found@50": _ratio_or_none(target_found_at_50, target_found_at_50_available),
         "target_found@100": _ratio_or_none(target_found_at_100, target_found_at_100_available),
         "rank_bucket_counts": dict(buckets),
@@ -2025,6 +2125,54 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
         "public_note": (
             "Target rank diagnostics use only configured expected segment IDs and "
             "hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
+        ),
+    }
+
+
+def _recall_coverage_diagnostics(
+    query_rows: list[dict[str, Any]],
+    artifact_summary: dict[str, Any],
+) -> dict[str, Any]:
+    current = _target_rank_inspection(query_rows)
+    base_rows = []
+    for row in query_rows:
+        base = row.get("base_target_diagnostics")
+        if isinstance(base, dict):
+            cloned = dict(row)
+            cloned["target_diagnostics"] = base
+            base_rows.append(cloned)
+    baseline = _target_rank_inspection(base_rows) if base_rows else None
+    return {
+        "schema_version": "evidence-unit-recall-coverage-comparison-public-v1",
+        "current": {
+            "target_configured_count": current.get("target_configured_count"),
+            "target_found@10": current.get("target_found@10"),
+            "target_found@50": current.get("target_found@50"),
+            "target_found@100": current.get("target_found@100"),
+            "target_found_bucket_counts": current.get("target_found_bucket_counts", {}),
+        },
+        "baseline": (
+            {
+                "kind": "base_evidence_unit_order",
+                "target_configured_count": baseline.get("target_configured_count"),
+                "target_found@10": baseline.get("target_found@10"),
+                "target_found@50": baseline.get("target_found@50"),
+                "target_found@100": baseline.get("target_found@100"),
+                "target_found_bucket_counts": baseline.get("target_found_bucket_counts", {}),
+            }
+            if baseline is not None
+            else {
+                "kind": "not_configured",
+                "available": False,
+            }
+        ),
+        "search_field_coverage": _public_search_field_coverage(
+            artifact_summary.get("search_field_coverage")
+        ),
+        "public_note": (
+            "Use this block to compare the same public-safe evaluation slice across "
+            "baseline/current runs: recall metrics are @10/@50/@100, while coverage "
+            "contains field availability counts only."
         ),
     }
 
@@ -2240,6 +2388,101 @@ def _empty_public_concept_field_coverage() -> dict[str, Any]:
             "schema_version": CONCEPT_FIELD_COVERAGE_SCHEMA_VERSION,
             "source": "dry_run",
             "public_note": CONCEPT_FIELD_PUBLIC_NOTE,
+        }
+    )
+
+
+def _public_search_field_coverage(value: Any) -> dict[str, Any]:
+    coverage = _mapping(value)
+    field_counts = _mapping(coverage.get("field_unit_counts"))
+    field_ratios = _mapping(coverage.get("field_unit_ratios"))
+    fields = (
+        "evidence_text",
+        "semantic_text",
+        "transcript_keywords",
+        "concept_search_text",
+        "visual_state_text",
+        "visual_entity_text",
+        "candidate_link_signal_summary",
+        "verified_link_signal_summary",
+    )
+    return {
+        "schema_version": coverage.get("schema_version") or SEARCH_FIELD_COVERAGE_SCHEMA_VERSION,
+        "source": coverage.get("source") or "build_summary",
+        "evidence_units_total": int(coverage.get("evidence_units_total") or 0),
+        "field_unit_counts": {
+            field: int(field_counts.get(field) or 0) for field in fields
+        },
+        "field_unit_ratios": {
+            field: field_ratios.get(field) for field in fields
+        },
+        "units_with_link_signal_search_text": int(
+            coverage.get("units_with_link_signal_search_text") or 0
+        ),
+        "unit_link_signal_search_text_ratio": coverage.get(
+            "unit_link_signal_search_text_ratio"
+        ),
+        "public_note": coverage.get("public_note") or SEARCH_FIELD_PUBLIC_NOTE,
+    }
+
+
+def _empty_public_search_field_coverage(source: str) -> dict[str, Any]:
+    return _public_search_field_coverage(
+        {
+            "schema_version": SEARCH_FIELD_COVERAGE_SCHEMA_VERSION,
+            "source": source,
+            "public_note": SEARCH_FIELD_PUBLIC_NOTE,
+        }
+    )
+
+
+def _loaded_search_field_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    fields = (
+        "evidence_text",
+        "semantic_text",
+        "transcript_keywords",
+        "concept_search_text",
+        "visual_state_text",
+        "visual_entity_text",
+        "candidate_link_signal_summary",
+        "verified_link_signal_summary",
+    )
+    counts = {field: 0 for field in fields}
+    link_signal_count = 0
+    for row in rows:
+        if _text_for_coverage(row.get("evidence_text")):
+            counts["evidence_text"] += 1
+        if _text_for_coverage(row.get("semantic_text")):
+            counts["semantic_text"] += 1
+        if _string_list(row.get("transcript_keywords")):
+            counts["transcript_keywords"] += 1
+        if _has_concept_search_text(row, _mapping(row.get("source_quality"))):
+            counts["concept_search_text"] += 1
+        if _text_for_coverage(row.get("visual_state_text")):
+            counts["visual_state_text"] += 1
+        if _text_for_coverage(row.get("visual_entity_text")):
+            counts["visual_entity_text"] += 1
+        if _text_for_coverage(row.get("candidate_link_signal_summary")):
+            counts["candidate_link_signal_summary"] += 1
+        if _text_for_coverage(row.get("verified_link_signal_summary")):
+            counts["verified_link_signal_summary"] += 1
+        if _text_for_coverage(row.get("candidate_link_signal_summary")) or _text_for_coverage(
+            row.get("verified_link_signal_summary")
+        ):
+            link_signal_count += 1
+    total = len(rows)
+    return _public_search_field_coverage(
+        {
+            "schema_version": SEARCH_FIELD_COVERAGE_SCHEMA_VERSION,
+            "source": "loaded_existing",
+            "evidence_units_total": total,
+            "field_unit_counts": counts,
+            "field_unit_ratios": {
+                field: _ratio_or_none(count, total) for field, count in counts.items()
+            },
+            "units_with_link_signal_search_text": link_signal_count,
+            "unit_link_signal_search_text_ratio": _ratio_or_none(link_signal_count, total),
+            "public_note": SEARCH_FIELD_PUBLIC_NOTE,
         }
     )
 
@@ -2749,6 +2992,7 @@ def _has_concept_relation_fields(candidate: dict[str, Any], source_quality: dict
 def _has_concept_search_text(candidate: dict[str, Any], source_quality: dict[str, Any]) -> bool:
     return bool(
         source_quality.get("has_concept_search_text")
+        or _text_for_coverage(candidate.get("concept_search_text")).strip()
         or _string_list(candidate.get("concept_labels"))
         or _string_list(candidate.get("concept_aliases"))
         or _text_for_coverage(candidate.get("concept_relation_text")).strip()
