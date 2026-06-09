@@ -13,6 +13,10 @@ from oarag.evaluation.benchmark import (
     _public_answer_summary,
 )
 from oarag.evaluation.quality_gate import evaluate_retrieval_quality_gate
+from oarag.evaluation.remaining_miss_audit import (
+    build_remaining_miss_audit,
+    synthetic_remaining_miss_rows,
+)
 
 
 class FakeClient:
@@ -501,6 +505,40 @@ def test_evidence_unit_target_rank_diagnostics_separate_window_and_time_matches(
         "window": "top1",
         "time_overlap": "top5",
     }
+
+
+def test_remaining_miss_audit_classifies_public_safe_seed_misses() -> None:
+    query_rows, depth_rows = synthetic_remaining_miss_rows()
+    audit = build_remaining_miss_audit(
+        query_rows=query_rows,
+        depth_rows=depth_rows,
+        run_label="synthetic",
+        input_status="synthetic_fixture",
+        unrun_reason="external artifacts unavailable",
+    )
+
+    assert audit["metrics"]["remaining_miss_seed_count"] == 2
+    assert audit["metrics"]["cause_counts"]["candidate_depth_issue"] == 2
+    assert audit["metrics"]["cause_counts"]["query_cleaning_issue"] == 1
+    assert audit["metrics"]["cause_counts"]["missing_search_field"] == 1
+    assert audit["metrics"]["cause_counts"]["verified_coverage_issue"] == 1
+    assert audit["privacy"]["gold_labels_used_as_search_input"] is False
+
+    first = audit["misses"][0]
+    assert first["seed_ref"].startswith("seed:")
+    assert first["variant_target_diagnostics"]["domain_lexicon"]["target_rank_bucket"] == "top10"
+    assert first["meili_depth_found"] == {
+        "5": False,
+        "10": False,
+        "30": True,
+        "50": True,
+        "100": True,
+    }
+    assert first["quality_bucket_delta"]["delta_bucket"] == "target_stronger"
+    assert first["target_search_field_coverage_bucket"] == "full"
+    assert "synthetic_seed_candidate_depth" not in json.dumps(audit)
+    assert "/Users/" not in json.dumps(audit)
+    assert "/private/tmp" not in json.dumps(audit)
 
 
 def test_answer_visual_citation_metrics_count_only_claim_references() -> None:

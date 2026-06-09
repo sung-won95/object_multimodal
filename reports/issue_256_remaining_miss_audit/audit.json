@@ -1,0 +1,188 @@
+{
+  "inputs": {
+    "depth_diagnostics": {
+      "row_count": 2,
+      "status": "loaded"
+    },
+    "query_results": {
+      "row_count": 3,
+      "status": "synthetic_fixture"
+    },
+    "unrun_reason": "1-4 lecture benchmark query_results were not available in this isolated worktree; wrote a synthetic fixture smoke report instead."
+  },
+  "metrics": {
+    "candidate_variant_row_count": 2,
+    "cause_counts": {
+      "candidate_depth_issue": 2,
+      "evaluation_match_issue": 0,
+      "missing_search_field": 1,
+      "query_cleaning_issue": 1,
+      "verified_coverage_issue": 1
+    },
+    "input_status": "synthetic_fixture",
+    "meili_depth_found_counts": {
+      "10": 0,
+      "100": 1,
+      "30": 1,
+      "5": 0,
+      "50": 1
+    },
+    "public_note": "This audit is public-safe: raw query text, raw answers, transcript excerpts, raw candidate ids, evidence text, and local absolute paths are excluded. Gold labels are consumed only through benchmark post-processing diagnostics, not as search input.",
+    "quality_bucket_delta_counts": {
+      "same": 1,
+      "target_stronger": 1
+    },
+    "remaining_miss_seed_count": 2,
+    "schema_version": "remaining-miss-audit-public-v1",
+    "target_search_field_coverage_bucket_counts": {
+      "full": 1,
+      "minimal": 1
+    },
+    "unrun_reason": "1-4 lecture benchmark query_results were not available in this isolated worktree; wrote a synthetic fixture smoke report instead."
+  },
+  "misses": [
+    {
+      "candidate_target_rank_bucket": "not_found",
+      "cause_codes": [
+        "candidate_depth_issue",
+        "query_cleaning_issue"
+      ],
+      "exact_window_time_overlap": {
+        "exact": false,
+        "time_overlap": false,
+        "window": false
+      },
+      "meili_depth_found": {
+        "10": false,
+        "100": true,
+        "30": true,
+        "5": false,
+        "50": true
+      },
+      "privacy": {
+        "query_text": "excluded",
+        "raw_candidate_id": "excluded",
+        "seed_id": "hashed"
+      },
+      "quality_bucket_delta": {
+        "delta": 2,
+        "delta_bucket": "target_stronger",
+        "target_candidate_quality_bucket": "verified_visual",
+        "top_candidate_quality_bucket": "visual_candidate"
+      },
+      "query_label_available": true,
+      "seed_ref": "seed:54ef50ceeada",
+      "suite_ref": "a7ff377903bc",
+      "target_search_field_coverage_bucket": "full",
+      "target_variant_id": "evidence_unit_candidate",
+      "variant_target_diagnostics": {
+        "domain_lexicon": {
+          "match_found": {
+            "exact": false,
+            "time_overlap": true,
+            "window": false
+          },
+          "match_rank_buckets": {
+            "exact": "not_found",
+            "time_overlap": "top10",
+            "window": "not_found"
+          },
+          "target_match_bucket": "time_overlap",
+          "target_rank_bucket": "top10"
+        },
+        "evidence_unit_candidate": {
+          "match_found": {
+            "exact": false,
+            "time_overlap": false,
+            "window": false
+          },
+          "match_rank_buckets": {
+            "exact": "not_found",
+            "time_overlap": "not_found",
+            "window": "not_found"
+          },
+          "target_match_bucket": "not_found",
+          "target_rank_bucket": "not_found"
+        }
+      }
+    },
+    {
+      "candidate_target_rank_bucket": "not_found",
+      "cause_codes": [
+        "candidate_depth_issue",
+        "missing_search_field",
+        "verified_coverage_issue"
+      ],
+      "exact_window_time_overlap": {
+        "exact": false,
+        "time_overlap": false,
+        "window": false
+      },
+      "meili_depth_found": {
+        "10": false,
+        "100": false,
+        "30": false,
+        "5": false,
+        "50": false
+      },
+      "privacy": {
+        "query_text": "excluded",
+        "raw_candidate_id": "excluded",
+        "seed_id": "hashed"
+      },
+      "quality_bucket_delta": {
+        "delta": 0,
+        "delta_bucket": "same",
+        "target_candidate_quality_bucket": "transcript_only",
+        "top_candidate_quality_bucket": "transcript_only"
+      },
+      "query_label_available": true,
+      "seed_ref": "seed:d198cbe5b593",
+      "suite_ref": "a7ff377903bc",
+      "target_search_field_coverage_bucket": "minimal",
+      "target_variant_id": "evidence_unit_candidate",
+      "variant_target_diagnostics": {
+        "evidence_unit_candidate": {
+          "match_found": {
+            "exact": false,
+            "time_overlap": false,
+            "window": false
+          },
+          "match_rank_buckets": {
+            "exact": "not_found",
+            "time_overlap": "not_found",
+            "window": "not_found"
+          },
+          "target_match_bucket": "not_found",
+          "target_rank_bucket": "not_found"
+        }
+      }
+    }
+  ],
+  "privacy": {
+    "answer_text": "excluded",
+    "candidate_evidence_text": "excluded",
+    "gold_labels_used_as_search_input": false,
+    "gold_labels_used_only_for_posthoc_target_diagnostics": true,
+    "local_absolute_paths": "excluded",
+    "public_outputs_are_sanitized": true,
+    "raw_candidate_ids": "excluded",
+    "raw_query_text": "excluded",
+    "transcript_excerpt": "excluded"
+  },
+  "public_note": "This audit is public-safe: raw query text, raw answers, transcript excerpts, raw candidate ids, evidence text, and local absolute paths are excluded. Gold labels are consumed only through benchmark post-processing diagnostics, not as search input.",
+  "run_label": "issue_256_remaining_miss_audit",
+  "schema_version": "remaining-miss-audit-public-v1",
+  "scope": {
+    "lecture_slice": "1-4",
+    "meili_depths": [
+      5,
+      10,
+      30,
+      50,
+      100
+    ],
+    "miss_filter": "target_rank_bucket == not_found",
+    "target_variant_id": "evidence_unit_candidate"
+  }
+}
