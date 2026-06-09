@@ -136,7 +136,8 @@ def run_cross_lecture_retrieval_smoke(
                     neo4j_config=neo4j_config,
                 )
                 suite_rows.append(row)
-                query_rows.append(row)
+        _apply_rerank_rank_deltas(suite_rows)
+        query_rows.extend(suite_rows)
         suite_summaries.append(_suite_summary(suite=suite, rows=suite_rows))
 
     payload = _summary_payload(
@@ -1006,6 +1007,9 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
             "",
             f"- graph-aware top changes: `{payload['rerank_diagnostics'].get('top_changed_count', 0)}`",
             f"- graph-aware target rank buckets: `{json.dumps(payload['rerank_diagnostics'].get('target_rank_bucket_counts', {}), sort_keys=True)}`",
+            f"- rank delta buckets vs Meili+Graph: `{json.dumps(payload['rerank_diagnostics'].get('rank_delta_bucket_counts', {}), sort_keys=True)}`",
+            f"- target recall delta: `{json.dumps(payload['rerank_diagnostics'].get('target_recall_delta', {}), sort_keys=True)}`",
+            f"- score component presence: `{json.dumps(payload['rerank_diagnostics'].get('score_component_presence', {}), sort_keys=True)}`",
             "",
             "## Skip Reasons",
             "",
@@ -1152,6 +1156,233 @@ def _sum_count_maps(rows: list[dict[str, Any]], *, keys: tuple[str, ...]) -> dic
     return {key: sum(int(row.get(key) or 0) for row in rows) for key in keys}
 
 
+def _apply_rerank_rank_deltas(rows: list[dict[str, Any]]) -> None:
+    baseline_by_query = {
+        _query_row_key(row): row
+        for row in rows
+        if row.get("variant") == "meili_graph"
+    }
+    for row in rows:
+        if row.get("variant") != "graph_aware_rerank":
+            continue
+        delta = _rerank_rank_delta(
+            baseline=baseline_by_query.get(_query_row_key(row)),
+            reranked=row,
+        )
+        row["rank_delta_vs_meili_graph"] = delta
+        rerank = dict(_mapping(row.get("graph_aware_rerank")))
+        rerank["rank_delta_vs_meili_graph"] = delta
+        row["graph_aware_rerank"] = rerank
+
+
+def _query_row_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("suite_id") or ""),
+        str(row.get("project_ref") or ""),
+        str(row.get("query_id") or ""),
+    )
+
+
+def _rerank_rank_delta(
+    *,
+    baseline: dict[str, Any] | None,
+    reranked: dict[str, Any],
+) -> dict[str, Any]:
+    if not baseline:
+        return _rank_delta_payload(bucket="baseline_missing")
+    if reranked.get("target_configured") is not True:
+        return _rank_delta_payload(bucket="target_not_configured")
+    if baseline.get("status") != "queried" or reranked.get("status") != "queried":
+        return _rank_delta_payload(bucket="not_comparable")
+
+    baseline_metrics = _mapping(baseline.get("candidate_source_metrics"))
+    reranked_metrics = _mapping(reranked.get("candidate_source_metrics"))
+    candidate_recall_failure = (
+        int(baseline_metrics.get("generated_recalled_count") or 0) <= 0
+        or int(reranked_metrics.get("generated_recalled_count") or 0) <= 0
+    )
+    baseline_rank = _optional_int(baseline.get("target_rank"))
+    reranked_rank = _optional_int(reranked.get("target_rank"))
+    bucket = _rank_delta_bucket(
+        baseline_rank=baseline_rank,
+        reranked_rank=reranked_rank,
+        candidate_recall_failure=candidate_recall_failure,
+    )
+    return _rank_delta_payload(
+        bucket=bucket,
+        baseline_rank=baseline_rank,
+        baseline_rank_bucket=str(baseline.get("target_rank_bucket") or "unknown"),
+        reranked_rank=reranked_rank,
+        reranked_rank_bucket=str(reranked.get("target_rank_bucket") or "unknown"),
+        delta=_rank_delta_value(baseline_rank=baseline_rank, reranked_rank=reranked_rank),
+        candidate_recall_failure=candidate_recall_failure,
+        top1_delta=_threshold_delta(baseline_rank, reranked_rank, threshold=1),
+        top5_delta=_threshold_delta(baseline_rank, reranked_rank, threshold=5),
+        top10_delta=_threshold_delta(baseline_rank, reranked_rank, threshold=10),
+    )
+
+
+def _rank_delta_payload(
+    *,
+    bucket: str,
+    baseline_rank: int | None = None,
+    baseline_rank_bucket: str = "unknown",
+    reranked_rank: int | None = None,
+    reranked_rank_bucket: str = "unknown",
+    delta: int | None = None,
+    candidate_recall_failure: bool = False,
+    top1_delta: int = 0,
+    top5_delta: int = 0,
+    top10_delta: int = 0,
+) -> dict[str, Any]:
+    return {
+        "public_safe": True,
+        "baseline_variant": "meili_graph",
+        "rerank_variant": "graph_aware_rerank",
+        "bucket": bucket,
+        "baseline_rank": baseline_rank,
+        "baseline_rank_bucket": baseline_rank_bucket,
+        "reranked_rank": reranked_rank,
+        "reranked_rank_bucket": reranked_rank_bucket,
+        "rank_delta": delta,
+        "candidate_recall_failure": candidate_recall_failure,
+        "top1_recall_delta": top1_delta,
+        "top5_recall_delta": top5_delta,
+        "top10_recall_delta": top10_delta,
+        "omits": ["raw_query", "raw_target_ids", "evidence_text", "local_paths"],
+    }
+
+
+def _rank_delta_bucket(
+    *,
+    baseline_rank: int | None,
+    reranked_rank: int | None,
+    candidate_recall_failure: bool,
+) -> str:
+    if candidate_recall_failure and baseline_rank is None and reranked_rank is None:
+        return "candidate_recall_failure"
+    if baseline_rank is None and reranked_rank is None:
+        return "unchanged_no_effect"
+    if baseline_rank is None:
+        return "not_found_to_found"
+    if reranked_rank is None:
+        return "regression_found_to_not_found"
+    if reranked_rank == baseline_rank:
+        return "unchanged_no_effect"
+
+    baseline_bucket = _target_rank_bucket(baseline_rank)
+    reranked_bucket = _target_rank_bucket(reranked_rank)
+    if reranked_rank < baseline_rank:
+        if baseline_bucket != reranked_bucket:
+            return f"{baseline_bucket}_to_{reranked_bucket}"
+        return "improved_within_bucket"
+    return "regression"
+
+
+def _rank_delta_value(*, baseline_rank: int | None, reranked_rank: int | None) -> int | None:
+    if baseline_rank is None or reranked_rank is None:
+        return None
+    return baseline_rank - reranked_rank
+
+
+def _threshold_delta(
+    baseline_rank: int | None,
+    reranked_rank: int | None,
+    *,
+    threshold: int,
+) -> int:
+    return int(_rank_at_or_above(reranked_rank, threshold)) - int(
+        _rank_at_or_above(baseline_rank, threshold)
+    )
+
+
+def _rank_at_or_above(rank: int | None, threshold: int) -> bool:
+    return rank is not None and rank <= threshold
+
+
+def _target_recall_delta(computed: list[dict[str, Any]]) -> dict[str, Any]:
+    deltas = [_mapping(diag.get("rank_delta_vs_meili_graph")) for diag in computed]
+    comparable = [delta for delta in deltas if delta.get("bucket") not in {None, "baseline_missing"}]
+    return {
+        "query_count": len(comparable),
+        "top1": _threshold_delta_summary(comparable, key="top1_recall_delta"),
+        "top5": _threshold_delta_summary(comparable, key="top5_recall_delta"),
+        "top10": _threshold_delta_summary(comparable, key="top10_recall_delta"),
+    }
+
+
+def _threshold_delta_summary(deltas: list[dict[str, Any]], *, key: str) -> dict[str, int]:
+    net_delta = sum(int(delta.get(key) or 0) for delta in deltas)
+    return {
+        "improved_count": sum(1 for delta in deltas if int(delta.get(key) or 0) > 0),
+        "regressed_count": sum(1 for delta in deltas if int(delta.get(key) or 0) < 0),
+        "unchanged_count": sum(1 for delta in deltas if int(delta.get(key) or 0) == 0),
+        "net_delta": net_delta,
+    }
+
+
+_SCORE_COMPONENT_GROUPS = {
+    "query_relevance": (
+        "evidence_text_query_overlap",
+        "semantic_text_query_overlap",
+        "transcript_query_overlap",
+        "retrieval_score",
+    ),
+    "graph_relation_match": (
+        "related_concept_graph_path",
+        "graph_direct_match",
+        "relation_type_match",
+    ),
+    "concept_alias_canonical_match": ("query_concept_direct_match",),
+    "vlm_object_evidence": (
+        "visual_description",
+        "visual_object_support",
+        "vlm_visual_entity",
+    ),
+    "verified_link": ("verified_alignment", "candidate_link_quality"),
+    "timestamp_fallback_penalty": ("timestamp_fallback_penalty",),
+    "ocr_only_penalty": ("ocr_only_penalty",),
+}
+
+
+def _score_component_presence(returned_breakdowns: list[dict[str, Any]]) -> dict[str, Any]:
+    presence = {
+        name: {"candidate_count": 0, "positive_count": 0, "negative_count": 0}
+        for name in _SCORE_COMPONENT_GROUPS
+    }
+    for breakdown in returned_breakdowns:
+        components = _mapping(breakdown.get("components"))
+        for name, component_keys in _SCORE_COMPONENT_GROUPS.items():
+            values = [
+                _optional_float(components.get(component_key))
+                for component_key in component_keys
+                if _optional_float(components.get(component_key)) is not None
+            ]
+            values = [value for value in values if value is not None]
+            if any(value > 0 for value in values):
+                presence[name]["candidate_count"] += 1
+                presence[name]["positive_count"] += 1
+            elif any(value < 0 for value in values):
+                presence[name]["candidate_count"] += 1
+                presence[name]["negative_count"] += 1
+    return presence
+
+
+def _merge_score_component_presence(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    merged = {
+        name: {"candidate_count": 0, "positive_count": 0, "negative_count": 0}
+        for name in _SCORE_COMPONENT_GROUPS
+    }
+    for row in rows:
+        for name, summary in _mapping(row).items():
+            if name not in merged:
+                continue
+            summary_map = _mapping(summary)
+            for key in ("candidate_count", "positive_count", "negative_count"):
+                merged[name][key] += int(summary_map.get(key) or 0)
+    return merged
+
+
 def _graph_aware_rerank_inspection(rows: list[dict[str, Any]]) -> dict[str, Any]:
     diagnostics = [
         _mapping(row.get("graph_aware_rerank"))
@@ -1170,12 +1401,29 @@ def _graph_aware_rerank_inspection(rows: list[dict[str, Any]]) -> dict[str, Any]
         "target_rank_bucket_counts": dict(
             Counter(str(diag.get("target_rank_bucket") or "unknown") for diag in computed)
         ),
+        "rank_delta_bucket_counts": dict(
+            Counter(
+                str(_mapping(diag.get("rank_delta_vs_meili_graph")).get("bucket") or "missing")
+                for diag in computed
+            )
+        ),
+        "candidate_recall_failure_count": sum(
+            1
+            for diag in computed
+            if _mapping(diag.get("rank_delta_vs_meili_graph")).get("candidate_recall_failure")
+            is True
+        ),
+        "target_recall_delta": _target_recall_delta(computed),
         "component_presence_counts": dict(
             Counter(
-                component
+                category
                 for diag in computed
-                for component in _string_list(diag.get("component_names"))
+                for category, summary in _mapping(diag.get("score_component_presence")).items()
+                if int(_mapping(summary).get("candidate_count") or 0) > 0
             )
+        ),
+        "score_component_presence": _merge_score_component_presence(
+            [_mapping(diag.get("score_component_presence")) for diag in computed]
         ),
     }
 
@@ -1197,6 +1445,9 @@ def _public_graph_aware_rerank(response: dict[str, Any]) -> dict[str, Any]:
         "reranked_top_original_rank": diagnostics.get("reranked_top_original_rank"),
         "reranked_top_rank": diagnostics.get("reranked_top_rank"),
         "component_names": _string_list(diagnostics.get("component_names")),
+        "score_component_presence": _score_component_presence(
+            _list_of_dicts(diagnostics.get("returned_breakdowns"))
+        ),
         "target_rank": metrics.get("target_rank"),
         "target_rank_bucket": metrics.get("target_rank_bucket"),
         "top_k_recall": metrics.get("top_k_recall"),
@@ -1349,7 +1600,9 @@ def _target_rank_bucket(rank: int | None) -> str:
         return "top10"
     if rank <= 50:
         return "top50"
-    return "beyond_top50"
+    if rank <= 100:
+        return "top100"
+    return "beyond_top100"
 
 
 def _top_k_recall(target_count: int, recalled_count: int) -> bool | None:
