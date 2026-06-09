@@ -35,6 +35,8 @@ def test_validator_reports_ocr_only_as_issue_200_skip(tmp_path: Path) -> None:
     assert entity["ocr_only_entity_count"] == 1
     assert entity["vlm_source_entity_count"] == 0
     assert entity["paper_quality_vlm_entity_count"] == 0
+    assert entity["ratios"]["ocr_only"] == 1.0
+    assert entity["ratios"]["vlm_object_description"] == 0.0
 
 
 def test_validator_rejects_mock_deterministic_vlm_entities_and_units(tmp_path: Path) -> None:
@@ -78,9 +80,13 @@ def test_validator_rejects_mock_deterministic_vlm_entities_and_units(tmp_path: P
     assert entity["paper_quality_vlm_entity_count"] == 0
     assert entity["deterministic_or_mock_vlm_entity_count"] == 1
     assert entity["rejection_reason_counts"]["deterministic_or_mock_vlm_output"] == 1
+    assert entity["vlm_object_description_entity_count"] == 1
+    assert entity["detected_text_entity_count"] == 1
     assert units["coverage_source"] == "visual_entity_context"
     assert units["units_with_vlm_entity"] == 0
     assert units["units_with_rejected_vlm_entity"] == 1
+    assert units["units_with_candidate_link"] == 0
+    assert units["units_with_verified_link"] == 0
 
 
 def test_validator_reports_empty_vlm_source_as_invalid(tmp_path: Path) -> None:
@@ -143,6 +149,11 @@ def test_validator_accepts_real_vlm_like_fixture_and_redacts_outputs(tmp_path: P
                     "has_vlm_entity": True,
                     "has_visual_description": True,
                     "has_detected_text": True,
+                    "candidate_link_count": 1,
+                    "verified_link_count": 1,
+                    "timestamp_fallback_link_count": 1,
+                    "has_verified_link": True,
+                    "has_timestamp_fallback_link": True,
                 },
             }
         ],
@@ -164,9 +175,19 @@ def test_validator_accepts_real_vlm_like_fixture_and_redacts_outputs(tmp_path: P
     assert entity["paper_quality_field_coverage"]["position"]["count"] == 1
     assert entity["paper_quality_field_coverage"]["relations"]["count"] == 1
     assert entity["paper_quality_field_coverage"]["detected_text"]["count"] == 1
+    assert entity["ratios"]["vlm_object_description"] == 1.0
+    assert entity["ratios"]["detected_text"] == 1.0
     assert units["units_with_vlm_entity"] == 1
     assert units["units_with_visual_description"] == 1
     assert units["units_with_detected_text"] == 1
+    assert units["units_with_candidate_link"] == 1
+    assert units["units_with_verified_link"] == 1
+    assert units["units_with_timestamp_fallback_link"] == 1
+    assert units["ratios"]["units_with_visual_description"] == 1.0
+    assert units["ratios"]["units_with_detected_text"] == 1.0
+    assert units["ratios"]["units_with_candidate_link"] == 1.0
+    assert units["ratios"]["units_with_verified_link"] == 1.0
+    assert units["ratios"]["units_with_timestamp_fallback_link"] == 1.0
     assert is_paper_quality_vlm_entity(real_like_entity) is True
 
     public_text = output_path.read_text(encoding="utf-8") + summary_path.read_text(

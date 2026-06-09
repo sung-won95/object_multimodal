@@ -127,6 +127,17 @@ def summarize_visual_entity_coverage(entities: Iterable[dict[str, Any]]) -> dict
     classifications = [classify_visual_entity(row) for row in rows]
     vlm_source = [item for item in classifications if item["is_vlm_source"]]
     paper_quality = [item for item in classifications if item["is_paper_quality_vlm_entity"]]
+    ocr_only_count = sum(
+        1
+        for row, item in zip(rows, classifications, strict=True)
+        if _is_ocr_entity(row) and not item["is_vlm_source"]
+    )
+    vlm_object_description_count = sum(
+        1
+        for row, item in zip(rows, classifications, strict=True)
+        if item["is_vlm_source"] and _has_visual_description(row)
+    )
+    detected_text_count = sum(1 for row in rows if _has_detected_text(row))
     reason_counts: Counter[str] = Counter()
     for item in classifications:
         for reason in item["reasons"]:
@@ -137,17 +148,22 @@ def summarize_visual_entity_coverage(entities: Iterable[dict[str, Any]]) -> dict
         "vlm_source_entity_count": len(vlm_source),
         "paper_quality_vlm_entity_count": len(paper_quality),
         "rejected_vlm_entity_count": len(vlm_source) - len(paper_quality),
-        "ocr_only_entity_count": sum(
-            1
-            for row, item in zip(rows, classifications, strict=True)
-            if _is_ocr_entity(row) and not item["is_vlm_source"]
-        ),
+        "ocr_only_entity_count": ocr_only_count,
+        "vlm_object_description_entity_count": vlm_object_description_count,
+        "detected_text_entity_count": detected_text_count,
         "empty_invalid_entity_count": sum(
             1 for item in classifications if "empty_or_invalid_entity" in item["reasons"]
         ),
         "deterministic_or_mock_vlm_entity_count": sum(
             1 for item in classifications if "deterministic_or_mock_vlm_output" in item["reasons"]
         ),
+        "ratios": {
+            "ocr_only": _ratio(ocr_only_count, len(rows)),
+            "vlm_source": _ratio(len(vlm_source), len(rows)),
+            "paper_quality_vlm": _ratio(len(paper_quality), len(rows)),
+            "vlm_object_description": _ratio(vlm_object_description_count, len(rows)),
+            "detected_text": _ratio(detected_text_count, len(rows)),
+        },
         "source_counts": _counter_dict(classifications, "source_category"),
         "rejection_reason_counts": dict(sorted(reason_counts.items())),
         "vlm_source_field_coverage": _field_coverage(
@@ -186,6 +202,10 @@ def summarize_evidence_unit_coverage(units: Iterable[dict[str, Any]]) -> dict[st
     units_with_detected_text = 0
     units_with_paper_quality_vlm_entity = 0
     units_with_rejected_vlm_entity = 0
+    units_using_ocr_only = 0
+    units_with_candidate_link = 0
+    units_with_verified_link = 0
+    units_with_timestamp_fallback_link = 0
     for row in rows:
         visual_entities = _list_of_dicts(row.get("visual_entities"))
         source_quality = _mapping(row.get("source_quality"))
@@ -212,6 +232,16 @@ def summarize_evidence_unit_coverage(units: Iterable[dict[str, Any]]) -> dict[st
         units_with_rejected_vlm_entity += int(has_rejected_vlm)
         units_with_visual_description += int(has_visual_description)
         units_with_detected_text += int(has_detected_text)
+        units_using_ocr_only += int(bool(source_quality.get("uses_ocr_only")))
+        units_with_candidate_link += int(int(source_quality.get("candidate_link_count") or 0) > 0)
+        units_with_verified_link += int(
+            bool(source_quality.get("has_verified_link"))
+            or int(source_quality.get("verified_link_count") or 0) > 0
+        )
+        units_with_timestamp_fallback_link += int(
+            bool(source_quality.get("has_timestamp_fallback_link"))
+            or int(source_quality.get("timestamp_fallback_link_count") or 0) > 0
+        )
 
     return {
         "status": "available" if rows else "not_available",
@@ -223,10 +253,25 @@ def summarize_evidence_unit_coverage(units: Iterable[dict[str, Any]]) -> dict[st
         "units_with_rejected_vlm_entity": units_with_rejected_vlm_entity,
         "units_with_visual_description": units_with_visual_description,
         "units_with_detected_text": units_with_detected_text,
+        "units_using_ocr_only": units_using_ocr_only,
+        "units_with_candidate_link": units_with_candidate_link,
+        "units_with_verified_link": units_with_verified_link,
+        "units_with_timestamp_fallback_link": units_with_timestamp_fallback_link,
         "ratios": {
             "units_with_vlm_entity": _ratio(units_with_vlm_entity, len(rows)),
+            "units_with_paper_quality_vlm_entity": _ratio(
+                units_with_paper_quality_vlm_entity,
+                len(rows),
+            ),
             "units_with_visual_description": _ratio(units_with_visual_description, len(rows)),
             "units_with_detected_text": _ratio(units_with_detected_text, len(rows)),
+            "units_using_ocr_only": _ratio(units_using_ocr_only, len(rows)),
+            "units_with_candidate_link": _ratio(units_with_candidate_link, len(rows)),
+            "units_with_verified_link": _ratio(units_with_verified_link, len(rows)),
+            "units_with_timestamp_fallback_link": _ratio(
+                units_with_timestamp_fallback_link,
+                len(rows),
+            ),
         },
         "public_note": (
             "When embedded visual entity context is available, units_with_vlm_entity uses "
@@ -346,11 +391,17 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
         f"- VLM source entities: `{entity['vlm_source_entity_count']}`",
         f"- paper-quality VLM entities: `{entity['paper_quality_vlm_entity_count']}`",
         f"- OCR-only entities: `{entity['ocr_only_entity_count']}`",
+        f"- VLM object-description entities: `{entity['vlm_object_description_entity_count']}`",
+        f"- detected-text entities: `{entity['detected_text_entity_count']}`",
         f"- empty/invalid entities: `{entity['empty_invalid_entity_count']}`",
         f"- deterministic/mock VLM entities: `{entity['deterministic_or_mock_vlm_entity_count']}`",
         f"- evidence units with VLM entity: `{unit['units_with_vlm_entity']}`",
         f"- evidence units with visual description: `{unit['units_with_visual_description']}`",
         f"- evidence units with detected text: `{unit['units_with_detected_text']}`",
+        f"- evidence units using OCR-only context: `{unit['units_using_ocr_only']}`",
+        f"- evidence units with candidate links: `{unit['units_with_candidate_link']}`",
+        f"- evidence units with verified links: `{unit['units_with_verified_link']}`",
+        f"- evidence units with timestamp fallback links: `{unit['units_with_timestamp_fallback_link']}`",
         "",
         "## VLM Source Field Coverage",
         "",
