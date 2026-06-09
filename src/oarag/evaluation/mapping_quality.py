@@ -39,6 +39,9 @@ ARTIFACT_ALIASES = {
     "global_concept_graph": ("global_concept_graph", "global_concepts"),
 }
 
+PROJECT_ENTRY_KEYS = ("projects", "project_dirs", "lectures", "lecture_projects", "suites")
+PROJECT_PATH_KEYS = ("project_dir", "project_path", "path", "root")
+
 TEXT_EXCLUSION_NOTICE = (
     "Raw transcript, local filesystem paths, raw queries, raw evidence text, visual labels, "
     "and raw candidate identifiers are excluded from this public-safe report."
@@ -187,8 +190,8 @@ def _load_project_inputs(
         resolved_manifest = manifest_path.expanduser().resolve()
         manifest_base = resolved_manifest.parent
         manifest = _read_json(resolved_manifest)
-        for index, item in enumerate(_manifest_project_items(manifest)):
-            project_dir_value = item.get("project_dir") or item.get("path") or item.get("root")
+        for index, item in enumerate(_manifest_project_items(manifest, manifest_base)):
+            project_dir_value = _project_dir_value(item)
             if not isinstance(project_dir_value, str) or not project_dir_value.strip():
                 continue
             project_dir = _resolve_path(Path(project_dir_value), manifest_base)
@@ -210,19 +213,58 @@ def _load_project_inputs(
     return projects
 
 
-def _manifest_project_items(manifest: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    for key in ("projects", "project_dirs", "lectures", "lecture_projects"):
+def _manifest_project_items(
+    manifest: Mapping[str, Any],
+    manifest_base: Path,
+    *,
+    seen: frozenset[Path] = frozenset(),
+) -> list[Mapping[str, Any]]:
+    for key in PROJECT_ENTRY_KEYS:
         value = manifest.get(key)
         if isinstance(value, list):
             items: list[Mapping[str, Any]] = []
             for item in value:
                 if isinstance(item, str):
-                    items.append({"project_dir": item})
+                    items.append({"project_dir": str(_resolve_path(Path(item), manifest_base))})
                 elif isinstance(item, Mapping):
-                    items.append(item)
+                    items.append(_manifest_project_item(item, manifest_base))
             if items:
                 return items
-    return []
+
+    matrix_manifest = _paper_bundle_matrix_manifest(manifest, manifest_base)
+    if matrix_manifest is None or matrix_manifest in seen or not matrix_manifest.exists():
+        return []
+    nested = _read_json(matrix_manifest)
+    if not isinstance(nested, Mapping):
+        return []
+    return _manifest_project_items(nested, matrix_manifest.parent, seen=seen | {matrix_manifest})
+
+
+def _project_dir_value(item: Mapping[str, Any]) -> Any:
+    for key in PROJECT_PATH_KEYS:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _manifest_project_item(item: Mapping[str, Any], manifest_base: Path) -> dict[str, Any]:
+    normalized = dict(item)
+    for key in PROJECT_PATH_KEYS:
+        value = normalized.get(key)
+        if isinstance(value, str) and value.strip():
+            normalized[key] = str(_resolve_path(Path(value), manifest_base))
+    return normalized
+
+
+def _paper_bundle_matrix_manifest(manifest: Mapping[str, Any], manifest_base: Path) -> Path | None:
+    paper_bundle = manifest.get("paper_bundle")
+    if not isinstance(paper_bundle, Mapping):
+        return None
+    matrix_manifest = paper_bundle.get("matrix_manifest")
+    if not isinstance(matrix_manifest, str) or not matrix_manifest.strip():
+        return None
+    return _resolve_path(Path(matrix_manifest), manifest_base)
 
 
 def _project_manifest(project_dir: Path, inline: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -244,7 +286,7 @@ def _merge_manifest(base: Mapping[str, Any], override: Mapping[str, Any]) -> dic
             artifacts = dict(base[key])
             artifacts.update(value)
             merged[key] = artifacts
-        elif key not in {"project_dir", "path", "root", "manifest"}:
+        elif key not in {*PROJECT_PATH_KEYS, "manifest"}:
             merged[key] = value
     return merged
 
