@@ -87,8 +87,7 @@ _RELATION_INTENT_TERMS = {
 
 
 class GraphCandidateSession(Protocol):
-    def run(self, query: str, parameters: dict[str, Any] | None = None) -> Any:
-        ...
+    def run(self, query: str, parameters: dict[str, Any] | None = None) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -185,7 +184,9 @@ def query_project_dual_candidates(
     )
 
     started_at = time.monotonic()
-    expanded_queries = _expanded_queries(query=query, analysis=analysis, max_queries=config.max_expanded_queries)
+    expanded_queries = _expanded_queries(
+        query=query, analysis=analysis, max_queries=config.max_expanded_queries
+    )
     if config.enable_meili:
         raw_entries, raw_context = _meili_candidate_entries(
             client=client,
@@ -268,7 +269,9 @@ def query_project_dual_candidates(
         "retrieval_context": {
             "candidate_generation": {
                 "mode": "meili_graph_dual",
-                "sources": _configured_sources(enable_meili=config.enable_meili, enable_graph=config.enable_graph),
+                "sources": _configured_sources(
+                    enable_meili=config.enable_meili, enable_graph=config.enable_graph
+                ),
                 "candidate_pool_limit": pool_limit,
                 "graph_limit": resolved_graph_limit,
                 "expanded_queries": expanded_queries,
@@ -460,11 +463,18 @@ LIMIT $limit
 """
 
 
-def serialize_graph_candidate_record(record: Any, *, rank: int) -> dict[str, Any]:
+def serialize_graph_candidate_record(
+    record: Any,
+    *,
+    rank: int,
+    concept_terms: list[str] | None = None,
+) -> dict[str, Any]:
     row = _record_data(record)
     evidence_unit = _node_payload(row.get("evidence_unit")) or {}
-    matched_concept = _public_concept_payload(row.get("matched_concept") or row.get("concept"))
-    related_concept = _public_concept_payload(row.get("related_concept"))
+    matched_concept_payload = _node_payload(row.get("matched_concept") or row.get("concept")) or {}
+    related_concept_payload = _node_payload(row.get("related_concept")) or {}
+    matched_concept = _public_concept_payload(matched_concept_payload)
+    related_concept = _public_concept_payload(related_concept_payload)
     source_evidence_ref = _public_source_evidence_ref(row.get("source_evidence_ref"))
     evidence_unit_id = str(
         row.get("evidence_unit_id")
@@ -480,7 +490,8 @@ def serialize_graph_candidate_record(record: Any, *, rank: int) -> dict[str, Any
             "evidence_unit_id": evidence_unit_id,
             "project_id": row.get("project_id") or evidence_unit.get("project_id"),
             "video_id": row.get("video_id") or evidence_unit.get("video_id"),
-            "target_segment_id": row.get("target_segment_id") or evidence_unit.get("target_segment_id"),
+            "target_segment_id": row.get("target_segment_id")
+            or evidence_unit.get("target_segment_id"),
             "source_segment_ids": _string_list(
                 row.get("source_segment_ids") or evidence_unit.get("source_segment_ids")
             ),
@@ -500,6 +511,10 @@ def serialize_graph_candidate_record(record: Any, *, rank: int) -> dict[str, Any
             "rank": rank,
             "score": score,
             "graph_match_type": row.get("graph_match_type") or row.get("type") or "graph_path",
+            "concept_match_bucket": _concept_match_bucket(
+                matched_concept_payload,
+                concept_terms=concept_terms or [],
+            ),
             "graph_path": graph_path,
             "relationships": relationships,
             "path_length": len(graph_path),
@@ -513,6 +528,53 @@ def serialize_graph_candidate_record(record: Any, *, rank: int) -> dict[str, Any
         }
     )
     return {"candidate": candidate, "source": source}
+
+
+def _concept_match_bucket(
+    concept: dict[str, Any],
+    *,
+    concept_terms: list[str],
+) -> str:
+    normalized_terms = [_normalize_text(term) for term in concept_terms]
+    normalized_terms = [term for term in normalized_terms if term]
+    if not normalized_terms:
+        return "concept_terms_unavailable"
+
+    alias_values = _string_list(concept.get("aliases"))
+    field_groups = (
+        ("alias_match", alias_values),
+        ("canonical_match", [str(concept.get("canonical_label") or "")]),
+        ("label_match", [str(concept.get("label") or "")]),
+        (
+            "concept_id_match",
+            [
+                str(concept.get("concept_id") or ""),
+                str(concept.get("global_concept_id") or ""),
+            ],
+        ),
+    )
+    for bucket, values in field_groups:
+        normalized_values = [_normalize_text(value) for value in values]
+        normalized_values = [value for value in normalized_values if value]
+        if any(
+            _term_matches_concept(term, value)
+            for term in normalized_terms
+            for value in normalized_values
+        ):
+            return bucket
+    if alias_values:
+        return "alias_available_no_term_match"
+    if concept.get("canonical_label"):
+        return "canonical_available_no_term_match"
+    if concept.get("label"):
+        return "label_available_no_term_match"
+    return "no_public_concept_match"
+
+
+def _term_matches_concept(term: str, value: str) -> bool:
+    if not term or not value:
+        return False
+    return term == value or term in value or value in term
 
 
 def dual_candidate_diagnostics(
@@ -629,7 +691,11 @@ def _graph_candidate_entries(
         if graph_session is not None:
             rows = graph_session.run(
                 graph_candidate_cypher(),
-                {"project_id": project_id, "concept_terms": concept_terms, "limit": config.graph_limit},
+                {
+                    "project_id": project_id,
+                    "concept_terms": concept_terms,
+                    "limit": config.graph_limit,
+                },
             )
         else:
             active_config = neo4j_config or load_neo4j_config()
@@ -649,7 +715,11 @@ def _graph_candidate_entries(
                     )
             finally:
                 driver.close()
-        entries = _entries_from_graph_rows(rows, evidence_lookup=evidence_lookup)
+        entries = _entries_from_graph_rows(
+            rows,
+            evidence_lookup=evidence_lookup,
+            concept_terms=concept_terms,
+        )
         elapsed_ms = round((time.monotonic() - started_at) * 1000, 2)
         return entries, _graph_status(
             attempted=True,
@@ -677,11 +747,16 @@ def _entries_from_graph_rows(
     rows: Any,
     *,
     evidence_lookup: dict[str, dict[str, Any]],
+    concept_terms: list[str],
 ) -> list[_CandidateEntry]:
     entries: list[_CandidateEntry] = []
     seen_sources: set[tuple[str, str, tuple[str, ...]]] = set()
     for rank, record in enumerate(rows or [], start=1):
-        serialized = serialize_graph_candidate_record(record, rank=rank)
+        serialized = serialize_graph_candidate_record(
+            record,
+            rank=rank,
+            concept_terms=concept_terms,
+        )
         candidate = serialized["candidate"]
         source = serialized["source"]
         evidence_unit_id = str(candidate.get("evidence_unit_id") or "")
@@ -719,7 +794,9 @@ def _merge_candidate_entries(entries: list[_CandidateEntry]) -> dict[str, _Candi
             continue
         existing.candidate = _merge_missing_values(existing.candidate, entry.candidate)
         for source in entry.sources:
-            if _source_identity(source) not in {_source_identity(item) for item in existing.sources}:
+            if _source_identity(source) not in {
+                _source_identity(item) for item in existing.sources
+            }:
                 existing.sources.append(dict(source))
     return merged
 

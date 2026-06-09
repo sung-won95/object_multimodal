@@ -12,7 +12,10 @@ from typing import Any, Protocol
 from oarag.core.config import Neo4jConfig, default_paths
 from oarag.core.io import write_json, write_jsonl
 from oarag.retrieval.dual_candidates import (
+    GRAPH_TRAVERSAL_SOURCE,
     GraphCandidateSession,
+    MEILI_EXPANDED_SOURCE,
+    MEILI_RAW_SOURCE,
     query_project_dual_candidates,
 )
 
@@ -27,6 +30,11 @@ DEFAULT_VARIANTS = (
 )
 MEILI_UNAVAILABLE_SKIP = "meili_unavailable"
 GRAPH_UNAVAILABLE_SKIP = "graph_db_unavailable"
+GRAPH_REPRODUCE_COMMAND = (
+    "PYTHONPATH=src python -m oarag cross-lecture-retrieval-smoke "
+    "--manifest <manifest.json> --output-dir <public-output-dir>"
+)
+MEILI_SOURCE_TYPES = frozenset({MEILI_RAW_SOURCE, MEILI_EXPANDED_SOURCE})
 
 
 class CrossLectureSmokeClient(Protocol):
@@ -224,26 +232,40 @@ def build_candidate_source_metrics(
         for source_type, counts in sorted(_mapping(diagnostics.get("source_counts")).items())
     }
     generated_recall = _source_recall_summary(_mapping(diagnostics.get("source_recall")))
-    returned_recall = _source_recall_summary(
-        _mapping(diagnostics.get("returned_source_recall"))
-    )
+    returned_recall = _source_recall_summary(_mapping(diagnostics.get("returned_source_recall")))
     target_count = max(
         int(generated_recall.get("target_count") or 0),
         int(returned_recall.get("target_count") or 0),
     )
     target_rank = _minimum_target_rank(generated_recall)
     top_k_recalled_count = int(returned_recall.get("recalled_target_count") or 0)
+    target_found = _target_found_bucket_by_source(
+        generated=generated_recall,
+        returned=returned_recall,
+    )
+    configured_sources = _configured_source_types(
+        response=response,
+        source_counts=source_counts,
+    )
     return {
         "public_safe": True,
         "top_k": top_k,
         "target_count": target_count,
         "target_rank": target_rank,
         "target_rank_bucket": _target_rank_bucket(target_rank),
+        "target_found_bucket_by_source": target_found,
+        "graph_recovered_meili_not_found_target": bool(
+            target_found["generated"] == "graph_only"
+            and GRAPH_TRAVERSAL_SOURCE in configured_sources
+            and bool(configured_sources & MEILI_SOURCE_TYPES)
+        ),
         "top_k_recall": _top_k_recall(target_count, top_k_recalled_count),
         "top_k_recalled_count": top_k_recalled_count,
         "generated_recalled_count": int(generated_recall.get("recalled_target_count") or 0),
         "candidate_pool": _mapping(diagnostics.get("candidate_pool")),
         "source_counts": source_counts,
+        "source_mix_counts": _source_mix_counts(_list_of_dicts(response.get("candidates"))),
+        "graph_source_buckets": _graph_source_buckets(_list_of_dicts(response.get("candidates"))),
         "by_source": _merge_source_recall(
             source_counts=source_counts,
             generated=generated_recall,
@@ -343,14 +365,16 @@ def _run_variant(
         "privacy": _privacy_policy(),
         "top_k": suite.limit,
         "index_ref": _id_ref(project.index_uid, prefix="idx"),
-        "target_configured": bool(
-            query.target_evidence_unit_ids or query.target_segment_ids
-        ),
+        "target_configured": bool(query.target_evidence_unit_ids or query.target_segment_ids),
         "target_rank": metrics["target_rank"],
         "target_rank_bucket": metrics["target_rank_bucket"],
+        "target_found_bucket_by_source": metrics["target_found_bucket_by_source"],
+        "graph_recovered_meili_not_found_target": metrics["graph_recovered_meili_not_found_target"],
         "top_k_recall": metrics["top_k_recall"],
         "candidate_source_metrics": metrics,
         "candidate_source_contribution": metrics["source_counts"],
+        "candidate_source_mix": metrics["source_mix_counts"],
+        "graph_source_buckets": metrics["graph_source_buckets"],
         "top_candidate": _public_candidate(top_candidate),
         "meilisearch": _public_meili_status(meili, attempted=options["enable_meili"]),
         "graph": graph_status,
@@ -383,14 +407,16 @@ def _skipped_query_row(
         "privacy": _privacy_policy(),
         "top_k": suite.limit,
         "index_ref": _id_ref(project.index_uid, prefix="idx"),
-        "target_configured": bool(
-            query.target_evidence_unit_ids or query.target_segment_ids
-        ),
+        "target_configured": bool(query.target_evidence_unit_ids or query.target_segment_ids),
         "target_rank": None,
         "target_rank_bucket": "not_queried",
+        "target_found_bucket_by_source": {"generated": "not_queried", "top_k": "not_queried"},
+        "graph_recovered_meili_not_found_target": False,
         "top_k_recall": None,
         "candidate_source_metrics": _empty_candidate_source_metrics(suite.limit),
         "candidate_source_contribution": {},
+        "candidate_source_mix": {"meili": 0, "graph": 0, "both": 0, "unknown": 0},
+        "graph_source_buckets": _empty_graph_source_buckets(),
         "top_candidate": None,
         "meilisearch": {"attempted": False, "available": False, "status": "skipped"},
         "graph": graph_status or {"attempted": False, "available": False, "status": "skipped"},
@@ -417,13 +443,15 @@ def _parse_suite(
 ) -> CrossLectureSuiteConfig:
     suite_id = str(suite.get("suite_id") or f"cross_lecture_suite_{suite_index}")
     limit = _positive_int(
-        suite.get("top_k") or suite.get("limit") or manifest.get("top_k") or manifest.get("limit") or 5,
+        suite.get("top_k")
+        or suite.get("limit")
+        or manifest.get("top_k")
+        or manifest.get("limit")
+        or 5,
         field_name="top_k",
     )
     candidate_pool_limit = _positive_int(
-        suite.get("candidate_pool_limit")
-        or manifest.get("candidate_pool_limit")
-        or max(limit, 10),
+        suite.get("candidate_pool_limit") or manifest.get("candidate_pool_limit") or max(limit, 10),
         field_name="candidate_pool_limit",
     )
     graph_limit = _positive_int(
@@ -551,17 +579,33 @@ def _query_rows(value: Any, *, base_dir: Path) -> list[dict[str, Any]]:
         path = value.get("path")
         if path is None:
             rows = value.get("rows")
-            return [dict(item) for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []
+            return (
+                [dict(item) for item in rows if isinstance(item, dict)]
+                if isinstance(rows, list)
+                else []
+            )
         value = path
     path = _optional_path(value, base_dir=base_dir, repo_root=base_dir)
     if path is None:
         return []
     suffix = path.suffix.lower()
     if suffix == ".jsonl":
-        return [row for row in (_json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()) if isinstance(row, dict)]
+        return [
+            row
+            for row in (
+                _json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            )
+            if isinstance(row, dict)
+        ]
     if suffix == ".json":
         loaded = _read_json(path)
-        return [dict(item) for item in loaded if isinstance(item, dict)] if isinstance(loaded, list) else []
+        return (
+            [dict(item) for item in loaded if isinstance(item, dict)]
+            if isinstance(loaded, list)
+            else []
+        )
     if suffix == ".csv":
         with path.open("r", encoding="utf-8", newline="") as handle:
             return [dict(row) for row in csv.DictReader(handle)]
@@ -631,15 +675,16 @@ def _source_recall_summary(recall: dict[str, Any]) -> dict[str, Any]:
         targets = _string_list(source_summary.get("recalled_targets"))
         recalled_targets.update(targets)
         ranks = [
-            _public_rank_record(record)
-            for record in _list_of_dicts(source_summary.get("ranks"))
+            _public_rank_record(record) for record in _list_of_dicts(source_summary.get("ranks"))
         ]
         by_source[str(source_type)] = {
             "recalled_count": int(source_summary.get("recalled_count") or len(targets)),
             "recalled_target_refs": [_target_ref(target) for target in sorted(targets)],
             "ranks": ranks,
             "rank_bucket_counts": dict(
-                Counter(_target_rank_bucket(_optional_int(rank.get("candidate_rank"))) for rank in ranks)
+                Counter(
+                    _target_rank_bucket(_optional_int(rank.get("candidate_rank"))) for rank in ranks
+                )
             ),
         }
     return {
@@ -687,6 +732,169 @@ def _merge_source_recall(
     return merged
 
 
+def _target_found_bucket_by_source(
+    *,
+    generated: dict[str, Any],
+    returned: dict[str, Any],
+) -> dict[str, str]:
+    return {
+        "generated": _source_family_recall_bucket(generated),
+        "top_k": _source_family_recall_bucket(returned),
+    }
+
+
+def _configured_source_types(
+    *,
+    response: dict[str, Any],
+    source_counts: dict[str, dict[str, int]],
+) -> set[str]:
+    context_sources = _string_list(
+        _mapping(_mapping(response.get("retrieval_context")).get("candidate_generation")).get(
+            "sources"
+        )
+    )
+    if context_sources:
+        return set(context_sources)
+    return set(source_counts)
+
+
+def _source_family_recall_bucket(recall: dict[str, Any]) -> str:
+    by_source = _mapping(recall.get("by_source"))
+    meili_found = any(
+        int(_mapping(by_source.get(source_type)).get("recalled_count") or 0) > 0
+        for source_type in MEILI_SOURCE_TYPES
+    )
+    graph_found = (
+        int(_mapping(by_source.get(GRAPH_TRAVERSAL_SOURCE)).get("recalled_count") or 0) > 0
+    )
+    if meili_found and graph_found:
+        return "both"
+    if meili_found:
+        return "meili"
+    if graph_found:
+        return "graph_only"
+    return "not_found"
+
+
+def _source_mix_counts(candidates: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(_source_mix_bucket(candidate) for candidate in candidates)
+    return {
+        "meili": int(counts.get("meili") or 0),
+        "graph": int(counts.get("graph") or 0),
+        "both": int(counts.get("both") or 0),
+        "unknown": int(counts.get("unknown") or 0),
+    }
+
+
+def _source_mix_bucket(candidate: dict[str, Any]) -> str:
+    source_types = set(_string_list(candidate.get("candidate_source_types")))
+    has_meili = bool(source_types & MEILI_SOURCE_TYPES)
+    has_graph = GRAPH_TRAVERSAL_SOURCE in source_types
+    if has_meili and has_graph:
+        return "both"
+    if has_meili:
+        return "meili"
+    if has_graph:
+        return "graph"
+    return "unknown"
+
+
+def _graph_source_buckets(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    match_types: Counter[str] = Counter()
+    relation_types: Counter[str] = Counter()
+    source_signals: Counter[str] = Counter()
+    source_types: Counter[str] = Counter()
+    concept_matches: Counter[str] = Counter()
+    graph_source_count = 0
+    for candidate in candidates:
+        for source in _list_of_dicts(candidate.get("candidate_sources")):
+            if source.get("source_type") != GRAPH_TRAVERSAL_SOURCE:
+                continue
+            graph_source_count += 1
+            match_types[_safe_bucket_label(source.get("graph_match_type"), default="missing")] += 1
+            concept_matches[
+                _safe_bucket_label(source.get("concept_match_bucket"), default="missing")
+            ] += 1
+            relationships = _string_list(source.get("relationships"))
+            if relationships:
+                for relationship in relationships:
+                    relation_types[_safe_bucket_label(relationship, default="missing")] += 1
+            else:
+                relation_types["missing"] += 1
+            source_ref = _mapping(source.get("source_evidence_ref"))
+            source_signals[
+                _public_provenance_bucket_label(
+                    source_ref.get("source_signal"),
+                    default="missing",
+                )
+            ] += 1
+            source_types[
+                _public_provenance_bucket_label(
+                    source_ref.get("source_type"),
+                    default="missing",
+                )
+            ] += 1
+    return {
+        "graph_source_count": graph_source_count,
+        "graph_match_type_counts": dict(sorted(match_types.items())),
+        "relation_type_counts": dict(sorted(relation_types.items())),
+        "source_signal_counts": dict(sorted(source_signals.items())),
+        "source_type_counts": dict(sorted(source_types.items())),
+        "concept_match_bucket_counts": dict(sorted(concept_matches.items())),
+    }
+
+
+def _safe_bucket_label(value: Any, *, default: str) -> str:
+    text = _optional_str(value)
+    if text is None:
+        return default
+    normalized = []
+    for character in text.casefold():
+        if character.isalnum() or character == "_":
+            normalized.append(character)
+        elif character in {"-", " ", "/", ":"}:
+            normalized.append("_")
+    bucket = "".join(normalized).strip("_")
+    return bucket[:80] or default
+
+
+def _public_provenance_bucket_label(value: Any, *, default: str) -> str:
+    text = _optional_str(value)
+    if text is None:
+        return default
+    if _looks_path_like(text):
+        return "path_like_redacted"
+    if len(text) > 64:
+        return "redacted_long_label"
+    if any(character.isspace() for character in text):
+        return "free_text_redacted"
+
+    bucket = _safe_bucket_label(text, default=default)
+    if len(bucket) > 48:
+        return "redacted_long_label"
+    if bucket == default:
+        return default
+    if not _looks_enum_like(bucket):
+        return "other"
+    return bucket
+
+
+def _looks_path_like(text: str) -> bool:
+    lowered = text.casefold()
+    return (
+        text.startswith(("/", "~/", "./", "../"))
+        or "\\" in text
+        or "/private/" in lowered
+        or "/tmp/" in lowered
+    )
+
+
+def _looks_enum_like(bucket: str) -> bool:
+    if not bucket or bucket[0].isdigit():
+        return False
+    return all(character.isalnum() or character == "_" for character in bucket)
+
+
 def _suite_summary(
     *,
     suite: CrossLectureSuiteConfig,
@@ -705,6 +913,7 @@ def _suite_summary(
         "variant_metrics": _variant_metrics(rows),
         "source_recall_by_variant": _source_recall_by_variant(rows),
         "candidate_source_contribution": _candidate_source_contribution(rows),
+        "graph_candidate_ablation": _graph_candidate_ablation(rows),
         "graph_skip_reasons": _skip_reason_counts(rows, component="graph"),
         "meili_skip_reasons": _skip_reason_counts(rows, component="meilisearch"),
         "rerank_diagnostics": _graph_aware_rerank_inspection(rows),
@@ -740,6 +949,7 @@ def _summary_payload(
         "variant_metrics": _variant_metrics(query_rows),
         "source_recall_by_variant": _source_recall_by_variant(query_rows),
         "candidate_source_contribution": _candidate_source_contribution(query_rows),
+        "graph_candidate_ablation": _graph_candidate_ablation(query_rows),
         "rerank_diagnostics": _graph_aware_rerank_inspection(query_rows),
         "graph_skip_reasons": _skip_reason_counts(query_rows, component="graph"),
         "meili_skip_reasons": _skip_reason_counts(query_rows, component="meilisearch"),
@@ -786,6 +996,7 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- top-k recall: `{summary.get('top_k_recall_count', 0)}`/`{summary.get('target_configured_count', 0)}`",
                 f"- source recall: `{json.dumps(_mapping(payload.get('source_recall_by_variant')).get(variant, {}), sort_keys=True)}`",
                 f"- candidate source contribution: `{json.dumps(_mapping(payload.get('candidate_source_contribution')).get(variant, {}), sort_keys=True)}`",
+                f"- graph ablation: `{json.dumps(_mapping(payload.get('graph_candidate_ablation')).get(variant, {}), sort_keys=True)}`",
                 "",
             ]
         )
@@ -814,7 +1025,9 @@ def _variant_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         recalled = [row for row in configured if row.get("top_k_recall") is True]
         metrics[variant] = {
             "query_variant_count": len(variant_rows),
-            "status_counts": dict(Counter(str(row.get("status") or "unknown") for row in variant_rows)),
+            "status_counts": dict(
+                Counter(str(row.get("status") or "unknown") for row in variant_rows)
+            ),
             "target_configured_count": len(configured),
             "top_k_recall_count": len(recalled),
             "target_rank_bucket_counts": dict(
@@ -849,9 +1062,9 @@ def _source_recall_by_variant(rows: list[dict[str, Any]]) -> dict[str, Any]:
             if int(metrics.get("target_count") or 0) > 0:
                 target["target_configured_count"] += 1
             for bucket, count in _mapping(_mapping(summary).get("rank_bucket_counts")).items():
-                target["rank_bucket_counts"][bucket] = (
-                    int(target["rank_bucket_counts"].get(bucket) or 0) + int(count or 0)
-                )
+                target["rank_bucket_counts"][bucket] = int(
+                    target["rank_bucket_counts"].get(bucket) or 0
+                ) + int(count or 0)
     return by_variant
 
 
@@ -869,22 +1082,93 @@ def _candidate_source_contribution(rows: list[dict[str, Any]]) -> dict[str, Any]
     return by_variant
 
 
+def _graph_candidate_ablation(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    by_variant: dict[str, Any] = {}
+    for variant in sorted({str(row.get("variant") or "unknown") for row in rows}):
+        variant_rows = [row for row in rows if row.get("variant") == variant]
+        graph_bucket = _merge_graph_source_buckets(
+            [_mapping(row.get("graph_source_buckets")) for row in variant_rows]
+        )
+        source_mix = _sum_count_maps(
+            [_mapping(row.get("candidate_source_mix")) for row in variant_rows],
+            keys=("meili", "graph", "both", "unknown"),
+        )
+        target_buckets = Counter(
+            str(_mapping(row.get("target_found_bucket_by_source")).get("generated") or "unknown")
+            for row in variant_rows
+            if row.get("target_configured") is True
+        )
+        top_k_target_buckets = Counter(
+            str(_mapping(row.get("target_found_bucket_by_source")).get("top_k") or "unknown")
+            for row in variant_rows
+            if row.get("target_configured") is True
+        )
+        by_variant[variant] = {
+            "query_variant_count": len(variant_rows),
+            "candidate_source_mix": source_mix,
+            "target_found_bucket_counts": dict(sorted(target_buckets.items())),
+            "top_k_target_found_bucket_counts": dict(sorted(top_k_target_buckets.items())),
+            "graph_recovered_meili_not_found_target_count": sum(
+                1
+                for row in variant_rows
+                if row.get("graph_recovered_meili_not_found_target") is True
+            ),
+            "graph_source_buckets": graph_bucket,
+            "graph_unavailable_reproduce_command": (
+                GRAPH_REPRODUCE_COMMAND
+                if any(
+                    _mapping(row.get("graph")).get("skip_reason") == GRAPH_UNAVAILABLE_SKIP
+                    for row in variant_rows
+                )
+                else None
+            ),
+        }
+    return by_variant
+
+
+def _merge_graph_source_buckets(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "graph_source_count": sum(int(row.get("graph_source_count") or 0) for row in rows),
+        "graph_match_type_counts": _sum_nested_count_maps(rows, "graph_match_type_counts"),
+        "relation_type_counts": _sum_nested_count_maps(rows, "relation_type_counts"),
+        "source_signal_counts": _sum_nested_count_maps(rows, "source_signal_counts"),
+        "source_type_counts": _sum_nested_count_maps(rows, "source_type_counts"),
+        "concept_match_bucket_counts": _sum_nested_count_maps(
+            rows,
+            "concept_match_bucket_counts",
+        ),
+    }
+
+
+def _sum_nested_count_maps(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        for bucket, count in _mapping(row.get(key)).items():
+            counts[str(bucket)] += int(count or 0)
+    return dict(sorted(counts.items()))
+
+
+def _sum_count_maps(rows: list[dict[str, Any]], *, keys: tuple[str, ...]) -> dict[str, int]:
+    return {key: sum(int(row.get(key) or 0) for row in rows) for key in keys}
+
+
 def _graph_aware_rerank_inspection(rows: list[dict[str, Any]]) -> dict[str, Any]:
     diagnostics = [
         _mapping(row.get("graph_aware_rerank"))
         for row in rows
         if row.get("variant") == "graph_aware_rerank"
     ]
-    computed = [diag for diag in diagnostics if diag.get("enabled") is True and diag.get("status") == "computed"]
+    computed = [
+        diag
+        for diag in diagnostics
+        if diag.get("enabled") is True and diag.get("status") == "computed"
+    ]
     return {
         "enabled_query_count": len([diag for diag in diagnostics if diag.get("enabled") is True]),
         "computed_query_count": len(computed),
         "top_changed_count": sum(1 for diag in computed if diag.get("top_changed") is True),
         "target_rank_bucket_counts": dict(
-            Counter(
-                str(diag.get("target_rank_bucket") or "unknown")
-                for diag in computed
-            )
+            Counter(str(diag.get("target_rank_bucket") or "unknown") for diag in computed)
         ),
         "component_presence_counts": dict(
             Counter(
@@ -923,13 +1207,16 @@ def _public_graph_aware_rerank(response: dict[str, Any]) -> dict[str, Any]:
 def _public_graph_status(status: dict[str, Any]) -> dict[str, Any]:
     if not status:
         return {"attempted": False, "available": False, "status": "not_configured"}
-    return {
+    public_status = {
         "attempted": bool(status.get("attempted")),
         "available": bool(status.get("available")),
         "status": str(status.get("status") or "unknown"),
         "skip_reason": status.get("skip_reason"),
         "hit_count": int(status.get("hit_count") or 0),
     }
+    if public_status.get("skip_reason") == GRAPH_UNAVAILABLE_SKIP:
+        public_status["reproduce_command"] = GRAPH_REPRODUCE_COMMAND
+    return public_status
 
 
 def _public_meili_status(meili: dict[str, Any], *, attempted: bool) -> dict[str, Any]:
@@ -982,13 +1269,28 @@ def _empty_candidate_source_metrics(top_k: int) -> dict[str, Any]:
         "target_count": 0,
         "target_rank": None,
         "target_rank_bucket": "not_queried",
+        "target_found_bucket_by_source": {"generated": "not_queried", "top_k": "not_queried"},
+        "graph_recovered_meili_not_found_target": False,
         "top_k_recall": None,
         "top_k_recalled_count": 0,
         "generated_recalled_count": 0,
         "candidate_pool": {"generated": 0, "returned": 0},
         "source_counts": {},
+        "source_mix_counts": {"meili": 0, "graph": 0, "both": 0, "unknown": 0},
+        "graph_source_buckets": _empty_graph_source_buckets(),
         "by_source": {},
         "omits": ["raw_query", "raw_transcript", "evidence_text", "local_paths"],
+    }
+
+
+def _empty_graph_source_buckets() -> dict[str, Any]:
+    return {
+        "graph_source_count": 0,
+        "graph_match_type_counts": {},
+        "relation_type_counts": {},
+        "source_signal_counts": {},
+        "source_type_counts": {},
+        "concept_match_bucket_counts": {},
     }
 
 
@@ -1004,7 +1306,10 @@ def _diagnostic_bucket(row: dict[str, Any]) -> str:
         return "top_k_recall_miss"
     if _optional_int(row.get("target_rank")) == 1:
         return "target_top1"
-    if row.get("variant") == "graph_aware_rerank" and _mapping(row.get("graph_aware_rerank")).get("top_changed") is True:
+    if (
+        row.get("variant") == "graph_aware_rerank"
+        and _mapping(row.get("graph_aware_rerank")).get("top_changed") is True
+    ):
         return "rerank_changed_top"
     return "target_found_not_top1"
 
