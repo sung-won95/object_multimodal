@@ -1793,7 +1793,7 @@ def _run_evidence_unit_matrix_query(
             index_uid=index_uid,
             project_dir=project_dir,
             query=query_text,
-            limit=limit,
+            limit=search_limit,
             evidence_units=evidence_units_path,
             evidence_unit_rerank=evidence_unit_rerank,
             candidate_depth=search_limit,

@@ -1450,6 +1450,63 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert "hashed" in public_text
 
 
+def test_evidence_unit_quality_rerank_uses_pool_before_final_limit(tmp_path: Path) -> None:
+    fixture_dir = Path("tests/fixtures/public_retrieval_ablation_project").resolve()
+    manifest_path = tmp_path / "benchmark_matrix_pool_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "public_matrix_pool_rerank",
+                "deltas": [5, 10],
+                "suites": [
+                    {
+                        "suite_id": "public_matrix_pool",
+                        "type": "retrieval_answer_matrix",
+                        "domain": "public_synthetic",
+                        "project_dir": str(fixture_dir),
+                        "queries": str(fixture_dir / "queries.jsonl"),
+                        "index": "public_segments",
+                        "evidence_unit_index": "public_evidence_units",
+                        "limit": 1,
+                        "include_answer": False,
+                        "variants": [
+                            {
+                                "variant_id": "evidence_unit_quality_rerank",
+                                "candidate_pool_limit": 2,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = run_benchmark(
+        client=FakeMatrixClient(),
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "matrix_pool",
+        repo_root=Path.cwd(),
+    )
+
+    rows = [
+        json.loads(line)
+        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+    ]
+    row = rows[0]
+
+    assert row["variant_id"] == "evidence_unit_quality_rerank"
+    assert row["config"]["limit"] == 1
+    assert row["config"]["candidate_pool_limit"] == 2
+    assert row["search_hit_count"] == 2
+    assert row["bundle_count"] == 1
+    assert row["modality_aware_rerank"]["candidate_count"] == 2
+    assert row["modality_aware_rerank"]["top_changed"] is True
+    assert row["evidence_unit_query_planning"]["returned_candidate_count"] == 2
+    assert row["top_candidate"]["object_evidence_coverage"]["has_verified_link"] is True
+    assert row["top_candidate"]["modality_aware_rerank"]["reranked_rank"] == 1
+
+
 def test_retrieval_answer_matrix_skips_evidence_unit_variant_without_index(
     tmp_path: Path,
 ) -> None:
