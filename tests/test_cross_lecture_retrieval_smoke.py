@@ -77,6 +77,8 @@ class CrossLectureGraphSession:
                 "target_segment_id": segment_id,
                 "matched_concept": {
                     "concept_id": "concept_step_size",
+                    "canonical_label": "Step size",
+                    "aliases": ["learning rate"],
                     "label": "Step size",
                     "lecture_id": lecture_id,
                 },
@@ -92,8 +94,38 @@ class CrossLectureGraphSession:
                 ],
                 "relationships": ["USES", "CONCEPT_SOURCE_EVIDENCE"],
                 "graph_match_type": "related_concept_evidence",
+                "source_evidence_ref": {
+                    "source_signal": "transcript_statement",
+                    "source_type": "concept_graph_artifact",
+                    "evidence_unit_id": evidence_unit_id,
+                },
                 "score": 0.78,
-            }
+            },
+            {
+                "evidence_unit_id": evidence_unit_id,
+                "project_id": project_id,
+                "target_segment_id": segment_id,
+                "matched_concept": {
+                    "concept_id": "concept_step_size",
+                    "canonical_label": "Step size",
+                    "aliases": ["learning rate"],
+                    "label": "Step size",
+                    "lecture_id": lecture_id,
+                },
+                "graph_path": [
+                    f"concept:{lecture_id}:step_size",
+                    f"evidence_unit:{lecture_id}:{evidence_unit_id}",
+                    f"private_marker:{lecture_id}",
+                ],
+                "relationships": ["USES"],
+                "graph_match_type": "direct_mention",
+                "source_evidence_ref": {
+                    "source_signal": "PRIVATE RAW TRANSCRIPT says secret formula",
+                    "source_type": "/private/tmp/raw/path",
+                    "evidence_unit_id": evidence_unit_id,
+                },
+                "score": 0.71,
+            },
         ]
 
 
@@ -115,7 +147,10 @@ def test_cross_lecture_manifest_parsing_resolves_projects_and_queries(tmp_path: 
     suite = manifest.suites[0]
     assert suite.suite_id == "public_cross_lecture_smoke"
     assert set(suite.projects) == {"lecture_a", "lecture_b"}
-    assert suite.projects["lecture_a"].evidence_units == project_a / "segments" / "evidence_units.jsonl"
+    assert (
+        suite.projects["lecture_a"].evidence_units
+        == project_a / "segments" / "evidence_units.jsonl"
+    )
     assert suite.queries[0].query_id == "q_private_a"
     assert suite.queries[0].project_ref == "lecture_a"
     assert suite.queries[1].target_evidence_unit_ids == ("evu_secret_graph_b",)
@@ -185,7 +220,13 @@ def test_candidate_source_metrics_records_recall_and_contribution() -> None:
     assert metrics["target_rank"] == 2
     assert metrics["target_rank_bucket"] == "top5"
     assert metrics["top_k_recall"] is True
+    assert metrics["target_found_bucket_by_source"] == {
+        "generated": "graph_only",
+        "top_k": "graph_only",
+    }
+    assert metrics["graph_recovered_meili_not_found_target"] is True
     assert metrics["source_counts"]["meili_raw"]["unique_candidates"] == 2
+    assert metrics["source_mix_counts"] == {"meili": 0, "graph": 0, "both": 0, "unknown": 0}
     graph_metrics = metrics["by_source"]["graph_traversal"]
     assert graph_metrics["top_k_recalled_count"] == 1
     assert graph_metrics["rank_bucket_counts"] == {"top5": 1}
@@ -217,8 +258,7 @@ def test_cross_lecture_smoke_writes_public_safe_variant_report(tmp_path: Path) -
     )
 
     rows = [
-        json.loads(line)
-        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
     ]
     assert len(rows) == 8
     assert {row["variant"] for row in rows} == {
@@ -230,16 +270,57 @@ def test_cross_lecture_smoke_writes_public_safe_variant_report(tmp_path: Path) -
     graph_only = next(row for row in rows if row["variant"] == "graph_only")
     assert graph_only["top_k_recall"] is True
     assert graph_only["target_rank"] == 1
-    assert graph_only["candidate_source_metrics"]["by_source"]["graph_traversal"][
-        "top_k_recalled_count"
-    ] == 1
+    assert graph_only["candidate_source_mix"]["graph"] == 1
+    assert graph_only["target_found_bucket_by_source"]["generated"] == "graph_only"
+    assert graph_only["graph_recovered_meili_not_found_target"] is False
+    assert (
+        graph_only["candidate_source_metrics"]["by_source"]["graph_traversal"][
+            "top_k_recalled_count"
+        ]
+        == 1
+    )
+    assert graph_only["graph_source_buckets"]["relation_type_counts"]["uses"] == 2
+    assert graph_only["graph_source_buckets"]["source_signal_counts"]["transcript_statement"] == 1
+    assert graph_only["graph_source_buckets"]["source_signal_counts"]["free_text_redacted"] == 1
+    assert graph_only["graph_source_buckets"]["source_type_counts"]["concept_graph_artifact"] == 1
+    assert graph_only["graph_source_buckets"]["source_type_counts"]["path_like_redacted"] == 1
+    assert graph_only["graph_source_buckets"]["concept_match_bucket_counts"]["canonical_match"] == 2
+    meili_graph = next(row for row in rows if row["variant"] == "meili_graph")
+    assert meili_graph["target_found_bucket_by_source"]["generated"] == "graph_only"
+    assert meili_graph["graph_recovered_meili_not_found_target"] is True
+    assert meili_graph["candidate_source_mix"] == {
+        "meili": 1,
+        "graph": 1,
+        "both": 0,
+        "unknown": 0,
+    }
     graph_rerank = next(row for row in rows if row["variant"] == "graph_aware_rerank")
     assert graph_rerank["graph_aware_rerank"]["enabled"] is True
     assert graph_rerank["graph_aware_rerank"]["top_changed"] is True
     payload = json.loads(run.metrics_path.read_text(encoding="utf-8"))
-    assert payload["source_recall_by_variant"]["graph_only"]["graph_traversal"][
-        "top_k_recalled_count"
-    ] == 2
+    assert (
+        payload["source_recall_by_variant"]["graph_only"]["graph_traversal"]["top_k_recalled_count"]
+        == 2
+    )
+    ablation = payload["graph_candidate_ablation"]
+    assert ablation["meili_graph"]["graph_recovered_meili_not_found_target_count"] == 2
+    assert ablation["graph_only"]["graph_recovered_meili_not_found_target_count"] == 0
+    assert ablation["graph_only"]["candidate_source_mix"]["graph"] == 2
+    assert ablation["graph_only"]["graph_source_buckets"]["relation_type_counts"]["uses"] == 4
+    assert (
+        ablation["graph_only"]["graph_source_buckets"]["source_signal_counts"]["free_text_redacted"]
+        == 2
+    )
+    assert (
+        ablation["graph_only"]["graph_source_buckets"]["source_type_counts"]["path_like_redacted"]
+        == 2
+    )
+    assert (
+        ablation["graph_only"]["graph_source_buckets"]["concept_match_bucket_counts"][
+            "canonical_match"
+        ]
+        == 4
+    )
     assert payload["rerank_diagnostics"]["top_changed_count"] == 2
 
     public_text = _public_text(run)
@@ -249,10 +330,19 @@ def test_cross_lecture_smoke_writes_public_safe_variant_report(tmp_path: Path) -
         "SECRET meili evidence",
         "evu_secret_graph_a",
         "seg_secret_graph_a",
+        "PRIVATE RAW TRANSCRIPT",
+        "private_raw_transcript_says_secret_formula",
+        "/private/tmp",
+        "private_tmp_raw_path",
         str(project_a),
         str(project_b),
     ]:
         assert sensitive not in public_text
+    for row in rows:
+        bucket_keys = json.dumps(row.get("graph_source_buckets", {}), ensure_ascii=False)
+        assert "private_raw_transcript_says_secret_formula" not in bucket_keys
+        assert "private_tmp_raw_path" not in bucket_keys
+        assert "/private/tmp" not in bucket_keys
 
 
 def test_cross_lecture_smoke_separates_meili_and_graph_unavailable_skips(
@@ -275,16 +365,25 @@ def test_cross_lecture_smoke_separates_meili_and_graph_unavailable_skips(
     )
 
     rows = [
-        json.loads(line)
-        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
     ]
     by_variant = {row["variant"]: row for row in rows}
     assert by_variant["meili_only"]["skip_reason"] == MEILI_UNAVAILABLE_SKIP
     assert by_variant["graph_only"]["skip_reason"] == GRAPH_UNAVAILABLE_SKIP
     assert by_variant["meili_graph"]["skip_reason"] == MEILI_UNAVAILABLE_SKIP
+    assert by_variant["graph_only"]["graph"]["reproduce_command"] == (
+        "PYTHONPATH=src python -m oarag cross-lecture-retrieval-smoke "
+        "--manifest <manifest.json> --output-dir <public-output-dir>"
+    )
     payload = json.loads(run.metrics_path.read_text(encoding="utf-8"))
     assert payload["meili_skip_reasons"][MEILI_UNAVAILABLE_SKIP] == 3
     assert payload["graph_skip_reasons"][GRAPH_UNAVAILABLE_SKIP] == 1
+    assert payload["graph_candidate_ablation"]["graph_only"][
+        "graph_unavailable_reproduce_command"
+    ] == (
+        "PYTHONPATH=src python -m oarag cross-lecture-retrieval-smoke "
+        "--manifest <manifest.json> --output-dir <public-output-dir>"
+    )
 
 
 def test_cross_lecture_retrieval_smoke_cli_help(capsys: pytest.CaptureFixture[str]) -> None:

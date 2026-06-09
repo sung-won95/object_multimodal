@@ -133,9 +133,7 @@ def test_graph_only_target_recall_fixture_records_source_recall(tmp_path: Path) 
 
     response = query_project_dual_candidates(
         client=QueryAwareEvidenceClient(
-            {
-                "Where is the step size diagram?": [_hit("evu_meili_only", "seg_meili", score=0.9)]
-            }
+            {"Where is the step size diagram?": [_hit("evu_meili_only", "seg_meili", score=0.9)]}
         ),
         index_uid="sample_evidence_units",
         project_dir=project_dir,
@@ -158,9 +156,7 @@ def test_graph_only_target_recall_fixture_records_source_recall(tmp_path: Path) 
     )
     recall = response["diagnostics"]["source_recall"]["by_source"]
     assert MEILI_RAW_SOURCE not in recall
-    assert recall[GRAPH_TRAVERSAL_SOURCE]["recalled_targets"] == [
-        "evidence_unit:evu_graph_target"
-    ]
+    assert recall[GRAPH_TRAVERSAL_SOURCE]["recalled_targets"] == ["evidence_unit:evu_graph_target"]
     assert response["retrieval_context"]["graph"]["status"] == "hit"
     assert graph_session.calls[0]["parameters"]["concept_terms"][0] == "step size diagram"
 
@@ -307,9 +303,12 @@ def test_graph_only_can_skip_meili_candidate_generation(tmp_path: Path) -> None:
         GRAPH_TRAVERSAL_SOURCE
     ]
     assert response["retrieval_context"]["meilisearch"]["raw"]["skip_reason"] == "meili_disabled"
-    assert response["diagnostics"]["source_recall"]["by_source"][GRAPH_TRAVERSAL_SOURCE][
-        "recalled_count"
-    ] == 1
+    assert (
+        response["diagnostics"]["source_recall"]["by_source"][GRAPH_TRAVERSAL_SOURCE][
+            "recalled_count"
+        ]
+        == 1
+    )
 
 
 def test_serialize_graph_candidate_record_keeps_public_safe_graph_metadata() -> None:
@@ -318,7 +317,9 @@ def test_serialize_graph_candidate_record_keeps_public_safe_graph_metadata() -> 
             "evidence_unit_id": "evu_public",
             "matched_concept": {
                 "concept_id": "concept_gradient",
+                "canonical_label": "Gradient",
                 "label": "Gradient",
+                "aliases": ["slope direction"],
                 "description": "raw private description omitted",
                 "metadata": {"raw": "private"},
             },
@@ -327,13 +328,16 @@ def test_serialize_graph_candidate_record_keeps_public_safe_graph_metadata() -> 
             "score": "0.8",
         },
         rank=1,
+        concept_terms=["slope direction"],
     )
 
     assert serialized["candidate"]["evidence_unit_id"] == "evu_public"
     assert serialized["source"]["matched_concept"] == {
         "concept_id": "concept_gradient",
+        "canonical_label": "Gradient",
         "label": "Gradient",
     }
+    assert serialized["source"]["concept_match_bucket"] == "alias_match"
     rendered = json.dumps(serialized, ensure_ascii=False)
     assert "raw private description" not in rendered
     assert "metadata" not in rendered
