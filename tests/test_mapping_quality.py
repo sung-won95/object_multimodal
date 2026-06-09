@@ -120,6 +120,58 @@ def test_mapping_quality_report_cli_subcommand_parses() -> None:
     assert args.csv is True
 
 
+def test_mapping_quality_link_status_normalization_and_dedupes_by_link_id(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "projects" / "status_regression"
+    (project_dir / "segments").mkdir(parents=True)
+    (project_dir / "manifests").mkdir(parents=True)
+    (project_dir / "manifests" / "project_manifest.json").write_text(
+        json.dumps(
+            {
+                "project_id": "public_status_regression",
+                "artifacts": {"evidence_units": "segments/evidence_units.jsonl"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        project_dir / "segments" / "evidence_units.jsonl",
+        [
+            _status_evidence_unit(
+                "evu_status_timestamp",
+                {"link_status_timestamp_raw": "timestamp_fallback"},
+            ),
+            _status_evidence_unit("evu_status_human", {"link_status_human_raw": "human_gold"}),
+            _status_evidence_unit("evu_status_vlm", {"link_status_vlm_raw": "vlm_verified"}),
+            _status_evidence_unit(
+                "evu_status_strict",
+                {"link_status_strict_raw": "strict_verified"},
+            ),
+            _status_evidence_unit(
+                "evu_status_duplicate",
+                {"link_status_duplicate_raw": "verified"},
+                verified_ids=["link_status_duplicate_raw"],
+                candidate_ids=["link_status_duplicate_raw", "link_status_extra_candidate_raw"],
+            ),
+        ],
+    )
+
+    run = generate_mapping_quality_report(
+        project_dirs=[project_dir],
+        output_dir=tmp_path / "report",
+    )
+
+    distribution = run.payload["evidence_quality"]["entity_link_status_distribution"]
+    assert distribution["timestamp-only"] == 1
+    assert distribution["verified"] == 4
+    assert distribution["candidate"] == 1
+
+    rendered = run.metrics_path.read_text(encoding="utf-8")
+    assert "link_status_duplicate_raw" not in rendered
+    assert "link_status_extra_candidate_raw" not in rendered
+
+
 def _write_project_a(project_dir: Path) -> None:
     (project_dir / "segments").mkdir(parents=True)
     (project_dir / "manifests").mkdir(parents=True)
@@ -408,6 +460,30 @@ def _relation(
         "evidence_unit_ids": ["evu_secret_verified"],
         "source_signals": ["transcript_statement"],
         "confidence": 0.8,
+    }
+
+
+def _status_evidence_unit(
+    evidence_unit_id: str,
+    statuses: dict[str, str],
+    *,
+    verified_ids: list[str] | None = None,
+    candidate_ids: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "evidence_unit_id": evidence_unit_id,
+        "lecture_id": "public_status_lecture",
+        "start_time": 0.0,
+        "end_time": 10.0,
+        "candidate_entity_link_statuses": statuses,
+        "verified_entity_link_ids": verified_ids or [],
+        "candidate_entity_link_ids": candidate_ids or [],
+        "source_quality": {
+            "verified_object_alignment": {
+                "has_verified_object_alignment": False,
+                "timestamp_fallback_counted_as_verified": False,
+            }
+        },
     }
 
 

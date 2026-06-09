@@ -44,8 +44,8 @@ TEXT_EXCLUSION_NOTICE = (
     "and raw candidate identifiers are excluded from this public-safe report."
 )
 
-TIMESTAMP_ONLY_STATUSES = {"timestamp-only", "timestamp_only", "timestamp_fallback"}
-VERIFIED_STATUSES = {"verified", "strict_verified", "human_gold", "vlm_verified"}
+TIMESTAMP_ONLY_STATUSES = {"timestamp-only", "timestamp-fallback"}
+VERIFIED_STATUSES = {"verified", "strict-verified", "human-gold", "vlm-verified"}
 RELATION_PREFIX = "GLOBAL_"
 
 
@@ -700,20 +700,41 @@ def _global_concept_graph_metrics(document: Mapping[str, Any]) -> dict[str, Any]
 
 
 def _candidate_statuses(row: Mapping[str, Any]) -> list[str]:
-    statuses = []
+    statuses_by_link_id: dict[str, str] = {}
     explicit = row.get("candidate_entity_link_statuses")
     if isinstance(explicit, Mapping):
-        statuses.extend(_normalized_link_status(value) for value in explicit.values())
+        for link_id, status in explicit.items():
+            if link_id:
+                statuses_by_link_id[str(link_id)] = _merge_link_status(
+                    statuses_by_link_id.get(str(link_id)),
+                    _normalized_link_status(status),
+                )
     for link_id in _list(row.get("verified_entity_link_ids")):
         if link_id:
-            statuses.append("verified")
+            statuses_by_link_id[str(link_id)] = _merge_link_status(
+                statuses_by_link_id.get(str(link_id)),
+                "verified",
+            )
     for link_id in _list(row.get("candidate_entity_link_ids")):
-        if link_id and not statuses:
-            statuses.append("candidate")
+        if link_id:
+            statuses_by_link_id[str(link_id)] = _merge_link_status(
+                statuses_by_link_id.get(str(link_id)),
+                "candidate",
+            )
+    if statuses_by_link_id:
+        return [statuses_by_link_id[link_id] for link_id in sorted(statuses_by_link_id)]
+
     alignment_status = _normalized_link_status(row.get("alignment_status"))
-    if alignment_status in {"verified", "candidate", "timestamp-only"} and alignment_status not in statuses:
-        statuses.append(alignment_status)
-    return statuses
+    if alignment_status in {"verified", "candidate", "timestamp-only"}:
+        return [alignment_status]
+    return []
+
+
+def _merge_link_status(current: str | None, incoming: str) -> str:
+    priority = {"candidate": 0, "transcript-only": 0, "timestamp-only": 1, "verified": 2}
+    if current is None:
+        return incoming
+    return incoming if priority.get(incoming, 0) > priority.get(current, 0) else current
 
 
 def _link_status(row: Mapping[str, Any]) -> str:
@@ -734,8 +755,8 @@ def _normalized_link_status(value: Any) -> str:
         return "timestamp-only"
     if status in VERIFIED_STATUSES:
         return "verified"
-    if status in {"candidate", "transcript-only", "transcript_only"}:
-        return status.replace("_", "-")
+    if status in {"candidate", "transcript-only"}:
+        return status
     return "candidate"
 
 
