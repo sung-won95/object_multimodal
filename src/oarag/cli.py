@@ -81,7 +81,10 @@ from oarag.retrieval.project_index import (
 )
 from oarag.retrieval.evidence_units import build_project_evidence_units, build_project_visual_states
 from oarag.retrieval.dual_candidates import query_project_dual_candidates
-from oarag.retrieval.evidence_unit_index import query_project_evidence_units
+from oarag.retrieval.evidence_unit_index import (
+    DEFAULT_EVIDENCE_UNIT_FUSION,
+    query_project_evidence_units,
+)
 from oarag.core.schemas import SearchCandidate
 from oarag.ingestion.stt import DEFAULT_MLX_WHISPER_MODEL
 from oarag.vision.visual_entities import DEFAULT_VISUAL_ENTITY_BACKEND, extract_visual_entities
@@ -1280,6 +1283,32 @@ def build_parser() -> argparse.ArgumentParser:
     location.add_argument("--project-dir", type=Path, help="Project artifact directory")
     query_evidence_units.add_argument("--query", required=True)
     query_evidence_units.add_argument("--limit", type=int, default=5)
+    query_evidence_units.add_argument(
+        "--candidate-depth",
+        type=int,
+        help="Default Meilisearch candidate depth per evidence-unit query variant.",
+    )
+    query_evidence_units.add_argument(
+        "--raw-candidate-depth",
+        type=int,
+        help="Meilisearch candidate depth for the raw query variant.",
+    )
+    query_evidence_units.add_argument(
+        "--broad-candidate-depth",
+        type=int,
+        help="Meilisearch candidate depth for the broad query variant.",
+    )
+    query_evidence_units.add_argument(
+        "--concept-candidate-depth",
+        type=int,
+        help="Meilisearch candidate depth for the concept query variant.",
+    )
+    query_evidence_units.add_argument(
+        "--candidate-fusion",
+        default=DEFAULT_EVIDENCE_UNIT_FUSION,
+        choices=["rrf", "reciprocal_rank_fusion", "round_robin"],
+        help="Deterministic merge strategy for evidence-unit query variants.",
+    )
     query_evidence_units.add_argument(
         "--evidence-units",
         type=Path,
@@ -2660,6 +2689,11 @@ def cmd_query_project_evidence_units(args: argparse.Namespace) -> None:
         query=args.query,
         limit=args.limit,
         evidence_units=args.evidence_units,
+        candidate_depth=args.candidate_depth,
+        raw_candidate_depth=args.raw_candidate_depth,
+        broad_candidate_depth=args.broad_candidate_depth,
+        concept_candidate_depth=args.concept_candidate_depth,
+        candidate_fusion=args.candidate_fusion,
     )
     if args.output is not None:
         output_path = args.output
