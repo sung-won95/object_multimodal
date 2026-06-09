@@ -494,6 +494,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional concept_graph JSONL path. Relative paths are resolved from project dir.",
     )
     build_evidence_units.add_argument(
+        "--domain-lexicon",
+        type=Path,
+        help="Optional domain_lexicon JSON path. Relative paths are resolved from project dir.",
+    )
+    build_evidence_units.add_argument(
         "--output",
         type=Path,
         help="Output evidence_units JSONL path. Relative paths are resolved from project dir.",
@@ -2277,6 +2282,7 @@ def cmd_build_project_evidence_units(args: argparse.Namespace) -> None:
         visual_entities=args.visual_entities,
         entity_links=args.entity_links,
         concept_graph=args.concept_graph,
+        domain_lexicon=args.domain_lexicon,
         manifest_path=args.manifest,
         window_seconds=args.window_seconds,
         neighbor_count=args.neighbor_count,

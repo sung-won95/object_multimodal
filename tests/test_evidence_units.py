@@ -145,6 +145,66 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert manifest["counts"]["evidence_units"] == 3
 
 
+def test_build_project_evidence_units_derives_public_concept_fields_from_text_and_lexicon(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "concept_search_project"
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            _segment(
+                "seg_lexicon",
+                10.0,
+                14.0,
+                "Gradient-descent methods minimize loss functions with adaptive step sizes.",
+            ),
+            _segment(
+                "seg_phrase",
+                20.0,
+                24.0,
+                "This variance reduction trick stabilizes noisy estimates.",
+            ),
+        ],
+    )
+    (project_dir / "domain_lexicon.json").parent.mkdir(parents=True, exist_ok=True)
+    (project_dir / "domain_lexicon.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "aliases": {
+                    "gradient descent": ["gradient-descent", "gd"],
+                    "loss function": ["objective function"],
+                    "learning rate": ["step size", "step-size", "lr"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = build_project_evidence_units(
+        project_dir=project_dir,
+        previous_neighbor_count=0,
+        next_neighbor_count=0,
+    )
+
+    rows = _read_jsonl(project_dir / "segments" / "evidence_units.jsonl")
+    lexicon_row = next(row for row in rows if row["target_segment_id"] == "seg_lexicon")
+    phrase_row = next(row for row in rows if row["target_segment_id"] == "seg_phrase")
+    assert "gradient descent" in lexicon_row["concept_labels"]
+    assert "loss function" in lexicon_row["concept_labels"]
+    assert "learning rate" in lexicon_row["concept_labels"]
+    assert "gd" in lexicon_row["concept_aliases"]
+    assert "step-size" in lexicon_row["concept_aliases"]
+    assert "learning rate" in lexicon_row["concept_search_text"]
+    assert "variance reduction" in phrase_row["concept_search_text"]
+    assert phrase_row["source_quality"]["has_concept"] is True
+    assert summary["counts"]["domain_lexicon_canonical_terms_total"] == 3
+    assert summary["counts"]["units_with_concept_search_text"] == 2
+    assert summary["concept_field_coverage"]["evidence_units_with_concept_labels"] == 2
+    assert summary["concept_field_coverage"]["evidence_units_with_concept_aliases"] == 1
+    assert summary["search_field_coverage"]["field_unit_counts"]["concept_search_text"] == 2
+
+
 def test_build_project_evidence_units_reports_link_signal_and_verified_source_aggregates(
     tmp_path: Path,
 ) -> None:

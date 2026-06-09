@@ -153,6 +153,14 @@ class DomainLexicon:
                     seen.add(normalized_alias)
         return additions
 
+    def matched_canonical_terms(self, text: str) -> dict[str, tuple[str, ...]]:
+        if not self.enabled:
+            return {}
+        return {
+            canonical: tuple(sorted(match["matched_terms"]))
+            for canonical, match in _canonical_matches(text, self.alias_to_canonical).items()
+        }
+
     def query_expansion_metadata(self, query: str) -> dict[str, Any]:
         return self.expand_query_result(query).metadata()
 
@@ -309,12 +317,12 @@ def _alias_match(query: str, alias: str) -> tuple[int, str] | None:
 
     for match in re.finditer(rf"[{TOKEN_CHARS}]+", query.casefold()):
         token = normalize_term(match.group(0))
-        if token == alias:
+        if _normalized_alias_equivalent(token, alias):
             return match.start(), token
         for suffix in KOREAN_PARTICLE_SUFFIXES:
             if token.endswith(suffix) and len(token) > len(suffix):
                 stem = token[: -len(suffix)]
-                if stem == alias:
+                if _normalized_alias_equivalent(stem, alias):
                     return match.start(), token
 
     if _should_try_folded_match(normalized_query, alias):
@@ -331,11 +339,11 @@ def _contains_surface_alias(query: str, alias: str) -> bool:
         return True
     for match in re.finditer(rf"[{TOKEN_CHARS}]+", query.casefold()):
         token = normalize_term(match.group(0))
-        if token == alias:
+        if _normalized_alias_equivalent(token, alias):
             return True
         for suffix in KOREAN_PARTICLE_SUFFIXES:
             if token.endswith(suffix) and len(token) > len(suffix):
-                if token[: -len(suffix)] == alias:
+                if _normalized_alias_equivalent(token[: -len(suffix)], alias):
                     return True
     return False
 
@@ -359,6 +367,28 @@ def _find_normalized_term(normalized_query: str, term: str) -> int | None:
 
 def _fold_separators(value: str) -> str:
     return re.sub(r"[\s_-]+", "", value)
+
+
+def _normalized_alias_equivalent(value: str, alias: str) -> bool:
+    if value == alias:
+        return True
+    return bool(_english_singular_candidates(value) & _english_singular_candidates(alias))
+
+
+def _english_singular_candidates(value: str) -> set[str]:
+    candidates = {value}
+    if re.fullmatch(r"[a-z][a-z0-9-]*", value):
+        if value.endswith("ies") and len(value) > 4:
+            candidates.add(f"{value[:-3]}y")
+        if re.search(r"(ches|shes|xes|zes|ses)$", value) and len(value) > 4:
+            candidates.add(value[:-2])
+        if (
+            value.endswith("s")
+            and len(value) > 3
+            and not re.search(r"(ss|us|is)$", value)
+        ):
+            candidates.add(value[:-1])
+    return candidates
 
 
 def _should_try_folded_match(normalized_query: str, alias: str) -> bool:

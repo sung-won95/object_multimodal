@@ -160,6 +160,31 @@ def test_domain_lexicon_expands_korean_english_and_numeric_variants(tmp_path: Pa
     ]
 
 
+def test_domain_lexicon_matches_plural_aliases_without_overstemming(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "domain_lexicon.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "aliases": {
+                    "gradient": ["slope"],
+                    "loss": ["objective"],
+                    "class": ["category"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    lexicon = load_domain_lexicon(project_dir=project_dir)
+
+    assert lexicon.matched_canonical_terms("gradients point downhill") == {
+        "gradient": ("gradients",)
+    }
+    assert lexicon.matched_canonical_terms("los claz") == {}
+
+
 def test_domain_lexicon_rejects_conflicting_aliases(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
