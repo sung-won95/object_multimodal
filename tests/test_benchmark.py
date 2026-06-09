@@ -1200,6 +1200,41 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["evidence_unit_verified"][
         "verified_link_source_counts"
     ]["vlm_verifier"] == 1
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "verified_alignment_coverage"
+    ]["candidate_only_visual_support_ratio"] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "candidate_only_visual_support_ratio"
+    ] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "verified_alignment_coverage"
+    ]["missing_reason_counts"] == {"ocr_only_without_verified_link": 1}
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "verified_alignment_coverage"
+    ]["verified_object_alignment_ratio"] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "verified_alignment_coverage"
+    ]["generated_reason_counts"] == {
+        "explicit_verified_flag": 1,
+        "explicit_verified_status": 1,
+        "vlm_verifier": 1,
+    }
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "verified_alignment_coverage"
+    ]["paper_claim_eligibility"] == {
+        "candidate_visual_support_eligible": False,
+        "verified_object_alignment_eligible_units": 1,
+        "timestamp_fallback_counted_as_verified_count": 0,
+        "timestamp_fallback_eligible": False,
+    }
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "failure_stage_reason_counts"
+    ] == {"ok:grounded_expected_citation": 1}
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "verified_alignment_coverage"
+    ]["evidence_unit_verified_failure_stage_reason_counts"] == {
+        "ok:grounded_expected_citation": 1
+    }
     assert suite["variant_metrics"]["rerank"]["grounded_answer_ratio"] == 1.0
     assert suite["variant_metrics"]["window"]["answer_citation_precision"] == 1.0
     assert suite["variant_metrics"]["window"]["answer_citation_recall"] == 1.0
@@ -1280,6 +1315,8 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         "verified_visual_citation"
     ] is False
     assert evidence_candidate_row["verified_object_alignment"]["verified_link_count"] == 0
+    assert evidence_candidate_row["candidate_visual_support"]["paper_claim_eligible"] is False
+    assert evidence_candidate_row["verified_object_alignment"]["paper_claim_eligible"] is False
     assert evidence_candidate_row["candidate_visual_support"]["candidate_link_signal_counts"][
         "temporal_overlap"
     ] == 1
@@ -1305,6 +1342,8 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         "answer_uses_verified_visual_evidence"
     ] is False
     assert evidence_verified_row["verified_object_alignment"]["verified_link_count"] == 1
+    assert evidence_verified_row["candidate_visual_support"]["paper_claim_eligible"] is False
+    assert evidence_verified_row["verified_object_alignment"]["paper_claim_eligible"] is True
     assert evidence_verified_row["top_candidate"]["evidence_unit_citation"][
         "verified_visual_citation"
     ] is True
@@ -1341,12 +1380,19 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert "answer_uses_verified_visual_evidence_count" in metrics_csv
     assert "answer_uses_candidate_only_visual_evidence_count" in metrics_csv
     assert "verified_object_alignment_ratio" in metrics_csv
+    assert "candidate_only_visual_support_ratio" in metrics_csv
+    assert "verified_alignment_missing_reason_counts" in metrics_csv
+    assert "evidence_unit_verified_failure_stage_reason_counts" in metrics_csv
+    assert "ocr_only_without_verified_link" in metrics_csv
     assert "abstention_ratio" in metrics_csv
     assert "answer_failure_reason_counts" in metrics_csv
     summary = run.summary_path.read_text(encoding="utf-8")
     assert "Retrieval/Answer Matrix" in summary
+    assert "Verified Object Alignment Coverage" in summary
     assert "candidate support" in summary
     assert "verified align" in summary
+    assert "ocr_only_without_verified_link" in summary
+    assert "ok:grounded_expected_citation" in summary
     assert "primary failures" in summary
     assert "deterministic expected hint overlap" in summary
 
@@ -1427,6 +1473,10 @@ def test_retrieval_answer_matrix_skips_evidence_unit_variant_without_index(
     assert variant["hit_at_10s"] == 0.0
     assert variant["verified_object_alignment_ratio"] == 0.0
     assert variant["candidate_visual_support_ratio"] == 0.0
+    assert variant["failure_stage_reason_counts"] == {"skip:missing_evidence_unit_index": 1}
+    assert variant["verified_alignment_coverage"]["missing_reason_counts"] == {
+        "skip:missing_evidence_unit_index": 1
+    }
     assert suite["skip_reason_counts"] == {"missing_evidence_unit_index": 1}
 
     row = json.loads(run.query_results_path.read_text(encoding="utf-8").splitlines()[0])
@@ -1558,13 +1608,23 @@ def test_retrieval_answer_matrix_reports_timestamp_fallback_as_candidate_not_ver
     assert variant["timestamp_fallback_counted_as_verified_count"] == 0
     assert variant["candidate_link_signal_counts"]["timestamp_fallback"] == 1
     assert variant["verified_link_source_counts"]["explicit_verified_flag"] == 0
+    assert variant["verified_alignment_coverage"]["candidate_only_visual_support_ratio"] == 1.0
+    assert variant["verified_alignment_coverage"]["verified_object_alignment_ratio"] == 0.0
+    assert variant["verified_alignment_coverage"]["missing_reason_counts"] == {
+        "timestamp_fallback_only_not_verified": 1
+    }
+    assert variant["verified_alignment_coverage"]["paper_claim_eligibility"][
+        "timestamp_fallback_counted_as_verified_count"
+    ] == 0
 
     row = json.loads(run.query_results_path.read_text(encoding="utf-8").splitlines()[0])
     assert row["candidate_visual_support"]["timestamp_fallback_link_count"] == 1
+    assert row["candidate_visual_support"]["paper_claim_eligible"] is False
     assert row["candidate_visual_support"]["candidate_link_signal_counts"]["timestamp_fallback"] == 1
     assert row["verified_object_alignment"]["has_verified_object_alignment"] is False
     assert row["verified_object_alignment"]["verified_link_count"] == 0
     assert row["verified_object_alignment"]["timestamp_fallback_counted_as_verified"] is False
+    assert row["verified_object_alignment"]["paper_claim_eligible"] is False
     assert row["top_candidate"]["verified_object_alignment"]["verified_link_count"] == 0
 
     public_text = "\n".join(

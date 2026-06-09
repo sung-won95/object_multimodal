@@ -63,6 +63,7 @@ DEFAULT_ABLATION_MODES = [
 ]
 MATRIX_SCHEMA_VERSION = "retrieval-answer-ablation-matrix-v1"
 MATRIX_LINK_DIAGNOSTICS_SCHEMA_VERSION = "retrieval-answer-object-link-diagnostics-public-v1"
+VERIFIED_ALIGNMENT_COVERAGE_SCHEMA_VERSION = "verified-object-alignment-coverage-public-v1"
 ANSWER_MATRIX_SCHEMA_VERSION = "retrieval-answer-citation-public-aggregate-v1"
 SEMANTIC_SMOKE_SCHEMA_VERSION = "semantic-live-smoke-aggregate-v1"
 LOCAL_HASH_BENCHMARK_WARNING = (
@@ -77,6 +78,11 @@ MATRIX_LINK_DIAGNOSTICS_PUBLIC_NOTE = (
     "candidate_visual_support is candidate/fallback visual evidence for retrieval "
     "inspection. verified_object_alignment requires explicit verified link metadata; "
     "timestamp fallback is not counted as verified object alignment."
+)
+VERIFIED_ALIGNMENT_COVERAGE_PUBLIC_NOTE = (
+    "Verified coverage is aggregate-only and public-safe. candidate_visual_support is "
+    "reported separately from verified_object_alignment; timestamp fallback never counts "
+    "as verified alignment or paper-claim eligible support."
 )
 CANDIDATE_LINK_SIGNAL_KEYS = (
     "temporal_overlap",
@@ -633,6 +639,7 @@ def run_retrieval_answer_matrix_suite(
         "mean_unsupported_claim_count",
         "unsupported_claim_ratio",
         "candidate_visual_support_ratio",
+        "candidate_only_visual_support_ratio",
         "verified_object_alignment_ratio",
         "visual_state_coverage_ratio",
         "visual_entity_coverage_ratio",
@@ -2340,9 +2347,14 @@ def _matrix_variant_metrics(
         "warning_ratio": _ratio(rows, "warning_count"),
         "source_counts": _source_counts(rows),
         "answer_failure_reason_counts": _answer_failure_reason_counts(rows),
+        "failure_stage_reason_counts": _failure_stage_reason_counts(rows),
         "answer_policy_reason_counts": _answer_policy_reason_counts(rows),
         "answer_grounding_gap_counts": _answer_grounding_gap_counts(rows),
+        "verified_alignment_coverage": _verified_alignment_coverage(rows),
     }
+    metric["candidate_only_visual_support_ratio"] = _mapping(
+        metric.get("verified_alignment_coverage")
+    ).get("candidate_only_visual_support_ratio")
     for delta in deltas:
         metric[f"hit_at_{delta}s"] = _ratio_hit(rows, str(delta))
     return metric
@@ -4200,6 +4212,46 @@ def _answer_failure_reason_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _failure_stage_reason(row: dict[str, Any]) -> str:
+    if row.get("status") == "skipped":
+        return f"skip:{_public_skip_reason(row.get('skip_reason'))}"
+    target = _mapping(row.get("target_rank_diagnostics"))
+    if int(row.get("bundle_count") or 0) <= 0:
+        return "retrieval:no_candidate_bundles"
+    if target.get("target_configured") is True and target.get("found_in_top_k") is False:
+        return "retrieval:target_not_found"
+    answer = row.get("answer")
+    grounding = row.get("answer_grounding")
+    if not isinstance(answer, dict) or not answer.get("enabled"):
+        return "grounding:answer_disabled"
+    if not isinstance(grounding, dict) or not grounding.get("enabled"):
+        return "grounding:answer_disabled"
+    if not grounding.get("expected_available"):
+        return "grounding:expected_hint_missing"
+    if grounding.get("expected_citation_hit") is False:
+        return "grounding:expected_citation_miss"
+    if answer.get("insufficient_evidence") is True:
+        return "grounding:insufficient_evidence"
+    if not int(answer.get("citation_count") or 0):
+        return "grounding:citation_missing"
+    unsupported = _optional_float(grounding.get("unsupported_claim_count"))
+    if unsupported is not None and unsupported > 0:
+        return "grounding:unsupported_claims"
+    return "ok:grounded_expected_citation"
+
+
+def _failure_stage_reason_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(_failure_stage_reason(row) for row in rows)
+    return dict(sorted(counts.items()))
+
+
+def _public_skip_reason(value: Any) -> str:
+    reason = str(value or "unknown").strip().casefold()
+    if reason.startswith("evidence_unit_query_failed:"):
+        return "evidence_unit_query_failed"
+    return reason or "unknown"
+
+
 def _answer_grounding_gap_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts: Counter[str] = Counter()
     for row in rows:
@@ -4606,6 +4658,109 @@ def _object_evidence_coverage_counts(rows: list[dict[str, Any]]) -> dict[str, in
         counts["visual_description_count"] += int(coverage.get("visual_description_count") or 0)
         counts["detected_text_count"] += int(coverage.get("detected_text_count") or 0)
     return counts
+
+
+def _verified_alignment_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    generated_reason_counts: Counter[str] = Counter()
+    missing_reason_counts: Counter[str] = Counter()
+    failure_stage_reason_counts: Counter[str] = Counter()
+    candidate_support_units = 0
+    candidate_only_support_units = 0
+    verified_units = 0
+    timestamp_fallback_units = 0
+    timestamp_fallback_counted_as_verified = 0
+    verified_links = 0
+    candidate_links = 0
+    timestamp_fallback_links = 0
+    for row in rows:
+        support = _mapping(row.get("candidate_visual_support"))
+        verified = _mapping(row.get("verified_object_alignment"))
+        has_candidate_support = support.get("has_candidate_visual_support") is True
+        has_verified = verified.get("has_verified_object_alignment") is True
+        if has_candidate_support:
+            candidate_support_units += 1
+        if has_verified:
+            verified_units += 1
+            generated_reason_counts.update(_verified_alignment_generated_reasons(verified))
+        else:
+            missing_reason_counts[_verified_alignment_missing_reason(row)] += 1
+        if has_candidate_support and not has_verified:
+            candidate_only_support_units += 1
+        if support.get("timestamp_fallback_link_count"):
+            timestamp_fallback_units += 1
+        if verified.get("timestamp_fallback_counted_as_verified") is True:
+            timestamp_fallback_counted_as_verified += 1
+        verified_links += int(verified.get("verified_link_count") or 0)
+        candidate_links += int(support.get("candidate_link_count") or 0)
+        timestamp_fallback_links += int(support.get("timestamp_fallback_link_count") or 0)
+        if row.get("variant_id") == "evidence_unit_verified":
+            failure_stage_reason_counts[_failure_stage_reason(row)] += 1
+
+    return {
+        "schema_version": VERIFIED_ALIGNMENT_COVERAGE_SCHEMA_VERSION,
+        "query_count": len(rows),
+        "candidate_visual_support_units": candidate_support_units,
+        "candidate_only_visual_support_units": candidate_only_support_units,
+        "verified_object_alignment_units": verified_units,
+        "timestamp_fallback_units": timestamp_fallback_units,
+        "candidate_link_count": candidate_links,
+        "verified_link_count": verified_links,
+        "timestamp_fallback_link_count": timestamp_fallback_links,
+        "candidate_visual_support_ratio": _ratio_from_counts(candidate_support_units, len(rows)),
+        "candidate_only_visual_support_ratio": _ratio_from_counts(
+            candidate_only_support_units,
+            len(rows),
+        ),
+        "verified_object_alignment_ratio": _ratio_from_counts(verified_units, len(rows)),
+        "timestamp_fallback_ratio": _ratio_from_counts(timestamp_fallback_units, len(rows)),
+        "generated_reason_counts": dict(sorted(generated_reason_counts.items())),
+        "missing_reason_counts": dict(sorted(missing_reason_counts.items())),
+        "evidence_unit_verified_failure_stage_reason_counts": dict(
+            sorted(failure_stage_reason_counts.items())
+        ),
+        "object_evidence_coverage_counts": _object_evidence_coverage_counts(rows),
+        "paper_claim_eligibility": {
+            "candidate_visual_support_eligible": False,
+            "verified_object_alignment_eligible_units": verified_units,
+            "timestamp_fallback_counted_as_verified_count": timestamp_fallback_counted_as_verified,
+            "timestamp_fallback_eligible": False,
+        },
+        "public_note": VERIFIED_ALIGNMENT_COVERAGE_PUBLIC_NOTE,
+    }
+
+
+def _verified_alignment_generated_reasons(verified: dict[str, Any]) -> list[str]:
+    source_counts = _mapping(verified.get("verified_link_source_counts"))
+    reasons = [key for key in VERIFIED_LINK_SOURCE_KEYS if int(source_counts.get(key) or 0) > 0]
+    return reasons or ["verified_link_present"]
+
+
+def _verified_alignment_missing_reason(row: dict[str, Any]) -> str:
+    if row.get("status") == "skipped":
+        return f"skip:{_public_skip_reason(row.get('skip_reason'))}"
+    if int(row.get("bundle_count") or 0) <= 0:
+        return "retrieval:no_candidate_bundles"
+    support = _mapping(row.get("candidate_visual_support"))
+    coverage = _mapping(row.get("object_evidence_coverage"))
+    candidate_link_count = int(support.get("candidate_link_count") or 0)
+    fallback_link_count = int(support.get("timestamp_fallback_link_count") or 0)
+    if fallback_link_count and not candidate_link_count:
+        return "timestamp_fallback_only_not_verified"
+    if bool(coverage.get("has_vlm_entity")):
+        return "vlm_object_without_verified_link"
+    if bool(coverage.get("uses_ocr_only")):
+        return "ocr_only_without_verified_link"
+    if candidate_link_count:
+        return "candidate_link_without_verified_metadata"
+    if support.get("has_candidate_visual_support") is True:
+        return "candidate_visual_support_without_verified_link"
+    return "no_object_visual_evidence"
+
+
+def _ratio_from_counts(numerator: int, denominator: int) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(numerator / denominator, 4)
 
 
 def _coverage_bool_ratio(rows: list[dict[str, Any]], key: str) -> float | None:
@@ -5113,6 +5268,52 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                     ),
                 )
             )
+        evidence_variants = [
+            (suite, variant)
+            for suite, variant in matrix_variants
+            if str(variant.get("variant_id") or "").startswith("evidence_unit_")
+        ]
+        if evidence_variants:
+            lines.extend(
+                [
+                    "",
+                    "### Verified Object Alignment Coverage",
+                    "",
+                    "Verified coverage is reported separately from candidate/fallback visual "
+                    "support. Timestamp fallback is excluded from verified alignment and "
+                    "paper-claim eligible support.",
+                    "",
+                    "| suite | variant | candidate support | candidate-only | verified align | timestamp fallback | missing reasons | verified failure stages |",
+                    "| --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
+                ]
+            )
+            for suite, variant in evidence_variants:
+                coverage = _mapping(variant.get("verified_alignment_coverage"))
+                lines.append(
+                    "| {suite_id} | {variant_id} | {candidate_support} | {candidate_only} | "
+                    "{verified_align} | {timestamp_fallback} | {missing} | {failures} |".format(
+                        suite_id=suite.get("suite_id"),
+                        variant_id=variant.get("variant_id"),
+                        candidate_support=_format_metric(
+                            coverage.get("candidate_visual_support_ratio")
+                        ),
+                        candidate_only=_format_metric(
+                            coverage.get("candidate_only_visual_support_ratio")
+                        ),
+                        verified_align=_format_metric(
+                            coverage.get("verified_object_alignment_ratio")
+                        ),
+                        timestamp_fallback=_format_metric(
+                            coverage.get("timestamp_fallback_ratio")
+                        ),
+                        missing=_format_counts_inline(coverage.get("missing_reason_counts")),
+                        failures=_format_counts_inline(
+                            coverage.get(
+                                "evidence_unit_verified_failure_stage_reason_counts"
+                            )
+                        ),
+                    )
+                )
     diagnostic_suites = [
         suite
         for suite in metrics["suites"]
@@ -5173,6 +5374,7 @@ def _write_metrics_summary_csv(path: Path, metrics: dict[str, Any]) -> None:
         "frame_backed_ratio",
         "linked_entity_backed_ratio",
         "candidate_visual_support_ratio",
+        "candidate_only_visual_support_ratio",
         "verified_object_alignment_ratio",
         "visual_state_coverage_ratio",
         "visual_entity_coverage_ratio",
@@ -5198,6 +5400,10 @@ def _write_metrics_summary_csv(path: Path, metrics: dict[str, Any]) -> None:
         "answer_uses_candidate_only_visual_evidence_ratio",
         "timestamp_fallback_answer_citation_count",
         "answer_failure_reason_counts",
+        "failure_stage_reason_counts",
+        "verified_alignment_missing_reason_counts",
+        "verified_alignment_generated_reason_counts",
+        "evidence_unit_verified_failure_stage_reason_counts",
         "answer_policy_reason_counts",
         "answer_grounding_gap_counts",
         "mean_processing_time_ms",
@@ -5262,6 +5468,7 @@ def _metrics_summary_row(
     row_type: str,
     variant_or_mode: Any,
 ) -> dict[str, Any]:
+    verified_alignment_coverage = _mapping(item.get("verified_alignment_coverage"))
     return {
         **base,
         "row_type": row_type,
@@ -5280,6 +5487,9 @@ def _metrics_summary_row(
             item.get("linked_entity_ratio"),
         ),
         "candidate_visual_support_ratio": item.get("candidate_visual_support_ratio"),
+        "candidate_only_visual_support_ratio": verified_alignment_coverage.get(
+            "candidate_only_visual_support_ratio"
+        ),
         "verified_object_alignment_ratio": item.get("verified_object_alignment_ratio"),
         "visual_state_coverage_ratio": item.get("visual_state_coverage_ratio"),
         "visual_entity_coverage_ratio": item.get("visual_entity_coverage_ratio"),
@@ -5316,6 +5526,18 @@ def _metrics_summary_row(
         ),
         "answer_failure_reason_counts": _compact_json(
             item.get("answer_failure_reason_counts")
+        ),
+        "failure_stage_reason_counts": _compact_json(item.get("failure_stage_reason_counts")),
+        "verified_alignment_missing_reason_counts": _compact_json(
+            verified_alignment_coverage.get("missing_reason_counts")
+        ),
+        "verified_alignment_generated_reason_counts": _compact_json(
+            verified_alignment_coverage.get("generated_reason_counts")
+        ),
+        "evidence_unit_verified_failure_stage_reason_counts": _compact_json(
+            verified_alignment_coverage.get(
+                "evidence_unit_verified_failure_stage_reason_counts"
+            )
         ),
         "answer_policy_reason_counts": _compact_json(item.get("answer_policy_reason_counts")),
         "answer_grounding_gap_counts": _compact_json(item.get("answer_grounding_gap_counts")),

@@ -114,6 +114,14 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert target["source_quality"]["has_vlm_entity"] is True
     assert target["source_quality"]["has_verified_link"] is False
     assert target["source_quality"]["has_timestamp_fallback_link"] is True
+    assert target["source_quality"]["candidate_visual_support"]["paper_claim_eligible"] is False
+    assert target["source_quality"]["verified_object_alignment"]["paper_claim_eligible"] is False
+    assert (
+        target["source_quality"]["verified_object_alignment"][
+            "timestamp_fallback_counted_as_verified"
+        ]
+        is False
+    )
     assert target["source_quality"]["has_detected_text"] is True
     assert target["source_quality"]["has_visual_description"] is True
     assert target["source_quality"]["visual_state_detected_text_count"] == 1
