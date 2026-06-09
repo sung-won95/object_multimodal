@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from oarag.core.domain_lexicon import DomainLexicon, load_domain_lexicon
 from oarag.core.io import write_json, write_jsonl
 from oarag.core.schemas import slugify
 from oarag.graph.concept_graph_schema import (
@@ -104,6 +105,61 @@ TRANSCRIPT_KEYWORD_STOPWORDS = {
     "will",
     "would",
 }
+CONCEPT_PHRASE_STOPWORDS = TRANSCRIPT_KEYWORD_STOPWORDS | {
+    "and",
+    "are",
+    "can",
+    "does",
+    "for",
+    "has",
+    "have",
+    "how",
+    "its",
+    "our",
+    "see",
+    "the",
+    "their",
+    "they",
+    "use",
+    "using",
+    "was",
+    "were",
+    "you",
+    "your",
+}
+CONCEPT_PHRASE_SIGNAL_TERMS = {
+    "algorithm",
+    "attention",
+    "bias",
+    "classifier",
+    "curve",
+    "descent",
+    "distribution",
+    "embedding",
+    "estimate",
+    "estimates",
+    "feature",
+    "function",
+    "gradient",
+    "layer",
+    "learning",
+    "loss",
+    "matrix",
+    "model",
+    "normalization",
+    "objective",
+    "optimizer",
+    "probability",
+    "rate",
+    "reduction",
+    "regression",
+    "representation",
+    "token",
+    "training",
+    "variance",
+    "vector",
+    "weight",
+}
 
 
 def build_project_visual_states(
@@ -194,6 +250,7 @@ def build_project_evidence_units(
     visual_entities: Path | None = None,
     entity_links: Path | None = None,
     concept_graph: Path | None = None,
+    domain_lexicon: Path | None = None,
     manifest_path: Path | None = None,
     window_seconds: float | None = None,
     neighbor_count: int = 1,
@@ -271,6 +328,10 @@ def build_project_evidence_units(
         if concept_graph_path is not None
         else []
     )
+    domain_lexicon_source = load_domain_lexicon(
+        project_dir=resolved_project_dir,
+        domain_lexicon_path=domain_lexicon,
+    )
     if visual_states_path is not None:
         visual_state_rows = load_visual_states_artifact(visual_states_path)
         visual_state_source = "external_visual_states_artifact"
@@ -291,6 +352,7 @@ def build_project_evidence_units(
         visual_entities=visual_entity_rows,
         entity_links=entity_link_rows,
         concept_graph_records=concept_graph_records,
+        domain_lexicon=domain_lexicon_source,
         window_seconds=window_seconds,
         neighbor_count=neighbor_count,
         previous_neighbor_count=previous_neighbor_count,
@@ -313,6 +375,9 @@ def build_project_evidence_units(
         "concept_relation_edges_total": sum(
             1 for record in concept_graph_records if isinstance(record, ConceptGraphRelationEdge)
         ),
+        "domain_lexicon_canonical_terms_total": domain_lexicon_source.metadata()[
+            "canonical_term_count"
+        ],
         "evidence_units_total": len(documents),
         "units_with_visual_state": sum(1 for document in documents if document["source_quality"]["has_visual_state"]),
         "units_with_visual_entity": sum(1 for document in documents if document["source_quality"]["has_visual_entity"]),
@@ -444,6 +509,7 @@ def build_evidence_unit_documents(
     visual_entities: list[dict[str, Any]] | None = None,
     entity_links: list[dict[str, Any]] | None = None,
     concept_graph_records: list[ConceptGraphRecord] | None = None,
+    domain_lexicon: DomainLexicon | None = None,
     window_seconds: float | None = None,
     neighbor_count: int = 1,
     previous_neighbor_count: int | None = None,
@@ -472,6 +538,7 @@ def build_evidence_unit_documents(
     concept_context_by_evidence_unit = _concept_context_by_evidence_unit(
         concept_graph_records or []
     )
+    domain_lexicon = domain_lexicon or DomainLexicon()
     window_config = _window_config(
         window_seconds=window_seconds,
         neighbor_count=neighbor_count,
@@ -506,6 +573,7 @@ def build_evidence_unit_documents(
                 entities_by_id=entities_by_id,
                 links_by_segment_id=links_by_segment_id,
                 concept_context_by_evidence_unit=concept_context_by_evidence_unit,
+                domain_lexicon=domain_lexicon,
                 window_config=window_config,
             )
         )
@@ -802,6 +870,7 @@ def _evidence_unit_document(
     entities_by_id: dict[str, dict[str, Any]],
     links_by_segment_id: dict[str, list[dict[str, Any]]],
     concept_context_by_evidence_unit: dict[str, dict[str, Any]],
+    domain_lexicon: DomainLexicon,
     window_config: dict[str, Any],
 ) -> dict[str, Any]:
     source_segment_ids = [_text(segment.get("segment_id")) for segment in window_segments]
@@ -845,7 +914,13 @@ def _evidence_unit_document(
     visual_text = _compact_text(
         " ".join(_unique_text_values([visual_state_text, visual_entity_text]))
     )
-    concept_context = concept_context_by_evidence_unit.get(evidence_unit_id) or _empty_concept_context()
+    concept_context = _public_concept_search_context(
+        base_context=concept_context_by_evidence_unit.get(evidence_unit_id),
+        transcript_text=transcript_window_text,
+        visual_state_text=visual_state_text,
+        visual_entity_text=visual_entity_text,
+        domain_lexicon=domain_lexicon,
+    )
     concept_text = _concept_summary_text(concept_context)
     source_quality = _source_quality(
         visual_states=window_states,
@@ -1070,7 +1145,10 @@ def _source_quality(
         or timestamp_fallback_link_count
     )
     has_verified_object_alignment = verified_link_count > 0
-    concept_count = len(_string_list(concept_context.get("concept_ids")))
+    concept_count = max(
+        len(_string_list(concept_context.get("concept_ids"))),
+        len(_string_list(concept_context.get("concept_labels"))),
+    )
     concept_relation_count = len(_list_of_dicts(concept_context.get("concept_relations")))
     timestamp_only_concept_relation_count = sum(
         1
@@ -1332,12 +1410,21 @@ def _concept_field_coverage_summary(
     units_with_concepts = 0
     units_with_relations = 0
     units_with_search_text = 0
+    units_with_labels = 0
+    units_with_aliases = 0
     concept_mentions = 0
+    concept_label_mentions = 0
+    concept_alias_mentions = 0
     relation_mentions = 0
     timestamp_only_relation_mentions = 0
     for document in documents:
         source_quality = _mapping(document.get("source_quality"))
-        concept_count = int(source_quality.get("concept_count") or len(_string_list(document.get("concept_ids"))))
+        labels = _string_list(document.get("concept_labels"))
+        aliases = _string_list(document.get("concept_aliases"))
+        concept_count = int(
+            source_quality.get("concept_count")
+            or max(len(_string_list(document.get("concept_ids"))), len(labels))
+        )
         relation_count = int(
             source_quality.get("concept_relation_count")
             or len(_list_of_dicts(document.get("concept_relations")))
@@ -1346,10 +1433,16 @@ def _concept_field_coverage_summary(
             source_quality.get("timestamp_only_concept_relation_count") or 0
         )
         concept_mentions += concept_count
+        concept_label_mentions += len(labels)
+        concept_alias_mentions += len(aliases)
         relation_mentions += relation_count
         timestamp_only_relation_mentions += timestamp_only_relation_count
         if concept_count:
             units_with_concepts += 1
+        if labels:
+            units_with_labels += 1
+        if aliases:
+            units_with_aliases += 1
         if relation_count:
             units_with_relations += 1
         if _has_concept_search_text(document):
@@ -1369,6 +1462,8 @@ def _concept_field_coverage_summary(
         "concept_relation_edges_total": relation_edges_total,
         "evidence_units_total": evidence_units_total,
         "evidence_units_with_concepts": units_with_concepts,
+        "evidence_units_with_concept_labels": units_with_labels,
+        "evidence_units_with_concept_aliases": units_with_aliases,
         "evidence_units_with_concept_relations": units_with_relations,
         "evidence_units_with_concept_search_text": units_with_search_text,
         "unit_concept_coverage_ratio": _ratio_or_none(units_with_concepts, evidence_units_total),
@@ -1377,6 +1472,8 @@ def _concept_field_coverage_summary(
             evidence_units_total,
         ),
         "concept_mentions": concept_mentions,
+        "concept_label_mentions": concept_label_mentions,
+        "concept_alias_mentions": concept_alias_mentions,
         "concept_relation_mentions": relation_mentions,
         "timestamp_only_concept_relation_mentions": timestamp_only_relation_mentions,
         "timestamp_only_counted_as_verified_object_alignment": False,
@@ -1616,6 +1713,61 @@ def _empty_concept_context() -> dict[str, Any]:
     }
 
 
+def _public_concept_search_context(
+    *,
+    base_context: dict[str, Any] | None,
+    transcript_text: str,
+    visual_state_text: str,
+    visual_entity_text: str,
+    domain_lexicon: DomainLexicon,
+) -> dict[str, Any]:
+    context = _clone_concept_context(base_context)
+    search_basis = _compact_text(
+        " ".join(
+            _unique_text_values([transcript_text, visual_state_text, visual_entity_text])
+        )
+    )
+    if not search_basis:
+        return context
+
+    lexicon_matches = domain_lexicon.matched_canonical_terms(search_basis)
+    if lexicon_matches:
+        lexicon_labels = list(lexicon_matches)
+        lexicon_aliases: list[str] = []
+        for canonical in lexicon_labels:
+            lexicon_aliases.extend(domain_lexicon.aliases_by_canonical.get(canonical, ()))
+            lexicon_aliases.extend(lexicon_matches.get(canonical, ()))
+        context["concept_labels"] = _unique_text_values(
+            [*context["concept_labels"], lexicon_labels]
+        )
+        context["concept_aliases"] = _unique_text_values(
+            [*context["concept_aliases"], lexicon_aliases]
+        )
+
+    phrase_labels = (
+        []
+        if _string_list(context.get("concept_labels"))
+        else _descriptive_concept_phrases(search_basis)
+    )
+    if phrase_labels:
+        context["concept_labels"] = _unique_text_values(
+            [*context["concept_labels"], phrase_labels]
+        )
+    return context
+
+
+def _clone_concept_context(value: dict[str, Any] | None) -> dict[str, Any]:
+    source = value if isinstance(value, dict) else _empty_concept_context()
+    return {
+        "concept_ids": _string_list(source.get("concept_ids")),
+        "concept_labels": _string_list(source.get("concept_labels")),
+        "concept_aliases": _string_list(source.get("concept_aliases")),
+        "concept_relation_text": _text(source.get("concept_relation_text")),
+        "concepts": _list_of_dicts(source.get("concepts")),
+        "concept_relations": _list_of_dicts(source.get("concept_relations")),
+    }
+
+
 def _concept_context(concept: ConceptGraphConceptNode) -> dict[str, Any]:
     source_signals = _unique_text_values(
         source.source_signal for source in concept.evidence_sources
@@ -1717,6 +1869,34 @@ def _concept_summary_text(concept_context: dict[str, Any]) -> str:
             )
         )
     )
+
+
+def _descriptive_concept_phrases(text: str, *, limit: int = 12) -> list[str]:
+    tokens = [
+        token
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9+-]*", text.casefold())
+        if len(token) >= 2 and token not in CONCEPT_PHRASE_STOPWORDS
+    ]
+    phrases: list[str] = []
+    for width in (4, 3, 2):
+        for start in range(0, max(0, len(tokens) - width + 1)):
+            phrase_tokens = tokens[start : start + width]
+            if not _concept_phrase_tokens(phrase_tokens):
+                continue
+            phrases.append(" ".join(phrase_tokens))
+    ranked = sorted(
+        _unique_text_values(phrases),
+        key=lambda phrase: (-len(phrase.split()), phrase),
+    )
+    return ranked[: max(0, int(limit))]
+
+
+def _concept_phrase_tokens(tokens: list[str]) -> bool:
+    if len(tokens) < 2:
+        return False
+    if any(token in CONCEPT_PHRASE_STOPWORDS for token in tokens):
+        return False
+    return any(token in CONCEPT_PHRASE_SIGNAL_TERMS for token in tokens)
 
 
 def _concept_canonical_label(concept: ConceptGraphConceptNode) -> str:
