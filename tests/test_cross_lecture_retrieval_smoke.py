@@ -10,6 +10,8 @@ from oarag.cli import build_parser
 from oarag.cross_lecture_retrieval_smoke import (
     GRAPH_UNAVAILABLE_SKIP,
     MEILI_UNAVAILABLE_SKIP,
+    _rerank_rank_delta,
+    _score_component_presence,
     build_candidate_source_metrics,
     load_cross_lecture_smoke_manifest,
     run_cross_lecture_retrieval_smoke,
@@ -297,6 +299,16 @@ def test_cross_lecture_smoke_writes_public_safe_variant_report(tmp_path: Path) -
     graph_rerank = next(row for row in rows if row["variant"] == "graph_aware_rerank")
     assert graph_rerank["graph_aware_rerank"]["enabled"] is True
     assert graph_rerank["graph_aware_rerank"]["top_changed"] is True
+    assert graph_rerank["rank_delta_vs_meili_graph"]["bucket"] == "top5_to_top1"
+    assert graph_rerank["rank_delta_vs_meili_graph"]["top1_recall_delta"] == 1
+    assert graph_rerank["rank_delta_vs_meili_graph"]["top5_recall_delta"] == 0
+    assert graph_rerank["rank_delta_vs_meili_graph"]["top10_recall_delta"] == 0
+    component_presence = graph_rerank["graph_aware_rerank"]["score_component_presence"]
+    assert component_presence["query_relevance"]["candidate_count"] >= 1
+    assert component_presence["graph_relation_match"]["candidate_count"] >= 1
+    assert component_presence["concept_alias_canonical_match"]["candidate_count"] >= 1
+    assert component_presence["vlm_object_evidence"]["candidate_count"] >= 1
+    assert component_presence["verified_link"]["candidate_count"] >= 1
     payload = json.loads(run.metrics_path.read_text(encoding="utf-8"))
     assert (
         payload["source_recall_by_variant"]["graph_only"]["graph_traversal"]["top_k_recalled_count"]
@@ -322,6 +334,17 @@ def test_cross_lecture_smoke_writes_public_safe_variant_report(tmp_path: Path) -
         == 4
     )
     assert payload["rerank_diagnostics"]["top_changed_count"] == 2
+    assert payload["rerank_diagnostics"]["rank_delta_bucket_counts"] == {"top5_to_top1": 2}
+    assert payload["rerank_diagnostics"]["candidate_recall_failure_count"] == 0
+    assert payload["rerank_diagnostics"]["target_recall_delta"]["top1"]["net_delta"] == 2
+    assert payload["rerank_diagnostics"]["target_recall_delta"]["top5"]["net_delta"] == 0
+    assert payload["rerank_diagnostics"]["target_recall_delta"]["top10"]["net_delta"] == 0
+    assert (
+        payload["rerank_diagnostics"]["score_component_presence"]["graph_relation_match"][
+            "candidate_count"
+        ]
+        >= 2
+    )
 
     public_text = _public_text(run)
     for sensitive in [
@@ -343,6 +366,118 @@ def test_cross_lecture_smoke_writes_public_safe_variant_report(tmp_path: Path) -
         assert "private_raw_transcript_says_secret_formula" not in bucket_keys
         assert "private_tmp_raw_path" not in bucket_keys
         assert "/private/tmp" not in bucket_keys
+
+
+def test_rerank_rank_delta_buckets_and_candidate_recall_failure_are_public_safe() -> None:
+    baseline = {
+        "suite_id": "suite_public",
+        "project_ref": "lecture_public",
+        "query_id": "q_public",
+        "variant": "meili_graph",
+        "status": "queried",
+        "target_configured": True,
+        "target_rank": 78,
+        "target_rank_bucket": "top100",
+        "candidate_source_metrics": {"generated_recalled_count": 1},
+    }
+    reranked = {
+        "suite_id": "suite_public",
+        "project_ref": "lecture_public",
+        "query_id": "q_public",
+        "variant": "graph_aware_rerank",
+        "status": "queried",
+        "target_configured": True,
+        "target_rank": 4,
+        "target_rank_bucket": "top5",
+        "candidate_source_metrics": {"generated_recalled_count": 1},
+    }
+
+    delta = _rerank_rank_delta(baseline=baseline, reranked=reranked)
+
+    assert delta["bucket"] == "top100_to_top5"
+    assert delta["rank_delta"] == 74
+    assert delta["top10_recall_delta"] == 1
+    assert delta["top5_recall_delta"] == 1
+    assert delta["top1_recall_delta"] == 0
+    assert delta["public_safe"] is True
+    rendered = json.dumps(delta, ensure_ascii=False)
+    assert "q_public" not in rendered
+    assert "lecture_public" not in rendered
+
+    miss = _rerank_rank_delta(
+        baseline={
+            **baseline,
+            "target_rank": None,
+            "target_rank_bucket": "not_found",
+            "candidate_source_metrics": {"generated_recalled_count": 0},
+        },
+        reranked={
+            **reranked,
+            "target_rank": None,
+            "target_rank_bucket": "not_found",
+            "candidate_source_metrics": {"generated_recalled_count": 0},
+        },
+    )
+    assert miss["bucket"] == "candidate_recall_failure"
+    assert miss["candidate_recall_failure"] is True
+
+
+def test_score_component_presence_uses_public_component_names_only() -> None:
+    presence = _score_component_presence(
+        [
+            {
+                "candidate_ref": "evu:public_hash",
+                "components": {
+                    "evidence_text_query_overlap": 0.2,
+                    "relation_type_match": 0.42,
+                    "query_concept_direct_match": 0.58,
+                    "vlm_visual_entity": 0.26,
+                    "verified_alignment": 0.46,
+                    "timestamp_fallback_penalty": -0.32,
+                    "ocr_only_penalty": -0.38,
+                },
+            }
+        ]
+    )
+
+    assert presence["query_relevance"]["candidate_count"] == 1
+    assert presence["graph_relation_match"]["candidate_count"] == 1
+    assert presence["concept_alias_canonical_match"]["candidate_count"] == 1
+    assert presence["vlm_object_evidence"]["candidate_count"] == 1
+    assert presence["verified_link"]["candidate_count"] == 1
+    assert presence["timestamp_fallback_penalty"]["negative_count"] == 1
+    assert presence["ocr_only_penalty"]["negative_count"] == 1
+    rendered = json.dumps(presence, ensure_ascii=False)
+    assert "evu:public_hash" not in rendered
+    assert "evidence text" not in rendered.casefold()
+
+
+def test_score_component_presence_counts_verified_link_from_verified_alignment_only() -> None:
+    candidate_only_link = _score_component_presence(
+        [
+            {
+                "components": {
+                    "candidate_link_quality": 0.3,
+                    "verified_alignment": 0.0,
+                },
+            }
+        ]
+    )
+    verified_alignment = _score_component_presence(
+        [
+            {
+                "components": {
+                    "candidate_link_quality": 0.0,
+                    "verified_alignment": 0.46,
+                },
+            }
+        ]
+    )
+
+    assert candidate_only_link["verified_link"]["candidate_count"] == 0
+    assert candidate_only_link["verified_link"]["positive_count"] == 0
+    assert verified_alignment["verified_link"]["candidate_count"] == 1
+    assert verified_alignment["verified_link"]["positive_count"] == 1
 
 
 def test_cross_lecture_smoke_separates_meili_and_graph_unavailable_skips(
