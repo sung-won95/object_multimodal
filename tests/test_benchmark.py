@@ -1101,6 +1101,12 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["evidence_unit_candidate"]["config"][
         "answer_matrix_role"
     ] == "evidence_unit_meili_only"
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["config"][
+        "candidate_pool_limit"
+    ] == 50
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["config"][
+        "candidate_fusion"
+    ] == "reciprocal_rank_fusion"
     assert suite["variant_metrics"]["evidence_unit_verified"]["config"][
         "evidence_unit_priority"
     ] == "verified"
@@ -1116,6 +1122,12 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["evidence_unit_quality_rerank"]["config"][
         "answer_matrix_role"
     ] == "evidence_unit_quality_rerank"
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"]["config"][
+        "candidate_pool_limit"
+    ] == 100
+    assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
+        "evidence_unit_query_planning"
+    ]["fusion_method_counts"] == {"reciprocal_rank_fusion": 1}
     assert suite["variant_metrics"]["window"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["rerank"]["hit_at_10s"] == 1.0
     assert suite["variant_metrics"]["evidence_unit_candidate"]["hit_at_10s"] == 1.0
@@ -1308,6 +1320,15 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     )
     assert evidence_candidate_row["status"] == "queried"
     assert evidence_candidate_row["top_candidate"]["source"] == "evidence_unit"
+    assert evidence_candidate_row["evidence_unit_query_planning"]["fusion_method"] == (
+        "reciprocal_rank_fusion"
+    )
+    assert evidence_candidate_row["evidence_unit_query_planning"]["depth"] == {
+        "raw": 50,
+        "broad": 50,
+        "concept": 50,
+    }
+    assert "loss curve" not in json.dumps(evidence_candidate_row["evidence_unit_query_planning"])
     assert evidence_candidate_row["top_candidate"]["evidence_unit_citation"][
         "candidate_only_visual_citation"
     ] is True

@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from oarag.retrieval.evidence_unit_index import (
+    EVIDENCE_UNIT_FUSION_RRF,
+    EVIDENCE_UNIT_FUSION_ROUND_ROBIN,
     classify_evidence_unit_query_modality,
     query_project_evidence_units,
 )
@@ -24,11 +26,105 @@ class FakeEvidenceUnitClient:
         return {"hits": self.hits[:limit], "processingTimeMs": 3}
 
 
+class PlanningEvidenceUnitClient:
+    def __init__(self) -> None:
+        self.searches: list[dict[str, Any]] = []
+
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+    ) -> dict[str, Any]:
+        self.searches.append(
+            {"index": index_uid, "query": query, "limit": limit, "filter": filter}
+        )
+        if query.startswith("Which "):
+            hits = [
+                _planning_hit("evu_raw_first", "seg_raw_first", 0.99),
+                _planning_hit("evu_fused", "seg_fused", 0.72),
+                _planning_hit("evu_shared_raw", "seg_shared", 0.5),
+            ]
+        elif query.startswith("diagram"):
+            hits = [
+                _planning_hit("evu_fused", "seg_fused", 0.93),
+                _planning_hit("evu_broad_second", "seg_broad_second", 0.8),
+                _planning_hit("evu_shared_broad", "seg_shared", 0.7),
+            ]
+        else:
+            hits = [
+                _planning_hit("evu_fused", "seg_fused", 0.91),
+                _planning_hit("evu_concept_second", "seg_concept_second", 0.76),
+            ]
+        return {"hits": hits[:limit], "processingTimeMs": 2}
+
+
 def test_query_modality_classifier_is_conservative() -> None:
     assert classify_evidence_unit_query_modality("Which diagram shows the red arrow?") == "visual-heavy"
     assert classify_evidence_unit_query_modality("What did the lecturer say about convergence?") == "speech-heavy"
     assert classify_evidence_unit_query_modality("What does the slide say about the diagram?") == "mixed"
     assert classify_evidence_unit_query_modality("loss curve slope") == "unknown"
+
+
+def test_evidence_unit_query_fusion_uses_variant_depths_and_rrf_by_default(
+    tmp_path: Path,
+) -> None:
+    project_dir = _write_project(tmp_path)
+    client = PlanningEvidenceUnitClient()
+
+    response = query_project_evidence_units(
+        client=client,
+        index_uid="evidence_units",
+        project_dir=project_dir,
+        query="Which diagram shows the loss curve arrow?",
+        limit=3,
+        raw_candidate_depth=5,
+        broad_candidate_depth=6,
+        concept_candidate_depth=7,
+    )
+
+    assert [search["limit"] for search in client.searches] == [5, 6, 7]
+    assert response["candidates"][0]["evidence_unit_id"] == "evu_fused"
+    assert response["candidates"][0]["candidate_fusion"]["method"] == EVIDENCE_UNIT_FUSION_RRF
+    assert response["candidates"][0]["candidate_fusion"]["match_count"] == 3
+    assert [
+        candidate["target_segment_id"] for candidate in response["candidates"]
+    ].count("seg_shared") == 1
+
+    planning = response["retrieval_context"]["query_planning"]
+    assert planning["strategy"] == "evidence_unit_query_fusion"
+    assert planning["query_count"] == 3
+    assert planning["depth"] == {"raw": 5, "broad": 6, "concept": 7}
+    assert planning["fusion_method"] == EVIDENCE_UNIT_FUSION_RRF
+    assert planning["raw_hit_count_before_dedupe"] == 8
+    assert planning["unique_candidate_count_before_limit"] == 5
+    assert planning["returned_candidate_count"] == 3
+    assert all(variant["query_ref"].startswith("query:") for variant in planning["variants"])
+    assert "Which diagram" not in json.dumps(planning)
+    assert "loss curve" not in json.dumps(planning)
+
+
+def test_evidence_unit_round_robin_fusion_remains_available_for_comparison(
+    tmp_path: Path,
+) -> None:
+    project_dir = _write_project(tmp_path)
+
+    response = query_project_evidence_units(
+        client=PlanningEvidenceUnitClient(),
+        index_uid="evidence_units",
+        project_dir=project_dir,
+        query="Which diagram shows the loss curve arrow?",
+        limit=3,
+        candidate_depth=5,
+        candidate_fusion=EVIDENCE_UNIT_FUSION_ROUND_ROBIN,
+    )
+
+    assert response["candidates"][0]["evidence_unit_id"] == "evu_raw_first"
+    assert response["candidates"][1]["evidence_unit_id"] == "evu_fused"
+    assert response["retrieval_context"]["query_planning"][
+        "fusion_method"
+    ] == EVIDENCE_UNIT_FUSION_ROUND_ROBIN
 
 
 def test_modality_aware_rerank_promotes_verified_visual_evidence(tmp_path: Path) -> None:
@@ -168,6 +264,20 @@ def _verified_visual_hit() -> dict[str, Any]:
         "semantic_text": "verified visual diagram loss curve arrow",
         "transcript_window_text": "short transcript",
         "_rankingScore": 0.6,
+    }
+
+
+def _planning_hit(evidence_unit_id: str, target_segment_id: str, score: float) -> dict[str, Any]:
+    return {
+        "evidence_unit_id": evidence_unit_id,
+        "project_id": "project_private",
+        "target_segment_id": target_segment_id,
+        "source_segment_ids": [target_segment_id],
+        "start_time": 1.0,
+        "end_time": 2.0,
+        "alignment_status": "candidate",
+        "source_quality": {"has_visual_state": False},
+        "_rankingScore": score,
     }
 
 

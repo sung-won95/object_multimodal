@@ -818,9 +818,15 @@ def test_query_project_evidence_units_returns_required_fields(tmp_path: Path) ->
         {
             "index_uid": "sample_evidence_units",
             "query": "gradient arrow",
-            "limit": 1,
+            "limit": 50,
             "filter": 'project_id = "sample_project"',
-        }
+        },
+        {
+            "index_uid": "sample_evidence_units",
+            "query": "gradient",
+            "limit": 50,
+            "filter": 'project_id = "sample_project"',
+        },
     ]
     candidate = response["candidates"][0]
     required_fields = {
@@ -850,6 +856,14 @@ def test_query_project_evidence_units_returns_required_fields(tmp_path: Path) ->
     assert candidate["concept_labels"] == ["Gradient descent"]
     assert candidate["concept_relation_text"] == "Gradient descent uses Learning rate"
     assert candidate["source_quality"]["has_verified_link"] is False
+    assert response["retrieval_context"]["query_planning"]["depth"] == {
+        "raw": 50,
+        "broad": 50,
+        "concept": 50,
+    }
+    assert response["retrieval_context"]["query_planning"]["fusion_method"] == (
+        "reciprocal_rank_fusion"
+    )
 
 
 def test_explicit_verified_link_is_not_downgraded_to_timestamp_fallback(

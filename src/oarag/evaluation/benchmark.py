@@ -32,6 +32,7 @@ from oarag.retrieval.evidence import (
 from oarag.retrieval.answer import compose_answer
 from oarag.retrieval.project_index import segment_artifact_path
 from oarag.retrieval.evidence_unit_index import (
+    DEFAULT_EVIDENCE_UNIT_FUSION,
     MODALITY_AWARE_RERANK,
     query_project_evidence_units,
 )
@@ -166,6 +167,8 @@ DEFAULT_MATRIX_VARIANTS = [
         "answer_matrix_role": "evidence_unit_meili_only",
         "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
         "evidence_unit_priority": "candidate",
+        "candidate_pool_limit": 50,
+        "candidate_fusion": DEFAULT_EVIDENCE_UNIT_FUSION,
         "use_domain_lexicon": False,
     },
     {
@@ -184,7 +187,8 @@ DEFAULT_MATRIX_VARIANTS = [
         "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
         "evidence_unit_priority": "quality",
         "evidence_unit_rerank": MODALITY_AWARE_RERANK,
-        "candidate_pool_limit": 30,
+        "candidate_pool_limit": 100,
+        "candidate_fusion": DEFAULT_EVIDENCE_UNIT_FUSION,
         "use_domain_lexicon": False,
     },
 ]
@@ -1777,15 +1781,26 @@ def _run_evidence_unit_matrix_query(
     search_limit = max(limit, candidate_pool_limit or limit)
     evidence_units_path = _optional_path(_variant_value(suite, variant, "evidence_units"))
     evidence_unit_rerank = _matrix_evidence_unit_rerank(suite=suite, variant=variant)
+    candidate_fusion = _optional_str(_variant_value(suite, variant, "candidate_fusion"))
+    raw_candidate_depth = _optional_int(_variant_value(suite, variant, "raw_candidate_depth"))
+    broad_candidate_depth = _optional_int(_variant_value(suite, variant, "broad_candidate_depth"))
+    concept_candidate_depth = _optional_int(
+        _variant_value(suite, variant, "concept_candidate_depth")
+    )
     try:
         evidence_response = query_project_evidence_units(
             client=client,  # type: ignore[arg-type]
             index_uid=index_uid,
             project_dir=project_dir,
             query=query_text,
-            limit=search_limit,
+            limit=limit,
             evidence_units=evidence_units_path,
             evidence_unit_rerank=evidence_unit_rerank,
+            candidate_depth=search_limit,
+            raw_candidate_depth=raw_candidate_depth,
+            broad_candidate_depth=broad_candidate_depth,
+            concept_candidate_depth=concept_candidate_depth,
+            candidate_fusion=candidate_fusion or DEFAULT_EVIDENCE_UNIT_FUSION,
         )
     except FileNotFoundError:
         return _skipped_matrix_row(
@@ -1856,6 +1871,9 @@ def _run_evidence_unit_matrix_query(
                 _mapping(evidence_response.get("retrieval_context")).get(
                     "evidence_unit_rerank"
                 )
+            ),
+            "query_planning": _mapping(
+                _mapping(evidence_response.get("retrieval_context")).get("query_planning")
             ),
         },
         "warnings": [],
@@ -1941,6 +1959,9 @@ def _run_evidence_unit_matrix_query(
         "object_link_diagnostics": object_link_diagnostics,
         "object_evidence_coverage": _matrix_object_evidence_coverage(top_bundle),
         "modality_aware_rerank": _public_evidence_unit_rerank(
+            response.get("retrieval_context")
+        ),
+        "evidence_unit_query_planning": _public_evidence_unit_query_planning(
             response.get("retrieval_context")
         ),
         "query_expansion": _public_query_expansion(None),
@@ -2046,6 +2067,7 @@ def _skipped_matrix_row(
         "object_link_diagnostics": object_link_diagnostics,
         "object_evidence_coverage": _matrix_object_evidence_coverage(None),
         "modality_aware_rerank": _public_evidence_unit_rerank(None),
+        "evidence_unit_query_planning": _public_evidence_unit_query_planning(None),
         "query_expansion": _public_query_expansion(None),
         "semantic_retrieval": _public_semantic_retrieval(None),
         "top_candidate": None,
@@ -2280,6 +2302,7 @@ def _matrix_variant_metrics(
         ),
         "teaching_moment_span": _matrix_teaching_moment_span_metrics(rows),
         "modality_aware_rerank": _matrix_modality_aware_rerank_metrics(rows),
+        "evidence_unit_query_planning": _matrix_evidence_unit_query_planning_metrics(rows),
         "object_evidence_coverage_counts": _object_evidence_coverage_counts(rows),
         "visual_state_coverage_ratio": _coverage_bool_ratio(rows, "has_visual_state"),
         "visual_entity_coverage_ratio": _coverage_bool_ratio(rows, "has_visual_entity"),
@@ -2406,6 +2429,38 @@ def _matrix_modality_aware_rerank_metrics(rows: list[dict[str, Any]]) -> dict[st
         "score_component_presence_counts": dict(component_presence),
         "public_note": (
             "Matrix rerank metrics are aggregate-only and exclude raw query/evidence text."
+        ),
+    }
+
+
+def _matrix_evidence_unit_query_planning_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    diagnostics = [_mapping(row.get("evidence_unit_query_planning")) for row in rows]
+    enabled = [diag for diag in diagnostics if diag.get("strategy")]
+    fusion_methods = Counter(str(diag.get("fusion_method") or "unknown") for diag in enabled)
+    query_counts = Counter(str(diag.get("query_count") or 0) for diag in enabled)
+    depth_patterns = Counter(
+        json.dumps(_mapping(diag.get("depth")), sort_keys=True)
+        for diag in enabled
+        if diag.get("depth")
+    )
+    raw_hits = [
+        int(diag.get("raw_hit_count_before_dedupe") or 0)
+        for diag in enabled
+    ]
+    unique_candidates = [
+        int(diag.get("unique_candidate_count_before_limit") or 0)
+        for diag in enabled
+    ]
+    return {
+        "enabled_query_count": len(enabled),
+        "fusion_method_counts": dict(sorted(fusion_methods.items())),
+        "query_count_distribution": dict(sorted(query_counts.items())),
+        "depth_pattern_counts": dict(sorted(depth_patterns.items())),
+        "mean_raw_hit_count_before_dedupe": _mean_or_none(raw_hits),
+        "mean_unique_candidate_count_before_limit": _mean_or_none(unique_candidates),
+        "public_note": (
+            "Evidence-unit query-planning metrics are aggregate-only and exclude raw query, "
+            "transcript, evidence text, local paths, and raw candidate ids."
         ),
     }
 
@@ -2763,6 +2818,13 @@ def _public_matrix_variant_config(variant: dict[str, Any]) -> dict[str, Any]:
                 else None
             )
         )
+        config["candidate_fusion"] = (
+            _optional_str(variant.get("candidate_fusion")) or DEFAULT_EVIDENCE_UNIT_FUSION
+        )
+        for key in ("raw_candidate_depth", "broad_candidate_depth", "concept_candidate_depth"):
+            depth = _optional_int(variant.get(key))
+            if depth is not None:
+                config[key] = depth
     if config["index_kind"] == TEACHING_MOMENT_HIT_SOURCE:
         config["anchor_index_kind"] = str(variant.get("anchor_index_kind") or SEGMENT_HIT_SOURCE)
         config["span_window_seconds"] = _optional_float(
@@ -2892,6 +2954,52 @@ def _public_evidence_unit_rerank(value: Any) -> dict[str, Any]:
         "public_note": (
             "Evidence-unit modality-aware rerank reports hashed refs, query type, "
             "feature names, counts, buckets, and scores only."
+        ),
+    }
+
+
+def _public_evidence_unit_query_planning(value: Any) -> dict[str, Any]:
+    context = value if isinstance(value, dict) else {}
+    planning = _mapping(context.get("query_planning"))
+    if not planning:
+        return {
+            "strategy": None,
+            "query_count": 0,
+            "fusion_method": None,
+            "depth": {},
+        }
+    return {
+        "strategy": planning.get("strategy"),
+        "query_count": int(planning.get("query_count") or 0),
+        "query_roles": [
+            str(role) for role in planning.get("query_roles", []) if isinstance(role, str)
+        ],
+        "depth": {
+            str(key): int(value)
+            for key, value in _mapping(planning.get("depth")).items()
+            if isinstance(value, int)
+        },
+        "candidate_limit": _optional_int(planning.get("candidate_limit")),
+        "fusion_method": planning.get("fusion_method"),
+        "rrf_rank_constant": _optional_int(planning.get("rrf_rank_constant")),
+        "raw_hit_count_before_dedupe": int(planning.get("raw_hit_count_before_dedupe") or 0),
+        "unique_candidate_count_before_limit": int(
+            planning.get("unique_candidate_count_before_limit") or 0
+        ),
+        "returned_candidate_count": int(planning.get("returned_candidate_count") or 0),
+        "variant_count": len(_list_of_dicts(planning.get("variants"))),
+        "variants": [
+            {
+                "role": variant.get("role"),
+                "query_ref": variant.get("query_ref"),
+                "depth": variant.get("depth"),
+                "hit_count": int(variant.get("hit_count") or 0),
+            }
+            for variant in _list_of_dicts(planning.get("variants"))
+        ],
+        "public_note": (
+            "Evidence-unit query planning reports variant roles, hashed query refs, depth, "
+            "fusion method, and counts only."
         ),
     }
 

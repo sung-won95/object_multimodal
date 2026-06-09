@@ -1211,6 +1211,11 @@ def test_query_project_evidence_units_cli_defaults() -> None:
     assert args.project_dir is None
     assert args.query == "gradient arrow"
     assert args.limit == 5
+    assert args.candidate_depth is None
+    assert args.raw_candidate_depth is None
+    assert args.broad_candidate_depth is None
+    assert args.concept_candidate_depth is None
+    assert args.candidate_fusion == "reciprocal_rank_fusion"
     assert args.evidence_units is None
     assert args.output is None
 
@@ -1246,6 +1251,16 @@ def test_cmd_query_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
             "gradient arrow",
             "--limit",
             "3",
+            "--candidate-depth",
+            "50",
+            "--raw-candidate-depth",
+            "25",
+            "--broad-candidate-depth",
+            "75",
+            "--concept-candidate-depth",
+            "100",
+            "--candidate-fusion",
+            "round_robin",
             "--evidence-units",
             "segments/evidence_units.jsonl",
         ]
@@ -1259,6 +1274,11 @@ def test_cmd_query_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
     assert calls["query_kwargs"]["project_dir"] == Path("/tmp/project")
     assert calls["query_kwargs"]["query"] == "gradient arrow"
     assert calls["query_kwargs"]["limit"] == 3
+    assert calls["query_kwargs"]["candidate_depth"] == 50
+    assert calls["query_kwargs"]["raw_candidate_depth"] == 25
+    assert calls["query_kwargs"]["broad_candidate_depth"] == 75
+    assert calls["query_kwargs"]["concept_candidate_depth"] == 100
+    assert calls["query_kwargs"]["candidate_fusion"] == "round_robin"
     assert calls["query_kwargs"]["evidence_units"].as_posix() == "segments/evidence_units.jsonl"
     assert json.loads(capsys.readouterr().out)["query"] == "gradient arrow"
 
