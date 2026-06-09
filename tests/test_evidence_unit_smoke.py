@@ -209,6 +209,91 @@ class ModalityAwareRerankFakeClient(AvailableFakeClient):
         return {"hits": hits[:limit], "processingTimeMs": 2}
 
 
+class CandidateDepthDiagnosticsFakeClient(AvailableFakeClient):
+    def search(
+        self,
+        index_uid: str,
+        query: str,
+        limit: int = 10,
+        filter: str | list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        if index_uid != "evidence_index":
+            return super().search(index_uid, query, limit=limit, filter=filter, **kwargs)
+        if "rank seventy five" in query:
+            hits = [
+                _fake_depth_hit(
+                    index,
+                    segment_id=f"seg_decoy_{index:03d}",
+                    evidence_unit_id=f"evu_decoy_{index:03d}",
+                    has_visual=True,
+                    has_verified=index == 1,
+                )
+                for index in range(1, 75)
+            ]
+            hits.append(
+                _fake_depth_hit(
+                    75,
+                    segment_id="seg_private_1",
+                    evidence_unit_id="evu_seg_private_1",
+                    has_visual=False,
+                    has_verified=False,
+                    evidence_text="SECRET target rank seventy five evidence",
+                    semantic_text="SECRET target rank seventy five semantic",
+                )
+            )
+            return {"hits": hits[:limit], "processingTimeMs": 3}
+        hits = [
+            _fake_depth_hit(
+                index,
+                segment_id=f"seg_decoy_missing_{index:03d}",
+                evidence_unit_id=f"evu_decoy_missing_{index:03d}",
+                has_visual=index <= 3,
+                has_verified=index == 1,
+            )
+            for index in range(1, 101)
+        ]
+        return {"hits": hits[:limit], "processingTimeMs": 3}
+
+
+def _fake_depth_hit(
+    index: int,
+    *,
+    segment_id: str,
+    evidence_unit_id: str,
+    has_visual: bool,
+    has_verified: bool,
+    evidence_text: str | None = None,
+    semantic_text: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "evidence_unit_id": evidence_unit_id,
+        "project_id": "project_private",
+        "video_id": "video_private",
+        "target_segment_id": segment_id,
+        "source_segment_ids": [segment_id],
+        "start_time": float(index),
+        "end_time": float(index + 1),
+        "evidence_text": evidence_text or f"SECRET decoy evidence {index}",
+        "semantic_text": semantic_text or f"SECRET decoy semantic {index}",
+        "visual_state_ids": [f"vstate_{index}"] if has_visual else [],
+        "visual_entity_ids": [f"entity_{index}"] if has_visual else [],
+        "verified_entity_link_ids": [f"link_verified_{index}"] if has_verified else [],
+        "candidate_entity_link_ids": [f"link_candidate_{index}"] if has_visual else [],
+        "alignment_status": "verified" if has_verified else "candidate",
+        "source_quality": {
+            "has_visual_state": has_visual,
+            "has_visual_entity": has_visual,
+            "has_vlm_entity": has_visual,
+            "has_verified_link": has_verified,
+            "has_timestamp_fallback_link": False,
+            "candidate_link_count": 1 if has_visual else 0,
+            "verified_link_count": 1 if has_verified else 0,
+        },
+        "_rankingScore": max(0.0, 1.0 - index / 200.0),
+    }
+
+
 def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: Path) -> None:
     project_dir = _write_project(tmp_path)
     manifest_path = _write_manifest(
@@ -333,7 +418,25 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert rows[0]["rag_input_inspectable"] is True
     assert payload["target_rank_diagnostics"]["target_configured_count"] == 1
     assert payload["target_rank_diagnostics"]["target_found_in_top_k_count"] == 1
+    assert payload["target_rank_diagnostics"]["target_found_at_50_count"] == 1
+    assert payload["target_rank_diagnostics"]["target_found_at_100_count"] == 1
+    assert payload["target_rank_diagnostics"]["target_found@50"] == 1.0
+    assert payload["target_rank_diagnostics"]["target_found@100"] == 1.0
     assert payload["target_rank_diagnostics"]["rank_bucket_counts"] == {"top5": 1}
+    assert payload["target_rank_diagnostics"]["target_found_bucket_counts"] == {
+        "top1": 0,
+        "top5": 1,
+        "top10": 0,
+        "top50": 0,
+        "top100": 0,
+        "not_found": 0,
+    }
+    assert payload["target_rank_diagnostics"]["not_found_reason_code_counts"] == {
+        "candidate_recall_failure": 0,
+        "text_coverage_failure": 0,
+        "modality_evidence_missing": 0,
+        "index_settings_issue": 0,
+    }
     assert payload["target_rank_diagnostics"]["found_target_candidate_link_signal_counts"][
         "timestamp_fallback"
     ] == 1
@@ -470,6 +573,93 @@ def test_evidence_unit_smoke_modality_aware_rerank_reports_public_breakdown(
         str(project_dir),
     ]:
         assert sensitive not in public_text
+
+
+def test_evidence_unit_smoke_candidate_depth_diagnostics_aggregate_public_safe_reasons(
+    tmp_path: Path,
+) -> None:
+    project_dir = _write_project(tmp_path)
+    manifest_path = _write_manifest(
+        tmp_path,
+        project_dir=project_dir,
+        extra_suite={
+            "target_rank_limit": 100,
+            "queries": [
+                {
+                    "query_id": "q_top100",
+                    "query_label": "public top100 target",
+                    "query_text": "PRIVATE RAW rank seventy five target query",
+                    "expected_segment_id": "seg_private_1",
+                    "expected_modality": "both",
+                    "query_type": "multimodal_grounded",
+                    "concept_aliases": ["public optimizer alias"],
+                },
+                {
+                    "query_id": "q_not_found",
+                    "query_label": "public not found target",
+                    "query_text": "PRIVATE RAW missing visual target query",
+                    "expected_segment_id": "seg_private_2",
+                    "expected_modality": "both",
+                    "query_type": "visual_object_reference",
+                    "concept_aliases": ["public missing alias"],
+                },
+            ],
+        },
+    )
+
+    run = run_evidence_unit_smoke(
+        client=CandidateDepthDiagnosticsFakeClient(),
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "public",
+        repo_root=tmp_path,
+    )
+
+    payload = json.loads(run.metrics_path.read_text(encoding="utf-8"))
+    rows = [
+        json.loads(line)
+        for line in run.query_results_path.read_text(encoding="utf-8").splitlines()
+    ]
+    summary = payload["target_rank_diagnostics"]
+
+    assert rows[0]["target_diagnostics"]["target_rank"] == 75
+    assert rows[0]["target_diagnostics"]["target_rank_bucket"] == "top100"
+    assert rows[0]["target_diagnostics"]["target_found@50"] is False
+    assert rows[0]["target_diagnostics"]["target_found@100"] is True
+    assert "target_found_top100" in rows[0]["target_diagnostics"]["public_safe_reason_codes"]
+    assert rows[1]["target_diagnostics"]["target_found_in_top_k"] is False
+    assert rows[1]["target_diagnostics"]["target_quality_source"] == "artifact"
+    assert "candidate_recall_failure" in rows[1]["target_diagnostics"]["not_found_reason_codes"]
+    assert summary["target_found_at_50_count"] == 0
+    assert summary["target_found_at_100_count"] == 1
+    assert summary["target_found@50"] == 0.0
+    assert summary["target_found@100"] == 0.5
+    assert summary["target_found_bucket_counts"] == {
+        "top1": 0,
+        "top5": 0,
+        "top10": 0,
+        "top50": 0,
+        "top100": 1,
+        "not_found": 1,
+    }
+    assert summary["not_found_reason_code_counts"]["candidate_recall_failure"] == 1
+    assert "target_evidence_text_bucket_counts" in summary
+    assert "target_semantic_text_bucket_counts" in summary
+    assert "target_query_term_bucket_counts" in summary
+    assert summary["target_feature_coverage_counts"]["has_visual_state"] >= 1
+    assert payload["suites"][0]["target_rank_diagnostics"]["target_found@100"] == 0.5
+
+    public_text = _public_text(run)
+    for sensitive in [
+        "PRIVATE RAW rank seventy five",
+        "PRIVATE RAW missing visual",
+        "SECRET target rank seventy five",
+        "seg_private_1",
+        "evu_seg_private_1",
+        str(project_dir),
+    ]:
+        assert sensitive not in public_text
+    assert "target_found@100" in run.summary_path.read_text(encoding="utf-8")
+    assert "candidate_recall_failure" in public_text
 
 
 def test_evidence_unit_smoke_unavailable_path_records_skip_reason(tmp_path: Path) -> None:

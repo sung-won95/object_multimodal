@@ -1,0 +1,552 @@
+{
+  "schema_version": "evidence-unit-retrieval-smoke-public-v1",
+  "run_id": "mit_lec01_02_public_safe_eval_slice_v1",
+  "manifest_ref": "1212b5b6bf2f",
+  "privacy": {
+    "raw_query_text": "redacted",
+    "transcript_excerpt": "redacted",
+    "semantic_text": "redacted",
+    "local_paths": "redacted",
+    "raw_ids": "hashed_refs",
+    "raw_response_in_public_output": false
+  },
+  "dry_run": true,
+  "meilisearch": {
+    "available": false,
+    "status": "dry_run",
+    "skip_reason": "dry_run_requested"
+  },
+  "suite_count": 2,
+  "query_count": 24,
+  "query_status_counts": {
+    "dry_run": 24
+  },
+  "evaluation_slice": {
+    "enabled": true,
+    "schema_version": "evidence-unit-public-safe-slice-v1",
+    "slice_id": "mit_lec01_02_public_safe_v1",
+    "lecture_count": 2,
+    "query_target_count": 24,
+    "target_configured_count": 24,
+    "expected_modality_counts": {
+      "audio": 12,
+      "both": 12
+    },
+    "query_type_counts": {
+      "concept_explanation": 6,
+      "multimodal_grounded": 6,
+      "definition_lookup": 4,
+      "visual_object_reference": 3,
+      "formula_table_lookup": 2,
+      "audio_reasoning": 3
+    },
+    "concept_alias_coverage": {
+      "queries_with_aliases": 24,
+      "queries_without_aliases": 0,
+      "concept_alias_total": 71,
+      "max_aliases_per_query": 3
+    },
+    "timestamp_hint_counts": {
+      "20-25m": 3,
+      "15-20m": 3,
+      "05-10m": 2,
+      "10-15m": 3,
+      "00-05m": 2,
+      "25-30m": 2,
+      "30-35m": 2,
+      "35-40m": 2,
+      "40-45m": 1,
+      "45-50m": 1,
+      "50-55m": 1,
+      "55-60m": 1,
+      "60-65m": 1
+    },
+    "privacy": "raw_query_text/transcripts/answers/evidence_text/local_paths_excluded",
+    "public_note": "This slice stores public-safe query IDs, concept-alias counts, target configuration, modality/query-type aggregates, and timestamp-hint buckets. Raw query text and raw evidence text are excluded."
+  },
+  "suites": [
+    {
+      "schema_version": "evidence-unit-retrieval-smoke-public-v1",
+      "suite_id": "mitdl_lec01_public_safe_slice",
+      "project_ref": "da853722962b",
+      "query_count": 12,
+      "build": {
+        "status": "dry_run",
+        "counts": {},
+        "alignment_status_counts": {},
+        "source_quality_counts": {},
+        "link_counts": {},
+        "link_diagnostics": {
+          "schema_version": "oarag-object-link-diagnostics-public-v1",
+          "evidence_units_total": 0,
+          "candidate_visual_support": {
+            "units_with_candidate_visual_support": 0,
+            "units_with_candidate_link": 0,
+            "units_with_timestamp_fallback_link": 0,
+            "candidate_links": 0,
+            "timestamp_fallback_links": 0,
+            "candidate_link_signal_counts": {
+              "temporal_overlap": 0,
+              "lexical_overlap": 0,
+              "mention_deictic_hook": 0,
+              "spatial_position": 0,
+              "visual_text_overlap": 0,
+              "vlm_object_visual_description_overlap": 0,
+              "semantic_domain_hint": 0,
+              "timestamp_fallback": 0
+            },
+            "paper_claim_eligible": false
+          },
+          "verified_object_alignment": {
+            "units_with_verified_object_alignment": 0,
+            "verified_links": 0,
+            "verified_link_source_counts": {
+              "explicit_verified_flag": 0,
+              "explicit_verified_status": 0,
+              "human_gold": 0,
+              "vlm_verifier": 0,
+              "strict_deterministic_rule": 0,
+              "unspecified_verified": 0
+            },
+            "timestamp_fallback_counted_as_verified": false,
+            "paper_claim_eligible_units": 0
+          },
+          "candidate_link_signal_counts": {
+            "temporal_overlap": 0,
+            "lexical_overlap": 0,
+            "mention_deictic_hook": 0,
+            "spatial_position": 0,
+            "visual_text_overlap": 0,
+            "vlm_object_visual_description_overlap": 0,
+            "semantic_domain_hint": 0,
+            "timestamp_fallback": 0
+          },
+          "verified_link_source_counts": {
+            "explicit_verified_flag": 0,
+            "explicit_verified_status": 0,
+            "human_gold": 0,
+            "vlm_verifier": 0,
+            "strict_deterministic_rule": 0,
+            "unspecified_verified": 0
+          },
+          "public_note": "Candidate visual support is reported separately from verified object alignment. Timestamp fallback links are candidate/fallback evidence only and are never counted as verified object alignment unless an explicit verified field is present."
+        },
+        "visual_state_coverage": {},
+        "concept_field_coverage": {
+          "schema_version": "oarag-evidence-unit-concept-field-coverage-v1",
+          "source": "dry_run",
+          "concept_graph_loaded": false,
+          "concept_graph_records_total": 0,
+          "concept_nodes_total": 0,
+          "concept_relation_edges_total": 0,
+          "evidence_units_total": 0,
+          "evidence_units_with_concepts": 0,
+          "evidence_units_with_concept_relations": 0,
+          "evidence_units_with_concept_search_text": 0,
+          "unit_concept_coverage_ratio": null,
+          "unit_concept_relation_coverage_ratio": null,
+          "concept_mentions": 0,
+          "concept_relation_mentions": 0,
+          "timestamp_only_concept_relation_mentions": 0,
+          "timestamp_only_counted_as_verified_object_alignment": false,
+          "public_note": "Concept field coverage reports public-safe counts only. Concept graph labels, aliases, and relation text may enrich local evidence-unit search, but timestamp-only concept relation signals remain candidate-only and are not verified object alignment."
+        },
+        "vlm_object_evidence_coverage": {
+          "status": "dry_run",
+          "skip_reason": "dry_run_requested"
+        }
+      },
+      "meilisearch": {
+        "available": false,
+        "status": "dry_run"
+      },
+      "index": {
+        "ref": "index:e41422dbcd78",
+        "status": "dry_run",
+        "skip_reason": "dry_run_requested"
+      },
+      "rag_input_inspection": {
+        "query_count": 12,
+        "queried_count": 0,
+        "inspectable_top_hit_count": 0,
+        "top_hits_with_visual_state_count": 0,
+        "top_hits_with_concept_count": 0,
+        "artifact_evidence_units_total": null,
+        "public_note": "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/semantic_text availability flags; text content remains redacted from this report."
+      },
+      "target_rank_diagnostics": {
+        "target_configured_count": 12,
+        "target_found_in_top_k_count": 0,
+        "target_found_at_50_count": 0,
+        "target_found_at_100_count": 0,
+        "target_found@50": null,
+        "target_found@100": null,
+        "rank_bucket_counts": {
+          "not_queried": 12
+        },
+        "target_found_bucket_counts": {
+          "top1": 0,
+          "top5": 0,
+          "top10": 0,
+          "top50": 0,
+          "top100": 0,
+          "not_found": 0
+        },
+        "not_found_reason_code_counts": {
+          "candidate_recall_failure": 0,
+          "text_coverage_failure": 0,
+          "modality_evidence_missing": 0,
+          "index_settings_issue": 0
+        },
+        "public_safe_reason_code_counts": {
+          "not_queried": 12
+        },
+        "target_evidence_text_bucket_counts": {},
+        "target_semantic_text_bucket_counts": {},
+        "target_query_term_bucket_counts": {},
+        "target_feature_coverage_counts": {},
+        "found_target_quality_counts": {},
+        "found_target_candidate_link_signal_counts": {},
+        "found_target_verified_link_source_counts": {},
+        "quality_delta_flag_counts": {},
+        "found_target_query_term_bucket_counts": {},
+        "public_note": "Target rank diagnostics use only configured expected segment IDs and hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
+      },
+      "rerank_diagnostics": {
+        "enabled_query_count": 0,
+        "computed_query_count": 0,
+        "top_changed_count": 0,
+        "base_top_match_count": 0,
+        "reranked_top_match_count": 0,
+        "base_target_rank_bucket_counts": {},
+        "reranked_target_rank_bucket_counts": {},
+        "reranked_top_score_component_presence_counts": {},
+        "public_note": "Rerank diagnostics compare base and deterministic quality-aware ordering using only candidate metadata. Expected targets are evaluation-only labels."
+      },
+      "modality_aware_rerank_diagnostics": {
+        "enabled_query_count": 0,
+        "computed_query_count": 0,
+        "top_changed_count": 0,
+        "query_type_counts": {},
+        "failure_mode_counts": {},
+        "base_target_rank_bucket_counts": {},
+        "reranked_target_rank_bucket_counts": {},
+        "score_component_presence_counts": {},
+        "public_note": "Failure modes separate candidate recall failure, rerank regression, ranking improvement/success, and remaining evidence-quality or ranking-tie cases."
+      },
+      "evaluation_slice": {
+        "suite_id": "mitdl_lec01_public_safe_slice",
+        "query_target_count": 12,
+        "target_configured_count": 12,
+        "expected_modality_counts": {
+          "audio": 6,
+          "both": 6
+        },
+        "query_type_counts": {
+          "concept_explanation": 4,
+          "multimodal_grounded": 3,
+          "definition_lookup": 2,
+          "visual_object_reference": 1,
+          "formula_table_lookup": 1,
+          "audio_reasoning": 1
+        },
+        "concept_alias_coverage": {
+          "queries_with_aliases": 12,
+          "queries_without_aliases": 0,
+          "concept_alias_total": 35,
+          "max_aliases_per_query": 3
+        },
+        "timestamp_hint_counts": {
+          "20-25m": 2,
+          "15-20m": 2,
+          "05-10m": 2,
+          "10-15m": 2,
+          "00-05m": 1,
+          "25-30m": 1,
+          "30-35m": 1,
+          "35-40m": 1
+        }
+      }
+    },
+    {
+      "schema_version": "evidence-unit-retrieval-smoke-public-v1",
+      "suite_id": "mitdl_lec02_public_safe_slice",
+      "project_ref": "0f9b5d848c95",
+      "query_count": 12,
+      "build": {
+        "status": "dry_run",
+        "counts": {},
+        "alignment_status_counts": {},
+        "source_quality_counts": {},
+        "link_counts": {},
+        "link_diagnostics": {
+          "schema_version": "oarag-object-link-diagnostics-public-v1",
+          "evidence_units_total": 0,
+          "candidate_visual_support": {
+            "units_with_candidate_visual_support": 0,
+            "units_with_candidate_link": 0,
+            "units_with_timestamp_fallback_link": 0,
+            "candidate_links": 0,
+            "timestamp_fallback_links": 0,
+            "candidate_link_signal_counts": {
+              "temporal_overlap": 0,
+              "lexical_overlap": 0,
+              "mention_deictic_hook": 0,
+              "spatial_position": 0,
+              "visual_text_overlap": 0,
+              "vlm_object_visual_description_overlap": 0,
+              "semantic_domain_hint": 0,
+              "timestamp_fallback": 0
+            },
+            "paper_claim_eligible": false
+          },
+          "verified_object_alignment": {
+            "units_with_verified_object_alignment": 0,
+            "verified_links": 0,
+            "verified_link_source_counts": {
+              "explicit_verified_flag": 0,
+              "explicit_verified_status": 0,
+              "human_gold": 0,
+              "vlm_verifier": 0,
+              "strict_deterministic_rule": 0,
+              "unspecified_verified": 0
+            },
+            "timestamp_fallback_counted_as_verified": false,
+            "paper_claim_eligible_units": 0
+          },
+          "candidate_link_signal_counts": {
+            "temporal_overlap": 0,
+            "lexical_overlap": 0,
+            "mention_deictic_hook": 0,
+            "spatial_position": 0,
+            "visual_text_overlap": 0,
+            "vlm_object_visual_description_overlap": 0,
+            "semantic_domain_hint": 0,
+            "timestamp_fallback": 0
+          },
+          "verified_link_source_counts": {
+            "explicit_verified_flag": 0,
+            "explicit_verified_status": 0,
+            "human_gold": 0,
+            "vlm_verifier": 0,
+            "strict_deterministic_rule": 0,
+            "unspecified_verified": 0
+          },
+          "public_note": "Candidate visual support is reported separately from verified object alignment. Timestamp fallback links are candidate/fallback evidence only and are never counted as verified object alignment unless an explicit verified field is present."
+        },
+        "visual_state_coverage": {},
+        "concept_field_coverage": {
+          "schema_version": "oarag-evidence-unit-concept-field-coverage-v1",
+          "source": "dry_run",
+          "concept_graph_loaded": false,
+          "concept_graph_records_total": 0,
+          "concept_nodes_total": 0,
+          "concept_relation_edges_total": 0,
+          "evidence_units_total": 0,
+          "evidence_units_with_concepts": 0,
+          "evidence_units_with_concept_relations": 0,
+          "evidence_units_with_concept_search_text": 0,
+          "unit_concept_coverage_ratio": null,
+          "unit_concept_relation_coverage_ratio": null,
+          "concept_mentions": 0,
+          "concept_relation_mentions": 0,
+          "timestamp_only_concept_relation_mentions": 0,
+          "timestamp_only_counted_as_verified_object_alignment": false,
+          "public_note": "Concept field coverage reports public-safe counts only. Concept graph labels, aliases, and relation text may enrich local evidence-unit search, but timestamp-only concept relation signals remain candidate-only and are not verified object alignment."
+        },
+        "vlm_object_evidence_coverage": {
+          "status": "dry_run",
+          "skip_reason": "dry_run_requested"
+        }
+      },
+      "meilisearch": {
+        "available": false,
+        "status": "dry_run"
+      },
+      "index": {
+        "ref": "index:e41422dbcd78",
+        "status": "dry_run",
+        "skip_reason": "dry_run_requested"
+      },
+      "rag_input_inspection": {
+        "query_count": 12,
+        "queried_count": 0,
+        "inspectable_top_hit_count": 0,
+        "top_hits_with_visual_state_count": 0,
+        "top_hits_with_concept_count": 0,
+        "artifact_evidence_units_total": null,
+        "public_note": "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/semantic_text availability flags; text content remains redacted from this report."
+      },
+      "target_rank_diagnostics": {
+        "target_configured_count": 12,
+        "target_found_in_top_k_count": 0,
+        "target_found_at_50_count": 0,
+        "target_found_at_100_count": 0,
+        "target_found@50": null,
+        "target_found@100": null,
+        "rank_bucket_counts": {
+          "not_queried": 12
+        },
+        "target_found_bucket_counts": {
+          "top1": 0,
+          "top5": 0,
+          "top10": 0,
+          "top50": 0,
+          "top100": 0,
+          "not_found": 0
+        },
+        "not_found_reason_code_counts": {
+          "candidate_recall_failure": 0,
+          "text_coverage_failure": 0,
+          "modality_evidence_missing": 0,
+          "index_settings_issue": 0
+        },
+        "public_safe_reason_code_counts": {
+          "not_queried": 12
+        },
+        "target_evidence_text_bucket_counts": {},
+        "target_semantic_text_bucket_counts": {},
+        "target_query_term_bucket_counts": {},
+        "target_feature_coverage_counts": {},
+        "found_target_quality_counts": {},
+        "found_target_candidate_link_signal_counts": {},
+        "found_target_verified_link_source_counts": {},
+        "quality_delta_flag_counts": {},
+        "found_target_query_term_bucket_counts": {},
+        "public_note": "Target rank diagnostics use only configured expected segment IDs and hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
+      },
+      "rerank_diagnostics": {
+        "enabled_query_count": 0,
+        "computed_query_count": 0,
+        "top_changed_count": 0,
+        "base_top_match_count": 0,
+        "reranked_top_match_count": 0,
+        "base_target_rank_bucket_counts": {},
+        "reranked_target_rank_bucket_counts": {},
+        "reranked_top_score_component_presence_counts": {},
+        "public_note": "Rerank diagnostics compare base and deterministic quality-aware ordering using only candidate metadata. Expected targets are evaluation-only labels."
+      },
+      "modality_aware_rerank_diagnostics": {
+        "enabled_query_count": 0,
+        "computed_query_count": 0,
+        "top_changed_count": 0,
+        "query_type_counts": {},
+        "failure_mode_counts": {},
+        "base_target_rank_bucket_counts": {},
+        "reranked_target_rank_bucket_counts": {},
+        "score_component_presence_counts": {},
+        "public_note": "Failure modes separate candidate recall failure, rerank regression, ranking improvement/success, and remaining evidence-quality or ranking-tie cases."
+      },
+      "evaluation_slice": {
+        "suite_id": "mitdl_lec02_public_safe_slice",
+        "query_target_count": 12,
+        "target_configured_count": 12,
+        "expected_modality_counts": {
+          "both": 6,
+          "audio": 6
+        },
+        "query_type_counts": {
+          "multimodal_grounded": 3,
+          "definition_lookup": 2,
+          "concept_explanation": 2,
+          "formula_table_lookup": 1,
+          "audio_reasoning": 2,
+          "visual_object_reference": 2
+        },
+        "concept_alias_coverage": {
+          "queries_with_aliases": 12,
+          "queries_without_aliases": 0,
+          "concept_alias_total": 36,
+          "max_aliases_per_query": 3
+        },
+        "timestamp_hint_counts": {
+          "00-05m": 1,
+          "10-15m": 1,
+          "15-20m": 1,
+          "20-25m": 1,
+          "25-30m": 1,
+          "30-35m": 1,
+          "35-40m": 1,
+          "40-45m": 1,
+          "45-50m": 1,
+          "50-55m": 1,
+          "55-60m": 1,
+          "60-65m": 1
+        }
+      }
+    }
+  ],
+  "rag_input_inspection": {
+    "query_count": 24,
+    "queried_count": 0,
+    "inspectable_top_hit_count": 0,
+    "top_hits_with_visual_state_count": 0,
+    "top_hits_with_concept_count": 0,
+    "artifact_evidence_units_total": null,
+    "public_note": "Inspectable means the top hit exposes evidence unit metadata plus evidence_text/semantic_text availability flags; text content remains redacted from this report."
+  },
+  "target_rank_diagnostics": {
+    "target_configured_count": 24,
+    "target_found_in_top_k_count": 0,
+    "target_found_at_50_count": 0,
+    "target_found_at_100_count": 0,
+    "target_found@50": null,
+    "target_found@100": null,
+    "rank_bucket_counts": {
+      "not_queried": 24
+    },
+    "target_found_bucket_counts": {
+      "top1": 0,
+      "top5": 0,
+      "top10": 0,
+      "top50": 0,
+      "top100": 0,
+      "not_found": 0
+    },
+    "not_found_reason_code_counts": {
+      "candidate_recall_failure": 0,
+      "text_coverage_failure": 0,
+      "modality_evidence_missing": 0,
+      "index_settings_issue": 0
+    },
+    "public_safe_reason_code_counts": {
+      "not_queried": 24
+    },
+    "target_evidence_text_bucket_counts": {},
+    "target_semantic_text_bucket_counts": {},
+    "target_query_term_bucket_counts": {},
+    "target_feature_coverage_counts": {},
+    "found_target_quality_counts": {},
+    "found_target_candidate_link_signal_counts": {},
+    "found_target_verified_link_source_counts": {},
+    "quality_delta_flag_counts": {},
+    "found_target_query_term_bucket_counts": {},
+    "public_note": "Target rank diagnostics use only configured expected segment IDs and hashed/count/flag evidence-unit metadata; raw query text and raw IDs remain redacted."
+  },
+  "rerank_diagnostics": {
+    "enabled_query_count": 0,
+    "computed_query_count": 0,
+    "top_changed_count": 0,
+    "base_top_match_count": 0,
+    "reranked_top_match_count": 0,
+    "base_target_rank_bucket_counts": {},
+    "reranked_target_rank_bucket_counts": {},
+    "reranked_top_score_component_presence_counts": {},
+    "public_note": "Rerank diagnostics compare base and deterministic quality-aware ordering using only candidate metadata. Expected targets are evaluation-only labels."
+  },
+  "modality_aware_rerank_diagnostics": {
+    "enabled_query_count": 0,
+    "computed_query_count": 0,
+    "top_changed_count": 0,
+    "query_type_counts": {},
+    "failure_mode_counts": {},
+    "base_target_rank_bucket_counts": {},
+    "reranked_target_rank_bucket_counts": {},
+    "score_component_presence_counts": {},
+    "public_note": "Failure modes separate candidate recall failure, rerank regression, ranking improvement/success, and remaining evidence-quality or ranking-tie cases."
+  },
+  "quality_rerank_requested": false,
+  "modality_aware_rerank_requested": false,
+  "object_alignment_note": "timestamp-only overlap is reported as candidate/fallback evidence only; it is not counted as verified object alignment",
+  "visual_state_note": "visual_state intervals are candidate support from sampled-frame midpoint coverage or an explicit artifact; interval overlap is not verified object alignment"
+}

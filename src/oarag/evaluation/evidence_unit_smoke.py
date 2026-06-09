@@ -34,6 +34,13 @@ PUBLIC_SAFE_SLICE_SCHEMA_VERSION = "evidence-unit-public-safe-slice-v1"
 DEFAULT_OUTPUT_ROOT = Path("reports") / "paper" / "evidence_units_retrieval_smoke"
 DEFAULT_INDEX_PREFIX = "evidence_units_smoke"
 DEFAULT_TARGET_RANK_LIMIT = 50
+TARGET_FOUND_BUCKETS = ("top1", "top5", "top10", "top50", "top100", "not_found")
+NOT_FOUND_REASON_CODES = (
+    "candidate_recall_failure",
+    "text_coverage_failure",
+    "modality_evidence_missing",
+    "index_settings_issue",
+)
 
 
 class EvidenceUnitSmokeClient(Protocol):
@@ -342,6 +349,12 @@ def _query_row(
     query_text = _query_text(query_row)
     expected_segment_ids = _expected_segment_ids(query_row)
     expected_evidence_unit_ids = _expected_evidence_unit_ids(query_row)
+    target_artifact = _expected_target_artifact(
+        project_dir=project_dir,
+        evidence_units=evidence_units,
+        expected_segment_ids=expected_segment_ids,
+        expected_evidence_unit_ids=expected_evidence_unit_ids,
+    )
 
     response = query_project_evidence_units(
         client=client,  # type: ignore[arg-type]
@@ -366,6 +379,8 @@ def _query_row(
         expected_evidence_unit_ids=expected_evidence_unit_ids,
         search_depth=target_rank_limit,
         query_text=query_text,
+        query_row=query_row,
+        target_artifact=target_artifact,
     )
     base_target_diagnostics = _target_diagnostics(
         candidates=base_candidates,
@@ -373,6 +388,8 @@ def _query_row(
         expected_evidence_unit_ids=expected_evidence_unit_ids,
         search_depth=target_rank_limit,
         query_text=query_text,
+        query_row=query_row,
+        target_artifact=target_artifact,
     )
     reranked_candidates = _quality_rerank_candidates(candidates) if quality_rerank else []
     reranked_top_candidate = reranked_candidates[0] if reranked_candidates else {}
@@ -392,6 +409,8 @@ def _query_row(
             expected_evidence_unit_ids=expected_evidence_unit_ids,
             search_depth=target_rank_limit,
             query_text=query_text,
+            query_row=query_row,
+            target_artifact=target_artifact,
         )
         if quality_rerank
         else {}
@@ -530,7 +549,12 @@ def _skipped_query_row(
             ),
             "target_found_in_top_k": None,
             "target_rank_bucket": "not_queried",
+            "target_found_bucket": "not_queried",
             "target_search_depth": 0,
+            "target_found@50": None,
+            "target_found@100": None,
+            "public_safe_reason_codes": ["not_queried"],
+            "not_found_reason_codes": [],
         },
         "base_target_diagnostics": None,
         "rerank_diagnostics": {
@@ -581,7 +605,12 @@ def _dry_run_query_row(
             "target_found_in_top_k": None,
             "target_rank": None,
             "target_rank_bucket": "not_queried" if target_configured else "not_configured",
+            "target_found_bucket": "not_queried" if target_configured else "not_configured",
             "target_search_depth": target_rank_limit,
+            "target_found@50": None,
+            "target_found@100": None,
+            "public_safe_reason_codes": ["not_queried"],
+            "not_found_reason_codes": [],
         },
         "base_target_diagnostics": None,
         "rerank_diagnostics": {
@@ -887,6 +916,8 @@ def _target_diagnostics(
     expected_evidence_unit_ids: set[str],
     search_depth: int,
     query_text: str,
+    query_row: dict[str, Any],
+    target_artifact: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     expected_evidence_unit_ids = expected_evidence_unit_ids or set()
     if not expected_segment_ids and not expected_evidence_unit_ids:
@@ -894,7 +925,12 @@ def _target_diagnostics(
             "target_configured": False,
             "target_found_in_top_k": None,
             "target_rank_bucket": "not_configured",
+            "target_found_bucket": "not_configured",
             "target_search_depth": search_depth,
+            "target_found@50": None,
+            "target_found@100": None,
+            "public_safe_reason_codes": ["target_not_configured"],
+            "not_found_reason_codes": [],
         }
     target_candidate = None
     target_rank = None
@@ -909,31 +945,55 @@ def _target_diagnostics(
             break
     top_candidate = candidates[0] if candidates else {}
     found = target_candidate is not None and target_rank is not None
+    public_target = target_candidate or target_artifact or {}
+    reason_codes = _target_reason_codes(
+        query_row=query_row,
+        query_text=query_text,
+        found=found,
+        target_rank=target_rank,
+        search_depth=search_depth,
+        top_candidate=top_candidate,
+        target_candidate=target_candidate or {},
+        target_artifact=target_artifact or {},
+    )
     return {
         "target_configured": True,
         "target_found_in_top_k": found,
         "target_rank": target_rank,
         "target_rank_bucket": _target_rank_bucket(target_rank),
+        "target_found_bucket": _target_rank_bucket(target_rank),
         "target_search_depth": search_depth,
-        "target_evidence_unit_ref": (
-            _id_ref(_optional_str(target_candidate.get("evidence_unit_id")), prefix="evu")
-            if target_candidate
-            else None
+        "target_found@50": _target_found_at(target_rank, search_depth=search_depth, k=50),
+        "target_found@100": _target_found_at(target_rank, search_depth=search_depth, k=100),
+        "target_evidence_unit_ref": _id_ref(
+            _optional_str(public_target.get("evidence_unit_id")),
+            prefix="evu",
+        )
+        if public_target
+        else None,
+        "target_quality_source": (
+            "candidate" if target_candidate else "artifact" if target_artifact else "not_available"
         ),
-        "target_evidence_unit_quality": _candidate_quality_summary(target_candidate or {}),
-        "target_content_coverage": _candidate_content_coverage(target_candidate or {}),
+        "target_evidence_unit_quality": _candidate_quality_summary(public_target),
+        "target_content_coverage": _candidate_content_coverage(public_target),
         "target_query_term_coverage": _query_term_coverage(
             query_text=query_text,
-            candidate=target_candidate or {},
+            candidate=public_target,
         ),
         "top_vs_target_quality_delta": _candidate_quality_delta(
             top_candidate=top_candidate,
-            target_candidate=target_candidate or {},
+            target_candidate=public_target,
         ),
         "top_vs_target_content_delta": _candidate_content_delta(
             top_candidate=top_candidate,
-            target_candidate=target_candidate or {},
+            target_candidate=public_target,
             query_text=query_text,
+        ),
+        "public_safe_reason_codes": reason_codes,
+        "not_found_reason_codes": (
+            [code for code in reason_codes if code in NOT_FOUND_REASON_CODES]
+            if not found
+            else []
         ),
     }
 
@@ -949,7 +1009,146 @@ def _target_rank_bucket(rank: int | None) -> str:
         return "top10"
     if rank <= 50:
         return "top50"
+    if rank <= 100:
+        return "top100"
     return "not_found"
+
+
+def _target_found_at(rank: int | None, *, search_depth: int, k: int) -> bool | None:
+    if rank is not None:
+        return rank <= k
+    if search_depth >= k:
+        return False
+    return None
+
+
+def _expected_target_artifact(
+    *,
+    project_dir: Path,
+    evidence_units: Path | None,
+    expected_segment_ids: set[str],
+    expected_evidence_unit_ids: set[str],
+) -> dict[str, Any] | None:
+    if not expected_segment_ids and not expected_evidence_unit_ids:
+        return None
+    try:
+        rows = _evidence_unit_rows(project_dir=project_dir, evidence_units=evidence_units)
+    except Exception:  # noqa: BLE001 - diagnostics should still run if local artifacts are unavailable.
+        return None
+    for row in rows:
+        if _candidate_matches_expected(row, expected_segment_ids, expected_evidence_unit_ids):
+            return row
+    return None
+
+
+def _target_reason_codes(
+    *,
+    query_row: dict[str, Any],
+    query_text: str,
+    found: bool,
+    target_rank: int | None,
+    search_depth: int,
+    top_candidate: dict[str, Any],
+    target_candidate: dict[str, Any],
+    target_artifact: dict[str, Any],
+) -> list[str]:
+    target = target_candidate or target_artifact
+    codes: list[str] = []
+    if found:
+        codes.append(f"target_found_{_target_rank_bucket(target_rank)}")
+    elif target:
+        codes.append("candidate_recall_failure")
+    else:
+        codes.append("index_settings_issue")
+
+    if not target:
+        return _dedupe_preserve_order(codes)
+
+    quality = _candidate_quality_summary(target)
+    content = _candidate_content_coverage(target)
+    term_coverage = _query_term_coverage(query_text=query_text, candidate=target)
+    evidence_bucket = str(content.get("evidence_text_bucket") or "unknown")
+    semantic_bucket = str(content.get("semantic_text_bucket") or "unknown")
+    query_bucket = str(term_coverage.get("combined_match_bucket") or "unknown")
+    if evidence_bucket in {"empty", "short"}:
+        codes.append(f"target_evidence_text_{evidence_bucket}")
+    if semantic_bucket in {"empty", "short"}:
+        codes.append(f"target_semantic_text_{semantic_bucket}")
+    if query_bucket in {"none", "low", "no_query_terms"}:
+        codes.append("text_coverage_failure")
+        codes.append(f"target_query_term_coverage_{query_bucket}")
+
+    concept_coverage = _mapping(quality.get("concept_field_coverage"))
+    if not bool(quality.get("has_concept")):
+        codes.append("target_concept_missing")
+    if _concept_alias_count(query_row) > 0 and int(concept_coverage.get("concept_alias_count") or 0) <= 0:
+        codes.append("target_concept_alias_missing")
+
+    candidate_support = _mapping(quality.get("candidate_visual_support"))
+    verified_alignment = _mapping(quality.get("verified_object_alignment"))
+    has_visual_state = bool(quality.get("has_visual_state"))
+    has_vlm = bool(quality.get("has_vlm_entity"))
+    has_candidate_support = bool(candidate_support.get("has_candidate_visual_support"))
+    has_verified_alignment = bool(verified_alignment.get("has_verified_object_alignment"))
+    if not has_visual_state:
+        codes.append("target_visual_state_missing")
+    if not has_vlm:
+        codes.append("target_vlm_missing")
+    if not has_candidate_support:
+        codes.append("target_candidate_link_missing")
+    if not has_verified_alignment:
+        codes.append("target_verified_link_missing")
+    if _query_expects_visual_evidence(query_row) and not (
+        has_visual_state or has_vlm or has_candidate_support or has_verified_alignment
+    ):
+        codes.append("modality_evidence_missing")
+
+    quality_delta = _candidate_quality_delta(
+        top_candidate=top_candidate,
+        target_candidate=target,
+    )
+    if any(
+        quality_delta.get(key) is True
+        for key in ("top_has_more_visual_entities", "top_has_verified_link_only")
+    ):
+        codes.append("top_hit_quality_stronger_than_target")
+    if any(
+        quality_delta.get(key) is True
+        for key in ("target_has_more_visual_entities", "target_has_verified_link_only")
+    ):
+        codes.append("target_quality_stronger_than_top_hit")
+    content_delta = _candidate_content_delta(
+        top_candidate=top_candidate,
+        target_candidate=target,
+        query_text=query_text,
+    )
+    if int(content_delta.get("combined_query_term_match_count_delta") or 0) > 0:
+        codes.append("top_hit_text_coverage_stronger_than_target")
+    if content_delta.get("target_has_more_query_term_matches") is True:
+        codes.append("target_text_coverage_stronger_than_top_hit")
+    if not found and search_depth < 100:
+        codes.append("candidate_depth_below_100")
+    return _dedupe_preserve_order(codes)
+
+
+def _query_expects_visual_evidence(query_row: dict[str, Any]) -> bool:
+    modality = (_optional_str(query_row.get("expected_modality")) or "").casefold()
+    query_type = (_optional_str(query_row.get("query_type")) or "").casefold()
+    return modality in {"both", "visual"} or query_type in {
+        "formula_table_lookup",
+        "multimodal_grounded",
+        "visual_object_reference",
+    }
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
 
 
 def _candidate_quality_summary(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -1587,6 +1786,13 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- index status: `{index.get('status')}`",
                 f"- RAG input inspectable top hits: `{suite.get('rag_input_inspection', {}).get('inspectable_top_hit_count', 0)}`",
                 f"- target rank buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('rank_bucket_counts', {}), sort_keys=True)}`",
+                f"- target found buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('target_found_bucket_counts', {}), sort_keys=True)}`",
+                f"- target_found@50: `{suite.get('target_rank_diagnostics', {}).get('target_found@50')}`",
+                f"- target_found@100: `{suite.get('target_rank_diagnostics', {}).get('target_found@100')}`",
+                f"- not_found reason codes: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('not_found_reason_code_counts', {}), sort_keys=True)}`",
+                f"- target evidence-text buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('target_evidence_text_bucket_counts', {}), sort_keys=True)}`",
+                f"- target semantic-text buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('target_semantic_text_bucket_counts', {}), sort_keys=True)}`",
+                f"- target feature coverage: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('target_feature_coverage_counts', {}), sort_keys=True)}`",
                 f"- found target query-term buckets: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('found_target_query_term_bucket_counts', {}), sort_keys=True)}`",
                 f"- found target candidate link signals: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('found_target_candidate_link_signal_counts', {}), sort_keys=True)}`",
                 f"- found target verified link sources: `{json.dumps(suite.get('target_rank_diagnostics', {}).get('found_target_verified_link_source_counts', {}), sort_keys=True)}`",
@@ -1643,10 +1849,68 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
         str(diag.get("target_rank_bucket") or "unknown")
         for diag in configured
     )
+    target_found_buckets = Counter({bucket: 0 for bucket in TARGET_FOUND_BUCKETS})
+    target_found_buckets.update(
+        str(diag.get("target_found_bucket") or diag.get("target_rank_bucket") or "unknown")
+        for diag in configured
+    )
     target_quality = Counter()
     target_candidate_signal_counts = Counter()
     target_verified_source_counts = Counter()
     top_better_counts = Counter()
+    reason_code_counts = Counter()
+    not_found_reason_code_counts = Counter()
+    evidence_text_buckets = Counter()
+    semantic_text_buckets = Counter()
+    query_term_buckets_all = Counter()
+    target_feature_coverage = Counter()
+    target_found_at_50 = 0
+    target_found_at_100 = 0
+    target_found_at_50_available = 0
+    target_found_at_100_available = 0
+    for diag in configured:
+        if diag.get("target_found@50") is not None:
+            target_found_at_50_available += 1
+            if diag.get("target_found@50") is True:
+                target_found_at_50 += 1
+        if diag.get("target_found@100") is not None:
+            target_found_at_100_available += 1
+            if diag.get("target_found@100") is True:
+                target_found_at_100 += 1
+        for code in _string_list(diag.get("public_safe_reason_codes")):
+            reason_code_counts[code] += 1
+        for code in _string_list(diag.get("not_found_reason_codes")):
+            not_found_reason_code_counts[code] += 1
+        coverage = _mapping(diag.get("target_content_coverage"))
+        if coverage:
+            evidence_text_buckets[str(coverage.get("evidence_text_bucket") or "unknown")] += 1
+            semantic_text_buckets[str(coverage.get("semantic_text_bucket") or "unknown")] += 1
+        terms = _mapping(diag.get("target_query_term_coverage"))
+        if terms:
+            query_term_buckets_all[str(terms.get("combined_match_bucket") or "unknown")] += 1
+        quality = _mapping(diag.get("target_evidence_unit_quality"))
+        if quality:
+            for key in (
+                "has_visual_state",
+                "has_visual_entity",
+                "has_vlm_entity",
+                "has_concept",
+                "has_concept_relation",
+                "has_verified_link",
+                "has_timestamp_fallback_link",
+            ):
+                if quality.get(key) is True:
+                    target_feature_coverage[key] += 1
+            if _mapping(quality.get("candidate_visual_support")).get(
+                "has_candidate_visual_support"
+            ) is True:
+                target_feature_coverage["has_candidate_visual_support"] += 1
+            if _mapping(quality.get("verified_object_alignment")).get(
+                "has_verified_object_alignment"
+            ) is True:
+                target_feature_coverage["has_verified_object_alignment"] += 1
+            if _mapping(quality.get("rag_fields")).get("concept_search_text_available") is True:
+                target_feature_coverage["has_concept_search_text"] += 1
     for diag in found:
         quality = _mapping(diag.get("target_evidence_unit_quality"))
         if quality.get("has_visual_state") is True:
@@ -1696,7 +1960,24 @@ def _target_rank_inspection(query_rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "target_configured_count": len(configured),
         "target_found_in_top_k_count": len(found),
+        "target_found_at_50_count": target_found_at_50,
+        "target_found_at_100_count": target_found_at_100,
+        "target_found@50": _ratio_or_none(target_found_at_50, target_found_at_50_available),
+        "target_found@100": _ratio_or_none(target_found_at_100, target_found_at_100_available),
         "rank_bucket_counts": dict(buckets),
+        "target_found_bucket_counts": {
+            bucket: int(target_found_buckets.get(bucket) or 0)
+            for bucket in TARGET_FOUND_BUCKETS
+        },
+        "not_found_reason_code_counts": {
+            code: int(not_found_reason_code_counts.get(code) or 0)
+            for code in NOT_FOUND_REASON_CODES
+        },
+        "public_safe_reason_code_counts": dict(reason_code_counts),
+        "target_evidence_text_bucket_counts": dict(evidence_text_buckets),
+        "target_semantic_text_bucket_counts": dict(semantic_text_buckets),
+        "target_query_term_bucket_counts": dict(query_term_buckets_all),
+        "target_feature_coverage_counts": dict(target_feature_coverage),
         "found_target_quality_counts": dict(target_quality),
         "found_target_candidate_link_signal_counts": dict(target_candidate_signal_counts),
         "found_target_verified_link_source_counts": dict(target_verified_source_counts),
