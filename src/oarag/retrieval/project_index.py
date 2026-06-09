@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
@@ -57,6 +58,39 @@ LOCAL_HASH_DOCUMENT_VECTOR_WARNING = (
     "local_hash_v1 document vectors are deterministic smoke-test fallback only; "
     "do not report semantic embedding quality without a provider-backed vector manifest."
 )
+TRANSCRIPT_KEYWORD_STOPWORDS = {
+    "about",
+    "after",
+    "again",
+    "also",
+    "because",
+    "before",
+    "between",
+    "from",
+    "here",
+    "into",
+    "just",
+    "like",
+    "more",
+    "next",
+    "only",
+    "over",
+    "that",
+    "then",
+    "there",
+    "these",
+    "this",
+    "those",
+    "through",
+    "with",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "will",
+    "would",
+}
 UNVERIFIED_DOCUMENT_VECTOR_WARNING = (
     "Document vectors do not carry provider-backed embedding metadata; semantic "
     "quality claims are disabled for this index summary."
@@ -1320,6 +1354,7 @@ def _evidence_unit_index_document(document: dict[str, Any]) -> dict[str, Any]:
     indexed = dict(document)
     indexed["evidence_unit_id"] = evidence_unit_id
     indexed.update(_evidence_unit_concept_search_fields(indexed))
+    indexed.update(_evidence_unit_search_enrichment_fields(indexed))
     semantic_text = _compact_text(str(indexed.get("semantic_text") or ""))
     evidence_text = _compact_text(str(indexed.get("evidence_text") or ""))
     transcript_text = _compact_text(str(indexed.get("transcript_window_text") or ""))
@@ -1336,18 +1371,113 @@ def _evidence_unit_index_document(document: dict[str, Any]) -> dict[str, Any]:
             "concept_labels",
             "concept_aliases",
             "concept_relation_text",
+            "concept_search_text",
         ],
+    )
+    transcript_keywords = " ".join(_string_list(indexed.get("transcript_keywords")))
+    link_signal_text = _compact_text(
+        " ".join(
+            _unique_text_values(
+                [
+                    indexed.get("candidate_link_signal_summary"),
+                    indexed.get("verified_link_signal_summary"),
+                ]
+            )
+        )
     )
     if not evidence_text:
         evidence_text = _compact_text(
-            " ".join(part for part in (transcript_text, visual_text) if part)
+            " ".join(
+                part
+                for part in (
+                    transcript_text,
+                    transcript_keywords,
+                    visual_text,
+                    concept_text,
+                    link_signal_text,
+                )
+                if part
+            )
         )
         indexed["evidence_text"] = evidence_text
     if not semantic_text:
         indexed["semantic_text"] = _compact_text(
-            " ".join(part for part in (evidence_text, transcript_text, visual_text, concept_text) if part)
+            " ".join(
+                part
+                for part in (
+                    evidence_text,
+                    transcript_text,
+                    transcript_keywords,
+                    visual_text,
+                    concept_text,
+                    link_signal_text,
+                )
+                if part
+            )
         )
     return indexed
+
+
+def _evidence_unit_search_enrichment_fields(document: dict[str, Any]) -> dict[str, Any]:
+    transcript_text = _compact_text(str(document.get("transcript_window_text") or ""))
+    transcript_keywords = _string_list(document.get("transcript_keywords"))
+    if not transcript_keywords:
+        transcript_keywords = _transcript_keywords(transcript_text)
+    visual_state_text = _compact_text(str(document.get("visual_state_text") or ""))
+    if not visual_state_text:
+        visual_state_text = text_from_document_fields(document, ["visual_states.state_summary", "visual_states.detected_text"])
+    visual_entity_text = _compact_text(str(document.get("visual_entity_text") or ""))
+    if not visual_entity_text:
+        visual_entity_text = text_from_document_fields(
+            document,
+            [
+                "visual_entities.text",
+                "visual_entities.visual_description",
+                "visual_entities.entity_type",
+                "visual_entities.detected_text",
+                "visual_entities.position",
+                "visual_entities.relations",
+            ],
+        )
+    concept_search_text = _compact_text(str(document.get("concept_search_text") or ""))
+    if not concept_search_text:
+        concept_search_text = text_from_document_fields(
+            document,
+            [
+                "concept_labels",
+                "concept_aliases",
+                "concept_relation_text",
+                "concepts.canonical_label",
+                "concepts.description",
+                "concepts.definition",
+                "concepts.example",
+                "concepts.formula",
+                "concepts.source_signals",
+                "concept_relations.source_signals",
+                "concept_relations.evidence_source_types",
+            ],
+        )
+    source_quality = document.get("source_quality") if isinstance(document.get("source_quality"), dict) else {}
+    candidate_link_signal_summary = _compact_text(str(document.get("candidate_link_signal_summary") or ""))
+    if not candidate_link_signal_summary:
+        candidate_link_signal_summary = _link_signal_summary_text(
+            source_quality.get("candidate_link_signal_counts"),
+            prefix="candidate",
+        )
+    verified_link_signal_summary = _compact_text(str(document.get("verified_link_signal_summary") or ""))
+    if not verified_link_signal_summary:
+        verified_link_signal_summary = _link_signal_summary_text(
+            source_quality.get("verified_link_source_counts"),
+            prefix="verified",
+        )
+    return {
+        "transcript_keywords": transcript_keywords,
+        "visual_state_text": visual_state_text,
+        "visual_entity_text": visual_entity_text,
+        "concept_search_text": concept_search_text,
+        "candidate_link_signal_summary": candidate_link_signal_summary,
+        "verified_link_signal_summary": verified_link_signal_summary,
+    }
 
 
 def _evidence_unit_concept_search_fields(document: dict[str, Any]) -> dict[str, Any]:
@@ -1727,6 +1857,39 @@ def _unique_text_values(values: Iterable[Any]) -> list[str]:
         seen.add(text)
         text_values.append(text)
     return text_values
+
+
+def _transcript_keywords(text: str, *, limit: int = 32) -> list[str]:
+    tokens = [
+        token
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_+-]{2,}", text.casefold())
+        if token not in TRANSCRIPT_KEYWORD_STOPWORDS
+    ]
+    counts: dict[str, int] = {}
+    first_seen: dict[str, int] = {}
+    for index, token in enumerate(tokens):
+        counts[token] = counts.get(token, 0) + 1
+        first_seen.setdefault(token, index)
+    ranked = sorted(counts, key=lambda token: (-counts[token], first_seen[token], token))
+    return ranked[: max(0, int(limit))]
+
+
+def _link_signal_summary_text(value: Any, *, prefix: str) -> str:
+    if not isinstance(value, dict):
+        return ""
+    labels = []
+    for key, count in sorted(value.items()):
+        try:
+            parsed_count = int(count or 0)
+        except (TypeError, ValueError):
+            parsed_count = 0
+        if parsed_count > 0:
+            labels.append(f"{prefix} {_humanize_snake(str(key))}")
+    return _compact_text(" ".join(labels))
+
+
+def _humanize_snake(value: str) -> str:
+    return _compact_text(value.replace("_", " "))
 
 
 def _compact_text(value: str) -> str:

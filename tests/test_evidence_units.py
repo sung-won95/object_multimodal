@@ -119,6 +119,11 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert target["source_quality"]["visual_state_detected_text_count"] == 1
     assert target["source_quality"]["visual_entity_detected_text_count"] == 1
     assert target["source_quality"]["visual_description_count"] == 1
+    assert "gradient" in target["transcript_keywords"]
+    assert "descent" in target["transcript_keywords"]
+    assert "Gradient Descent" in target["visual_state_text"]
+    assert "Arrow indicating the descent direction" in target["visual_entity_text"]
+    assert "candidate temporal overlap" in target["candidate_link_signal_summary"]
     assert target["visual_states"][0]["detected_text"] == ["Gradient Descent"]
     assert target["visual_states"][0]["interval_source"] == "sampled_frame_midpoint"
     assert target["visual_states"][0]["valid_start_time"] <= target["end_time"]
@@ -126,7 +131,14 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert target["visual_entities"][0]["detected_text"] == ["descent"]
     assert summary["counts"]["units_with_detected_text"] >= 1
     assert summary["counts"]["units_with_visual_description"] >= 1
+    assert summary["counts"]["units_with_transcript_keywords"] >= 1
+    assert summary["counts"]["units_with_visual_state_search_text"] >= 1
+    assert summary["counts"]["units_with_visual_entity_search_text"] >= 1
+    assert summary["counts"]["units_with_link_signal_search_text"] >= 1
+    assert summary["search_field_coverage"]["field_unit_counts"]["transcript_keywords"] >= 1
+    assert summary["search_field_coverage"]["field_unit_counts"]["visual_entity_text"] >= 1
     assert "gradient arrow" in target["semantic_text"]
+    assert "candidate temporal overlap" in target["semantic_text"]
 
     manifest = json.loads((project_dir / "manifests" / "project_manifest.json").read_text())
     assert manifest["artifacts"]["evidence_units"].endswith("segments/evidence_units.jsonl")
@@ -449,6 +461,12 @@ def test_build_project_evidence_units_adds_concept_graph_search_fields(
                 "label": "Gradient descent",
                 "aliases": ["steepest descent"],
                 "concept_type": "algorithm",
+                "metadata": {
+                    "canonical_label": "Gradient descent optimizer",
+                    "definition": "public optimizer definition",
+                    "example": "public optimizer example",
+                    "formula": "theta update rule",
+                },
                 "source_evidence_unit_ids": ["evu_public_001_0001"],
                 "evidence_sources": [
                     {
@@ -540,6 +558,10 @@ def test_build_project_evidence_units_adds_concept_graph_search_fields(
     assert first["concept_labels"] == ["Gradient descent", "Loss function"]
     assert first["concept_aliases"] == ["steepest descent", "objective function"]
     assert "Gradient descent related to Loss function" in first["concept_relation_text"]
+    assert "Gradient descent optimizer" in first["concept_search_text"]
+    assert "public optimizer definition" in first["concept_search_text"]
+    assert "public optimizer example" in first["concept_search_text"]
+    assert "theta update rule" in first["semantic_text"]
     assert "steepest descent" in first["semantic_text"]
     assert first["source_quality"]["has_concept"] is True
     assert first["source_quality"]["has_concept_relation"] is True
@@ -558,10 +580,14 @@ def test_build_project_evidence_units_adds_concept_graph_search_fields(
     assert summary["concept_field_coverage"][
         "timestamp_only_counted_as_verified_object_alignment"
     ] is False
+    assert summary["search_field_coverage"]["field_unit_counts"]["concept_search_text"] == 2
 
     manifest = json.loads((project_dir / "manifests" / "project_manifest.json").read_text())
     assert manifest["evidence_unit_storage"]["concept_field_coverage"][
         "evidence_units_with_concept_search_text"
+    ] == 2
+    assert manifest["evidence_unit_storage"]["search_field_coverage"]["field_unit_counts"][
+        "concept_search_text"
     ] == 2
 
 
@@ -595,15 +621,23 @@ def test_index_project_evidence_units_indexes_artifact_and_preserves_fallback_st
                     "has_vlm_entity": False,
                     "has_verified_link": False,
                     "has_timestamp_fallback_link": True,
+                    "candidate_link_signal_counts": {
+                        "temporal_overlap": 1,
+                        "timestamp_fallback": 1,
+                    },
+                    "verified_link_source_counts": {
+                        "explicit_verified_flag": 0,
+                    },
                 },
                 "evidence_text": "Transcript: This gradient arrow shows descent.",
-                "semantic_text": "gradient arrow descent",
                 "concept_ids": ["concept_gradient_descent"],
                 "concepts": [
                     {
                         "concept_id": "concept_gradient_descent",
                         "label": "Gradient descent",
                         "aliases": ["steepest descent"],
+                        "canonical_label": "Gradient descent optimizer",
+                        "definition": "public optimizer definition",
                     }
                 ],
                 "concept_relations": [
@@ -631,6 +665,11 @@ def test_index_project_evidence_units_indexes_artifact_and_preserves_fallback_st
     assert client.settings["searchableAttributes"][:2] == ["semantic_text", "evidence_text"]
     assert "concept_labels" in client.settings["searchableAttributes"]
     assert "concept_aliases" in client.settings["searchableAttributes"]
+    assert "concept_search_text" in client.settings["searchableAttributes"]
+    assert "transcript_keywords" in client.settings["searchableAttributes"]
+    assert "visual_state_text" in client.settings["searchableAttributes"]
+    assert "visual_entity_text" in client.settings["searchableAttributes"]
+    assert "candidate_link_signal_summary" in client.settings["searchableAttributes"]
     assert "concept_relation_text" in client.settings["searchableAttributes"]
     assert summary["indexed_documents"] == 1
     assert summary["alignment_status_counts"] == {"candidate": 1}
@@ -641,6 +680,10 @@ def test_index_project_evidence_units_indexes_artifact_and_preserves_fallback_st
     assert indexed["concept_labels"] == ["Gradient descent", "Learning rate"]
     assert indexed["concept_aliases"] == ["steepest descent"]
     assert indexed["concept_relation_text"] == "Gradient descent uses Learning rate"
+    assert indexed["concept_search_text"]
+    assert indexed["transcript_keywords"] == ["gradient", "arrow", "shows", "descent"]
+    assert "candidate temporal overlap" in indexed["candidate_link_signal_summary"]
+    assert "public optimizer definition" in indexed["semantic_text"]
     assert indexed["candidate_entity_link_statuses"] == {
         "link_timestamp": "timestamp_fallback"
     }
