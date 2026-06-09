@@ -46,6 +46,7 @@ from oarag.ingestion.ingest import (
 )
 from oarag.core.io import write_json
 from oarag.evaluation.lecture_smoke import run_lecture_smoke
+from oarag.evaluation.mapping_quality import generate_mapping_quality_report
 from oarag.evaluation.evidence_unit_smoke import run_evidence_unit_smoke
 from oarag.evaluation.cross_lecture_retrieval_smoke import run_cross_lecture_retrieval_smoke
 from oarag.integrations.meili import (
@@ -1813,6 +1814,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cross_lecture_retrieval_smoke.set_defaults(func=cmd_cross_lecture_retrieval_smoke)
 
+    mapping_quality = subparsers.add_parser(
+        "mapping-quality-report",
+        help="Generate a public-safe aggregate mapping/concept quality report for lecture projects",
+    )
+    mapping_location = mapping_quality.add_mutually_exclusive_group(required=True)
+    mapping_location.add_argument(
+        "--manifest",
+        type=Path,
+        help="JSON manifest with projects/project_dirs/lectures entries.",
+    )
+    mapping_location.add_argument(
+        "--project-dir",
+        action="append",
+        type=Path,
+        dest="project_dirs",
+        help="Lecture project artifact directory. Repeat for multiple projects.",
+    )
+    mapping_quality.add_argument("--output-dir", required=True, type=Path)
+    mapping_quality.add_argument(
+        "--csv",
+        action="store_true",
+        help="Also write a public-safe artifact coverage CSV.",
+    )
+    mapping_quality.set_defaults(func=cmd_mapping_quality_report)
+
     return parser
 
 
@@ -3069,6 +3095,27 @@ def cmd_cross_lecture_retrieval_smoke(args: argparse.Namespace) -> None:
                 "metrics": str(run.metrics_path),
                 "query_results": str(run.query_results_path),
                 "summary": str(run.summary_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+def cmd_mapping_quality_report(args: argparse.Namespace) -> None:
+    run = generate_mapping_quality_report(
+        project_dirs=args.project_dirs,
+        manifest_path=args.manifest,
+        output_dir=args.output_dir,
+        write_csv=args.csv,
+    )
+    print(
+        json.dumps(
+            {
+                "output_dir": str(run.output_dir),
+                "metrics": str(run.metrics_path),
+                "summary": str(run.markdown_path),
+                "csv": str(run.csv_path) if run.csv_path is not None else None,
             },
             ensure_ascii=False,
             indent=2,
