@@ -1482,6 +1482,7 @@ def _run_matrix_query(
         bundles=bundles,
         expected_segment_ids=expected_segment_ids,
         expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges,
     )
 
     row = {
@@ -1665,6 +1666,7 @@ def _run_teaching_moment_matrix_query(
         bundles=bundles,
         expected_segment_ids=expected_segment_ids,
         expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges,
     )
 
     row = {
@@ -1884,6 +1886,7 @@ def _run_evidence_unit_matrix_query(
         bundles=bundles,
         expected_segment_ids=expected_segment_ids,
         expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges,
     )
 
     row = {
@@ -1991,6 +1994,7 @@ def _skipped_matrix_row(
         bundles=[],
         expected_segment_ids=expected_segment_ids,
         expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges,
     )
     row = {
         "schema_version": MATRIX_SCHEMA_VERSION,
@@ -2281,6 +2285,8 @@ def _matrix_variant_metrics(
             "has_timestamp_fallback_link",
         ),
         "target_rank_bucket_counts": _target_rank_bucket_counts(rows),
+        "target_match_type_counts": _target_match_type_counts(rows),
+        "target_match_rank_bucket_counts": _target_match_rank_bucket_counts(rows),
         "target_found_in_top_k_count": _target_found_in_top_k_count(rows),
         "target_found_in_top_k_ratio": _target_found_in_top_k_ratio(rows),
         "top1_expected_segment_match_ratio": _ratio(rows, "top1_expected_segment_match"),
@@ -2397,16 +2403,23 @@ def _expected_ranges(query_row: dict[str, Any]) -> list[tuple[float, float]]:
     ranges = parse_time_hint(time_hint)
     if ranges:
         return ranges
-    start = _optional_float(query_row.get("expected_start_time"))
-    end = _optional_float(query_row.get("expected_end_time"))
-    if start is not None or end is not None:
-        if start is None:
-            start = end
-        if end is None:
-            end = start
-        if start is not None and end is not None:
-            return [(min(start, end), max(start, end))]
-    points = query_row.get("timestamp_points", query_row.get("expected_timestamp"))
+    for start_key, end_key in (
+        ("expected_start_time", "expected_end_time"),
+        ("gold_start_time", "gold_end_time"),
+    ):
+        start = _optional_float(query_row.get(start_key))
+        end = _optional_float(query_row.get(end_key))
+        if start is not None or end is not None:
+            if start is None:
+                start = end
+            if end is None:
+                end = start
+            if start is not None and end is not None:
+                return [(min(start, end), max(start, end))]
+    points = query_row.get(
+        "timestamp_points",
+        query_row.get("expected_timestamp", query_row.get("gold_timestamp_center")),
+    )
     if not isinstance(points, list):
         points = [] if points is None else [points]
     ranges = []
@@ -2418,11 +2431,17 @@ def _expected_ranges(query_row: dict[str, Any]) -> list[tuple[float, float]]:
 
 
 def _expected_segment_ids(query_row: dict[str, Any]) -> list[str]:
-    values = query_row.get(
+    values: list[str] = []
+    for key in (
         "expected_segment_ids",
-        query_row.get("expected_segment_id", query_row.get("target_segment_id")),
-    )
-    return _string_list(values)
+        "expected_segment_id",
+        "target_segment_id",
+        "gold_segment_id",
+    ):
+        values.extend(_string_list(query_row.get(key)))
+        if values:
+            break
+    return list(dict.fromkeys(values))
 
 
 def _expected_window_ids(query_row: dict[str, Any]) -> list[str]:
@@ -3356,34 +3375,88 @@ def _matrix_target_rank_diagnostics(
     bundles: list[dict[str, Any]],
     expected_segment_ids: list[str],
     expected_window_ids: list[str],
+    expected_ranges: list[tuple[float, float]],
 ) -> dict[str, Any]:
-    configured = bool(expected_segment_ids or expected_window_ids)
+    configured = bool(expected_segment_ids or expected_window_ids or expected_ranges)
     target_rank: int | None = None
+    target_match_type: str | None = None
+    match_ranks: dict[str, int | None] = {
+        "exact": None,
+        "window": None,
+        "time_overlap": None,
+    }
     if configured:
         for rank, bundle in enumerate(bundles, start=1):
             candidate = bundle.get("candidate") if isinstance(bundle.get("candidate"), dict) else {}
-            if _bundle_matches_expected_target(
+            match_flags = _bundle_expected_target_match_flags(
                 bundle=bundle,
                 candidate=candidate,
                 expected_segment_ids=expected_segment_ids,
                 expected_window_ids=expected_window_ids,
-            ):
-                target_rank = rank
-                break
+                expected_ranges=expected_ranges,
+            )
+            for match_type in ("exact", "window", "time_overlap"):
+                if match_flags[match_type] and match_ranks[match_type] is None:
+                    match_ranks[match_type] = rank
+            if target_rank is None:
+                for match_type in ("exact", "window", "time_overlap"):
+                    if match_flags[match_type]:
+                        target_rank = rank
+                        target_match_type = match_type
+                        break
+    match_found = {key: value is not None for key, value in match_ranks.items()}
+    match_rank_buckets = {
+        key: _target_rank_bucket(value, configured=configured)
+        for key, value in match_ranks.items()
+    }
     return {
         "target_configured": configured,
         "target_rank": target_rank,
         "target_rank_bucket": _target_rank_bucket(target_rank, configured=configured),
+        "target_match_type": target_match_type,
+        "target_match_bucket": target_match_type
+        if target_match_type is not None
+        else ("not_found" if configured else "not_configured"),
         "found_in_top_k": bool(target_rank is not None) if configured else None,
+        "match_found": match_found,
+        "match_ranks": match_ranks,
+        "match_rank_buckets": match_rank_buckets,
     }
 
 
-def _bundle_matches_expected_target(
+def _bundle_expected_target_match_flags(
     *,
     bundle: dict[str, Any],
     candidate: dict[str, Any],
     expected_segment_ids: list[str],
     expected_window_ids: list[str],
+    expected_ranges: list[tuple[float, float]],
+) -> dict[str, bool]:
+    return {
+        "exact": _bundle_matches_exact_target(
+            bundle=bundle,
+            candidate=candidate,
+            expected_segment_ids=expected_segment_ids,
+        ),
+        "window": _bundle_matches_expected_window(
+            bundle=bundle,
+            candidate=candidate,
+            expected_segment_ids=expected_segment_ids,
+            expected_window_ids=expected_window_ids,
+        ),
+        "time_overlap": _bundle_matches_expected_time_overlap(
+            bundle=bundle,
+            candidate=candidate,
+            expected_ranges=expected_ranges,
+        ),
+    }
+
+
+def _bundle_matches_exact_target(
+    *,
+    bundle: dict[str, Any],
+    candidate: dict[str, Any],
+    expected_segment_ids: list[str],
 ) -> bool:
     if expected_segment_ids:
         values = _string_list(
@@ -3394,7 +3467,6 @@ def _bundle_matches_expected_target(
                 _mapping(bundle.get("evidence_window")).get("target_segment_id"),
             ]
         )
-        values.extend(_string_list(candidate.get("source_segment_ids")))
         for source in _list_of_dicts(bundle.get("retrieval_sources")):
             values.extend(
                 _string_list(
@@ -3405,16 +3477,106 @@ def _bundle_matches_expected_target(
                     ]
                 )
             )
-            values.extend(_string_list(source.get("source_segment_ids")))
         if set(values).intersection(expected_segment_ids):
             return True
+    return False
+
+
+def _bundle_matches_expected_window(
+    *,
+    bundle: dict[str, Any],
+    candidate: dict[str, Any],
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+) -> bool:
+    if expected_segment_ids:
+        source_segment_ids = _string_list(candidate.get("source_segment_ids"))
+        for source in _list_of_dicts(bundle.get("retrieval_sources")):
+            source_segment_ids.extend(_string_list(source.get("source_segment_ids")))
+        if set(source_segment_ids).intersection(expected_segment_ids):
+            return True
     if expected_window_ids:
-        values = _string_list([candidate.get("window_id")])
+        values = _string_list(
+            [
+                candidate.get("window_id"),
+                _mapping(bundle.get("evidence_window")).get("window_id"),
+            ]
+        )
         for source in _list_of_dicts(bundle.get("retrieval_sources")):
             values.extend(_string_list([source.get("window_id")]))
         if set(values).intersection(expected_window_ids):
             return True
     return False
+
+
+def _bundle_matches_expected_time_overlap(
+    *,
+    bundle: dict[str, Any],
+    candidate: dict[str, Any],
+    expected_ranges: list[tuple[float, float]],
+) -> bool:
+    if not expected_ranges:
+        return False
+    ranges = _candidate_time_ranges(candidate)
+    evidence_window = _mapping(bundle.get("evidence_window"))
+    ranges.extend(_candidate_time_ranges(evidence_window))
+    ranges.extend(_candidate_time_ranges(_mapping(evidence_window.get("target_segment"))))
+    for source in _list_of_dicts(bundle.get("retrieval_sources")):
+        ranges.extend(_candidate_time_ranges(source))
+    return any(
+        _time_ranges_overlap(candidate_range, expected_range)
+        for candidate_range in ranges
+        for expected_range in expected_ranges
+    )
+
+
+def _candidate_time_ranges(candidate: dict[str, Any]) -> list[tuple[float, float]]:
+    ranges: list[tuple[float, float]] = []
+    for start_key, end_key in (
+        ("start_time", "end_time"),
+        ("target_start_time", "target_end_time"),
+    ):
+        start = _optional_float(candidate.get(start_key))
+        end = _optional_float(candidate.get(end_key))
+        if start is not None or end is not None:
+            if start is None:
+                start = end
+            if end is None:
+                end = start
+            if start is not None and end is not None:
+                ranges.append((min(start, end), max(start, end)))
+    for point_key in ("timestamp_center", "target_timestamp_center", "timestamp"):
+        point = _optional_float(candidate.get(point_key))
+        if point is not None:
+            ranges.append((point, point))
+    return ranges
+
+
+def _time_ranges_overlap(
+    left: tuple[float, float],
+    right: tuple[float, float],
+) -> bool:
+    left_start, left_end = left
+    right_start, right_end = right
+    return max(left_start, right_start) <= min(left_end, right_end)
+
+
+def _bundle_matches_expected_target(
+    *,
+    bundle: dict[str, Any],
+    candidate: dict[str, Any],
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+    expected_ranges: list[tuple[float, float]] | None = None,
+) -> bool:
+    match_flags = _bundle_expected_target_match_flags(
+        bundle=bundle,
+        candidate=candidate,
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges or [],
+    )
+    return any(match_flags.values())
 
 
 def _target_rank_bucket(rank: int | None, *, configured: bool) -> str:
@@ -4469,6 +4631,32 @@ def _target_rank_bucket_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
             continue
         counts[str(diagnostics.get("target_rank_bucket") or "not_found")] += 1
     return dict(sorted(counts.items()))
+
+
+def _target_match_type_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter()
+    for row in rows:
+        diagnostics = _mapping(row.get("target_rank_diagnostics"))
+        if diagnostics.get("target_configured") is not True:
+            continue
+        counts[str(diagnostics.get("target_match_bucket") or "not_found")] += 1
+    return dict(sorted(counts.items()))
+
+
+def _target_match_rank_bucket_counts(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    counts: dict[str, Counter[str]] = {
+        "exact": Counter(),
+        "window": Counter(),
+        "time_overlap": Counter(),
+    }
+    for row in rows:
+        diagnostics = _mapping(row.get("target_rank_diagnostics"))
+        if diagnostics.get("target_configured") is not True:
+            continue
+        buckets = _mapping(diagnostics.get("match_rank_buckets"))
+        for match_type in counts:
+            counts[match_type][str(buckets.get(match_type) or "not_found")] += 1
+    return {key: dict(sorted(value.items())) for key, value in counts.items()}
 
 
 def _target_found_in_top_k_count(rows: list[dict[str, Any]]) -> int:

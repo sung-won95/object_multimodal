@@ -7,6 +7,9 @@ from oarag.benchmark import parse_time_hint, run_benchmark
 from oarag.evaluation.benchmark import (
     _answer_failure_reason,
     _answer_grounding_metrics,
+    _expected_ranges,
+    _expected_segment_ids,
+    _matrix_target_rank_diagnostics,
     _public_answer_summary,
 )
 from oarag.evaluation.quality_gate import evaluate_retrieval_quality_gate
@@ -428,6 +431,76 @@ DEFAULT_MATRIX_VARIANTS = [
 
 def test_parse_time_hint_extracts_multiple_ranges() -> None:
     assert parse_time_hint("95-102s or 126-131s") == [(95.0, 102.0), (126.0, 131.0)]
+
+
+def test_evidence_unit_target_rank_diagnostics_separate_window_and_time_matches() -> None:
+    query_row = {
+        "gold_segment_id": "seg_gold_public",
+        "gold_start_time": "10.0",
+        "gold_end_time": "12.0",
+    }
+    diagnostics = _matrix_target_rank_diagnostics(
+        bundles=[
+            {
+                "candidate": {
+                    "target_segment_id": "seg_neighbor_public",
+                    "source_segment_ids": ["seg_gold_public", "seg_neighbor_public"],
+                    "start_time": 30.0,
+                    "end_time": 32.0,
+                },
+                "evidence_window": {
+                    "target_segment_id": "seg_neighbor_public",
+                    "start_time": 30.0,
+                    "end_time": 32.0,
+                },
+                "retrieval_sources": [
+                    {
+                        "source": "evidence_unit",
+                        "target_segment_id": "seg_neighbor_public",
+                        "source_segment_ids": ["seg_gold_public"],
+                    }
+                ],
+            },
+            {
+                "candidate": {
+                    "target_segment_id": "seg_gold_public",
+                    "source_segment_ids": ["seg_gold_public"],
+                    "start_time": 40.0,
+                    "end_time": 42.0,
+                },
+                "evidence_window": {"target_segment_id": "seg_gold_public"},
+                "retrieval_sources": [],
+            },
+            {
+                "candidate": {
+                    "target_segment_id": "seg_time_public",
+                    "source_segment_ids": ["seg_time_public"],
+                    "start_time": 10.5,
+                    "end_time": 11.5,
+                },
+                "evidence_window": {"target_segment_id": "seg_time_public"},
+                "retrieval_sources": [],
+            },
+        ],
+        expected_segment_ids=_expected_segment_ids(query_row),
+        expected_window_ids=[],
+        expected_ranges=_expected_ranges(query_row),
+    )
+
+    assert diagnostics["target_rank"] == 1
+    assert diagnostics["target_rank_bucket"] == "top1"
+    assert diagnostics["target_match_type"] == "window"
+    assert diagnostics["match_found"] == {
+        "exact": True,
+        "window": True,
+        "time_overlap": True,
+    }
+    assert diagnostics["match_ranks"] == {"exact": 2, "window": 1, "time_overlap": 3}
+    assert diagnostics["match_rank_buckets"] == {
+        "exact": "top5",
+        "window": "top1",
+        "time_overlap": "top5",
+    }
 
 
 def test_answer_visual_citation_metrics_count_only_claim_references() -> None:
@@ -1012,8 +1085,25 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert suite["variant_metrics"]["evidence_unit_candidate"]["target_rank_bucket_counts"] == {
         "top5": 1
     }
+    assert suite["variant_metrics"]["evidence_unit_candidate"]["target_match_type_counts"] == {
+        "exact": 1
+    }
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "target_match_rank_bucket_counts"
+    ] == {
+        "exact": {"top5": 1},
+        "window": {"top5": 1},
+        "time_overlap": {"top5": 1},
+    }
     assert suite["variant_metrics"]["evidence_unit_verified"]["target_rank_bucket_counts"] == {
         "top1": 1
+    }
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "target_match_rank_bucket_counts"
+    ] == {
+        "exact": {"top1": 1},
+        "window": {"top1": 1},
+        "time_overlap": {"top1": 1},
     }
     assert suite["variant_metrics"]["evidence_unit_candidate"][
         "candidate_visual_support_ratio"
@@ -1159,6 +1249,12 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         "visual_text_overlap"
     ] == 1
     assert evidence_candidate_row["target_rank_bucket"] == "top5"
+    assert evidence_candidate_row["target_rank_diagnostics"]["target_match_type"] == "exact"
+    assert evidence_candidate_row["target_rank_diagnostics"]["match_rank_buckets"] == {
+        "exact": "top5",
+        "window": "top5",
+        "time_overlap": "top5",
+    }
     assert evidence_candidate_row["answer"]["candidate_only_visual_citation_count"] == 1
     assert evidence_candidate_row["answer"]["verified_visual_citation_count"] == 0
     assert evidence_candidate_row["answer_grounding"][
