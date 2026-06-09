@@ -99,6 +99,154 @@ def test_mapping_quality_report_public_safe_aggregate_outputs(tmp_path: Path) ->
     assert "lecture_" in combined_output
 
 
+def test_mapping_quality_report_accepts_suites_manifest_with_safe_overrides(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "projects" / "suite_project"
+    (project_dir / "segments").mkdir(parents=True)
+    (project_dir / "manifests").mkdir(parents=True)
+    (project_dir / "manifests" / "project_manifest.json").write_text(
+        json.dumps(
+            {
+                "project_id": "base_project_should_be_overridden",
+                "artifacts": {
+                    "lecture_segments_aligned": "segments/base_segments.jsonl",
+                    "visual_entities": "manifests/base_visual_entities.jsonl",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        project_dir / "segments" / "base_segments.jsonl",
+        [
+            {
+                "segment_id": "base_secret_segment",
+                "lecture_id": "base_secret_lecture",
+                "start_time": 0.0,
+                "end_time": 5.0,
+                "transcript_text": "BASE_SECRET_TRANSCRIPT",
+            }
+        ],
+    )
+    _write_jsonl(
+        project_dir / "suite_artifacts" / "segments.jsonl",
+        [
+            {
+                "segment_id": "suite_secret_segment_1",
+                "start_time": 0.0,
+                "end_time": 5.0,
+                "transcript_text": "SUITE_SECRET_TRANSCRIPT",
+            },
+            {
+                "segment_id": "suite_secret_segment_2",
+                "start_time": 5.0,
+                "end_time": 10.0,
+                "transcript_text": "SUITE_SECRET_TRANSCRIPT",
+            },
+        ],
+    )
+
+    manifest_path = tmp_path / "suite_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "suites": [
+                    {
+                        "suite_id": "suite_raw_identifier_should_not_render",
+                        "project_path": str(project_dir),
+                        "project_id": "suite_project_public_id",
+                        "video_id": "suite_video_public_id",
+                        "lecture_id": "suite_lecture_public_id",
+                        "artifacts": {
+                            "lecture_segments_aligned": "suite_artifacts/segments.jsonl",
+                            "visual_entities": str(tmp_path / "private_missing_visual_entities.jsonl"),
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = generate_mapping_quality_report(
+        manifest_path=manifest_path,
+        output_dir=tmp_path / "report",
+        write_csv=True,
+    )
+
+    assert run.payload["counts"]["project_count"] == 1
+    assert run.payload["counts"]["lecture_count"] == 1
+    assert run.payload["artifact_counts"]["segment_count"] == 2
+    assert run.payload["artifact_statuses"]["visual_entities:missing"] == 1
+    assert run.payload["missing_artifact_reasons"]["missing_artifact"] >= 1
+
+    combined_output = "\n".join(
+        [
+            run.metrics_path.read_text(encoding="utf-8"),
+            run.markdown_path.read_text(encoding="utf-8"),
+            run.csv_path.read_text(encoding="utf-8") if run.csv_path else "",
+        ]
+    )
+    for forbidden in (
+        "BASE_SECRET_TRANSCRIPT",
+        "SUITE_SECRET_TRANSCRIPT",
+        "base_secret_segment",
+        "suite_secret_segment_1",
+        "suite_raw_identifier_should_not_render",
+        "suite_project_public_id",
+        "suite_video_public_id",
+        "suite_lecture_public_id",
+        "private_missing_visual_entities",
+        str(tmp_path),
+    ):
+        assert forbidden not in combined_output
+
+
+def test_mapping_quality_report_resolves_paper_bundle_matrix_manifest(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "projects" / "nested_suite_project"
+    (project_dir / "segments").mkdir(parents=True)
+    (project_dir / "manifests").mkdir(parents=True)
+    _write_jsonl(
+        project_dir / "segments" / "lecture_segments_aligned.jsonl",
+        [
+            {
+                "segment_id": "nested_secret_segment",
+                "lecture_id": "nested_public_lecture",
+                "start_time": 0.0,
+                "end_time": 5.0,
+                "transcript_text": "NESTED_SECRET_TRANSCRIPT",
+            }
+        ],
+    )
+
+    matrix_dir = tmp_path / "matrix"
+    matrix_dir.mkdir()
+    matrix_path = matrix_dir / "benchmark_matrix_manifest.json"
+    matrix_path.write_text(
+        json.dumps({"suites": [{"suite_id": "nested_suite", "root": "../projects/nested_suite_project"}]}),
+        encoding="utf-8",
+    )
+    bundle_path = tmp_path / "paper_bundle_manifest.json"
+    bundle_path.write_text(
+        json.dumps({"paper_bundle": {"matrix_manifest": "matrix/benchmark_matrix_manifest.json"}}),
+        encoding="utf-8",
+    )
+
+    run = generate_mapping_quality_report(
+        manifest_path=bundle_path,
+        output_dir=tmp_path / "report",
+    )
+
+    assert run.payload["counts"]["project_count"] == 1
+    assert run.payload["artifact_counts"]["segment_count"] == 1
+    rendered = run.metrics_path.read_text(encoding="utf-8")
+    assert "NESTED_SECRET_TRANSCRIPT" not in rendered
+    assert str(tmp_path) not in rendered
+
+
 def test_mapping_quality_report_cli_subcommand_parses() -> None:
     parser = build_parser()
 
