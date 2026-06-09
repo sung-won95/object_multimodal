@@ -863,6 +863,12 @@
       "evidence_unit_verified",
       "evidence_unit_quality_rerank"
     ],
+    "answer_matrix_variant_ids": [
+      "segment_lexical",
+      "evidence_unit_candidate",
+      "evidence_unit_verified",
+      "evidence_unit_quality_rerank"
+    ],
     "baseline_variant_id": "segment_lexical",
     "domain_lexicon": "domain_lexicon.json",
     "privacy": {

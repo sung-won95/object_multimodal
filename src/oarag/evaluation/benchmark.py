@@ -56,6 +56,7 @@ DEFAULT_ABLATION_MODES = [
 ]
 MATRIX_SCHEMA_VERSION = "retrieval-answer-ablation-matrix-v1"
 MATRIX_LINK_DIAGNOSTICS_SCHEMA_VERSION = "retrieval-answer-object-link-diagnostics-public-v1"
+ANSWER_MATRIX_SCHEMA_VERSION = "retrieval-answer-citation-public-aggregate-v1"
 SEMANTIC_SMOKE_SCHEMA_VERSION = "semantic-live-smoke-aggregate-v1"
 LOCAL_HASH_BENCHMARK_WARNING = (
     "local_hash_v1 vectors are deterministic smoke fallback; benchmark semantic "
@@ -89,6 +90,12 @@ VERIFIED_LINK_SOURCE_KEYS = (
     "unspecified_verified",
 )
 EVIDENCE_UNIT_HIT_SOURCE = "evidence_unit"
+ANSWER_MATRIX_VARIANT_IDS = (
+    "segment_lexical",
+    "evidence_unit_candidate",
+    "evidence_unit_verified",
+    "evidence_unit_quality_rerank",
+)
 INSUFFICIENT_EVIDENCE_POLICY_REASONS = {
     "no_candidate_bundles",
     "no_informative_query_terms",
@@ -102,6 +109,7 @@ DEFAULT_MATRIX_VARIANTS = [
     {
         "variant_id": "segment_lexical",
         "label": "Segment lexical baseline",
+        "answer_matrix_role": "segment_baseline",
         "index_kind": SEGMENT_HIT_SOURCE,
         "use_domain_lexicon": False,
     },
@@ -142,6 +150,7 @@ DEFAULT_MATRIX_VARIANTS = [
     {
         "variant_id": "evidence_unit_candidate",
         "label": "Evidence-unit candidate support",
+        "answer_matrix_role": "evidence_unit_meili_only",
         "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
         "evidence_unit_priority": "candidate",
         "use_domain_lexicon": False,
@@ -149,6 +158,7 @@ DEFAULT_MATRIX_VARIANTS = [
     {
         "variant_id": "evidence_unit_verified",
         "label": "Evidence-unit verified alignment",
+        "answer_matrix_role": "evidence_unit_meili_graph",
         "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
         "evidence_unit_priority": "verified",
         "candidate_pool_limit": 30,
@@ -157,6 +167,7 @@ DEFAULT_MATRIX_VARIANTS = [
     {
         "variant_id": "evidence_unit_quality_rerank",
         "label": "Evidence-unit quality rerank",
+        "answer_matrix_role": "evidence_unit_quality_rerank",
         "index_kind": EVIDENCE_UNIT_HIT_SOURCE,
         "evidence_unit_priority": "quality",
         "evidence_unit_rerank": MODALITY_AWARE_RERANK,
@@ -577,6 +588,10 @@ def run_retrieval_answer_matrix_suite(
     metric["query_status_counts"] = _query_status_counts(rows)
     metric["skip_reason_counts"] = _skip_reason_counts(rows)
     metric["skipped_count"] = sum(1 for row in rows if row.get("status") == "skipped")
+    metric["answer_failure_reason_counts"] = _answer_failure_reason_counts(rows)
+    metric["answer_policy_reason_counts"] = _answer_policy_reason_counts(rows)
+    metric["answer_grounding_gap_counts"] = _answer_grounding_gap_counts(rows)
+    metric["answer_matrix"] = _public_answer_matrix(variant_metrics)
     for delta in deltas:
         metric[f"hit_at_{delta}s"] = _mean_or_none(
             item.get(f"hit_at_{delta}s") for item in variant_metrics
@@ -588,6 +603,8 @@ def run_retrieval_answer_matrix_suite(
         "linked_entity_backed_ratio",
         "grounded_answer_ratio",
         "citation_coverage_ratio",
+        "abstention_ratio",
+        "insufficient_evidence_ratio",
         "answer_citation_precision",
         "answer_citation_recall",
         "expected_citation_hit_ratio",
@@ -1396,6 +1413,7 @@ def _run_matrix_query(
         expected_window_ids=expected_window_ids,
         expected_ranges=expected_ranges,
     )
+    answer_summary = _public_answer_summary(answer)
     elapsed_ms = round((time.perf_counter() - started) * 1000, 4)
     bundles = _list_of_dicts(response.get("bundles"))
     candidate_errors = [
@@ -1423,7 +1441,7 @@ def _run_matrix_query(
         expected_window_ids=expected_window_ids,
     )
 
-    return {
+    row = {
         "schema_version": MATRIX_SCHEMA_VERSION,
         "status": "queried",
         "run_id": run_id,
@@ -1472,12 +1490,14 @@ def _run_matrix_query(
             response.get("retrieval_context")
         ),
         "top_candidate": _public_matrix_candidate(top_bundle),
-        "answer": _public_answer_summary(answer),
+        "answer": answer_summary,
         "answer_grounding": answer_grounding,
         "processing_time_ms": response.get("processing_time_ms"),
         "elapsed_time_ms": elapsed_ms,
         "warning_count": len(response.get("warnings") or []),
     }
+    row["answer_failure_reason"] = _answer_failure_reason(row)
+    return row
 
 
 def _run_evidence_unit_matrix_query(
@@ -1614,6 +1634,7 @@ def _run_evidence_unit_matrix_query(
         expected_window_ids=expected_window_ids,
         expected_ranges=expected_ranges,
     )
+    answer_summary = _public_answer_summary(answer)
     elapsed_ms = round((time.perf_counter() - started) * 1000, 4)
     candidate_errors = [
         _local_candidate_error(
@@ -1640,7 +1661,7 @@ def _run_evidence_unit_matrix_query(
         expected_window_ids=expected_window_ids,
     )
 
-    return {
+    row = {
         "schema_version": MATRIX_SCHEMA_VERSION,
         "status": "queried",
         "run_id": run_id,
@@ -1690,12 +1711,14 @@ def _run_evidence_unit_matrix_query(
         "query_expansion": _public_query_expansion(None),
         "semantic_retrieval": _public_semantic_retrieval(response.get("retrieval_context")),
         "top_candidate": _public_matrix_candidate(top_bundle),
-        "answer": _public_answer_summary(answer),
+        "answer": answer_summary,
         "answer_grounding": answer_grounding,
         "processing_time_ms": response.get("processing_time_ms"),
         "elapsed_time_ms": elapsed_ms,
         "warning_count": 0,
     }
+    row["answer_failure_reason"] = _answer_failure_reason(row)
+    return row
 
 
 def _matrix_evidence_unit_index_uid(
@@ -1744,7 +1767,7 @@ def _skipped_matrix_row(
         expected_segment_ids=expected_segment_ids,
         expected_window_ids=expected_window_ids,
     )
-    return {
+    row = {
         "schema_version": MATRIX_SCHEMA_VERSION,
         "status": "skipped",
         "skip_reason": skip_reason,
@@ -1801,6 +1824,8 @@ def _skipped_matrix_row(
         "elapsed_time_ms": round((time.perf_counter() - started) * 1000, 4),
         "warning_count": 1,
     }
+    row["answer_failure_reason"] = _answer_failure_reason(row)
+    return row
 
 
 def _evidence_unit_matrix_sort_key(
@@ -2035,6 +2060,10 @@ def _matrix_variant_metrics(
         "top1_expected_segment_match_ratio": _ratio(rows, "top1_expected_segment_match"),
         "grounded_answer_ratio": _answer_ratio(rows, "grounded_answer"),
         "candidate_evidence_only_ratio": _answer_ratio(rows, "candidate_evidence_only"),
+        "abstention_ratio": _answer_policy_reason_ratio(
+            rows,
+            INSUFFICIENT_EVIDENCE_POLICY_REASONS,
+        ),
         "insufficient_evidence_ratio": _answer_policy_reason_ratio(
             rows,
             INSUFFICIENT_EVIDENCE_POLICY_REASONS,
@@ -2078,6 +2107,7 @@ def _matrix_variant_metrics(
         "mean_elapsed_time_ms": _mean_or_none(row.get("elapsed_time_ms") for row in rows),
         "warning_ratio": _ratio(rows, "warning_count"),
         "source_counts": _source_counts(rows),
+        "answer_failure_reason_counts": _answer_failure_reason_counts(rows),
         "answer_policy_reason_counts": _answer_policy_reason_counts(rows),
         "answer_grounding_gap_counts": _answer_grounding_gap_counts(rows),
     }
@@ -2408,6 +2438,7 @@ def _public_query_vector_config(config: dict[str, Any]) -> dict[str, Any]:
 def _public_matrix_variant_config(variant: dict[str, Any]) -> dict[str, Any]:
     config = {
         "index_kind": _normalize_index_kind(variant.get("index_kind", SEGMENT_HIT_SOURCE)),
+        "answer_matrix_role": _answer_matrix_role(variant),
         "domain_lexicon": _bool_config(variant, "use_domain_lexicon", default=False),
         "hybrid_retrieval": _bool_config(variant, "hybrid_retrieval", default=False),
         "rerank": _bool_config(variant, "rerank", default=False),
@@ -2430,6 +2461,22 @@ def _public_matrix_variant_config(variant: dict[str, Any]) -> dict[str, Any]:
     if candidate_pool_limit is not None:
         config["candidate_pool_limit"] = candidate_pool_limit
     return config
+
+
+def _answer_matrix_role(variant: dict[str, Any]) -> str | None:
+    configured = _optional_str(variant.get("answer_matrix_role"))
+    if configured:
+        return configured
+    variant_id = str(variant.get("variant_id") or "")
+    if variant_id == "segment_lexical":
+        return "segment_baseline"
+    if variant_id == "evidence_unit_candidate":
+        return "evidence_unit_meili_only"
+    if variant_id == "evidence_unit_verified":
+        return "evidence_unit_meili_graph"
+    if variant_id == "evidence_unit_quality_rerank":
+        return "evidence_unit_quality_rerank"
+    return None
 
 
 def _public_query_expansion(value: Any) -> dict[str, Any]:
@@ -3640,20 +3687,56 @@ def _answer_policy_reason_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _answer_failure_reason(row: dict[str, Any]) -> str:
+    if row.get("status") == "skipped":
+        return "retrieval_miss"
+    answer = row.get("answer")
+    if not isinstance(answer, dict) or not answer.get("enabled"):
+        return "answer_disabled"
+    grounding = row.get("answer_grounding")
+    if not isinstance(grounding, dict) or not grounding.get("enabled"):
+        return "answer_disabled"
+    if not grounding.get("expected_available"):
+        return "expected_hint_missing"
+    if not row.get("evidence_covered") or int(row.get("bundle_count") or 0) <= 0:
+        return "retrieval_miss"
+    if grounding.get("expected_citation_hit") is False:
+        return "retrieval_miss"
+    if answer.get("insufficient_evidence") is True:
+        return "insufficient_evidence"
+    if not int(answer.get("citation_count") or 0):
+        return "citation_missing"
+    unsupported = _optional_float(grounding.get("unsupported_claim_count"))
+    if unsupported is not None and unsupported > 0:
+        return "unsupported_claims"
+    return "grounded_expected_citation"
+
+
+def _answer_failure_reason_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(_answer_failure_reason(row) for row in rows)
+    return dict(sorted(counts.items()))
+
+
 def _answer_grounding_gap_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts: Counter[str] = Counter()
     for row in rows:
+        if row.get("status") == "skipped":
+            counts["retrieval_miss"] += 1
+            continue
         grounding = row.get("answer_grounding")
         if not isinstance(grounding, dict) or not grounding.get("enabled"):
             counts["answer_disabled"] += 1
             continue
+        answer = row.get("answer") if isinstance(row.get("answer"), dict) else {}
+        if answer.get("insufficient_evidence") is True:
+            counts["insufficient_evidence"] += 1
         if not grounding.get("expected_available"):
             counts["expected_hint_missing"] += 1
             continue
         if not ((row.get("answer") or {}).get("citation_count") or 0):
             counts["citation_missing"] += 1
         if grounding.get("expected_citation_hit") is False:
-            counts["retrieval_localization_miss"] += 1
+            counts["retrieval_miss"] += 1
         unsupported = _optional_float(grounding.get("unsupported_claim_count"))
         if unsupported is not None and unsupported > 0:
             counts["unsupported_claims"] += 1
@@ -3662,6 +3745,63 @@ def _answer_grounding_gap_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
         ):
             counts["grounded_expected_citation"] += 1
     return dict(sorted(counts.items()))
+
+
+def _public_answer_matrix(variant_metrics: list[dict[str, Any]]) -> dict[str, Any]:
+    variants = [
+        _public_answer_matrix_variant(metric)
+        for metric in variant_metrics
+        if str(metric.get("variant_id") or "") in ANSWER_MATRIX_VARIANT_IDS
+    ]
+    rows_by_id = {str(row["variant_id"]): row for row in variants}
+    return {
+        "schema_version": ANSWER_MATRIX_SCHEMA_VERSION,
+        "variant_ids": [variant_id for variant_id in ANSWER_MATRIX_VARIANT_IDS if variant_id in rows_by_id],
+        "variants": [rows_by_id[variant_id] for variant_id in ANSWER_MATRIX_VARIANT_IDS if variant_id in rows_by_id],
+        "privacy": {
+            "payload": "public_safe_aggregate_metrics_only",
+            "raw_queries": "excluded",
+            "answer_text": "excluded",
+            "full_evidence_text": "excluded",
+            "transcript_excerpt": "excluded",
+            "local_paths": "excluded",
+        },
+    }
+
+
+def _public_answer_matrix_variant(metric: dict[str, Any]) -> dict[str, Any]:
+    config = _mapping(metric.get("config"))
+    return {
+        "variant_id": metric.get("variant_id"),
+        "label": metric.get("label"),
+        "answer_matrix_role": config.get("answer_matrix_role"),
+        "config": {
+            key: config.get(key)
+            for key in (
+                "index_kind",
+                "answer_matrix_role",
+                "evidence_unit_priority",
+                "evidence_unit_rerank",
+                "candidate_pool_limit",
+                "answer",
+            )
+            if key in config
+        },
+        "query_count": metric.get("query_count"),
+        "queried_count": metric.get("queried_count"),
+        "skipped_count": metric.get("skipped_count"),
+        "grounded_answer_ratio": metric.get("grounded_answer_ratio"),
+        "citation_coverage_ratio": metric.get("citation_coverage_ratio"),
+        "answer_citation_precision": metric.get("answer_citation_precision"),
+        "answer_citation_recall": metric.get("answer_citation_recall"),
+        "expected_citation_hit_ratio": metric.get("expected_citation_hit_ratio"),
+        "unsupported_claim_ratio": metric.get("unsupported_claim_ratio"),
+        "insufficient_evidence_ratio": metric.get("insufficient_evidence_ratio"),
+        "abstention_ratio": metric.get("abstention_ratio"),
+        "answer_failure_reason_counts": metric.get("answer_failure_reason_counts"),
+        "answer_policy_reason_counts": metric.get("answer_policy_reason_counts"),
+        "answer_grounding_gap_counts": metric.get("answer_grounding_gap_counts"),
+    }
 
 
 def _matrix_privacy_payload() -> dict[str, Any]:
@@ -4425,8 +4565,8 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 "Evidence-unit rows may be queried or skipped; skipped variants report zero hit/MRR "
                 "and a public-safe skip reason in JSON metrics.",
                 "",
-                "| suite | variant | queries | skipped | pool | Hit@10s | MRR | target in pool | frame-backed | linked-backed | candidate support | verified align | VLM | grounded | cite P | cite R | expected hit | unsupported | latency ms |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                "| suite | variant | queries | skipped | pool | Hit@10s | MRR | target in pool | frame-backed | linked-backed | candidate support | verified align | VLM | grounded | cite P | cite R | expected hit | unsupported | abstain | primary failures | latency ms |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |",
             ]
         )
         for suite, variant in matrix_variants:
@@ -4435,7 +4575,7 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 "{hit10} | {mrr} | {target_pool} | "
                 "{frame} | {linked} | {candidate_support} | {verified_align} | {vlm} | "
                 "{grounded} | {precision} | {recall} | {hit} | "
-                "{unsupported} | {latency} |".format(
+                "{unsupported} | {abstain} | {failures} | {latency} |".format(
                     suite_id=suite.get("suite_id"),
                     variant_id=variant.get("variant_id"),
                     query_count=variant.get("query_count") or 0,
@@ -4454,6 +4594,10 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                     recall=_format_metric(variant.get("answer_citation_recall")),
                     hit=_format_metric(variant.get("expected_citation_hit_ratio")),
                     unsupported=_format_metric(variant.get("mean_unsupported_claim_count")),
+                    abstain=_format_metric(variant.get("abstention_ratio")),
+                    failures=_format_counts_inline(
+                        variant.get("answer_failure_reason_counts")
+                    ),
                     latency=_format_metric(
                         variant.get("mean_processing_time_ms")
                         or variant.get("mean_elapsed_time_ms")
@@ -4531,6 +4675,7 @@ def _write_metrics_summary_csv(path: Path, metrics: dict[str, Any]) -> None:
         "target_found_in_top_k_ratio",
         "grounded_answer_ratio",
         "citation_coverage_ratio",
+        "abstention_ratio",
         "insufficient_evidence_ratio",
         "answer_citation_precision",
         "answer_citation_recall",
@@ -4543,6 +4688,9 @@ def _write_metrics_summary_csv(path: Path, metrics: dict[str, Any]) -> None:
         "answer_uses_candidate_only_visual_evidence_count",
         "answer_uses_candidate_only_visual_evidence_ratio",
         "timestamp_fallback_answer_citation_count",
+        "answer_failure_reason_counts",
+        "answer_policy_reason_counts",
+        "answer_grounding_gap_counts",
         "mean_processing_time_ms",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -4634,6 +4782,7 @@ def _metrics_summary_row(
         "target_found_in_top_k_ratio": item.get("target_found_in_top_k_ratio"),
         "grounded_answer_ratio": item.get("grounded_answer_ratio"),
         "citation_coverage_ratio": item.get("citation_coverage_ratio"),
+        "abstention_ratio": item.get("abstention_ratio"),
         "insufficient_evidence_ratio": item.get("insufficient_evidence_ratio"),
         "answer_citation_precision": item.get("answer_citation_precision"),
         "answer_citation_recall": item.get("answer_citation_recall"),
@@ -4656,6 +4805,11 @@ def _metrics_summary_row(
         "timestamp_fallback_answer_citation_count": item.get(
             "timestamp_fallback_answer_citation_count"
         ),
+        "answer_failure_reason_counts": _compact_json(
+            item.get("answer_failure_reason_counts")
+        ),
+        "answer_policy_reason_counts": _compact_json(item.get("answer_policy_reason_counts")),
+        "answer_grounding_gap_counts": _compact_json(item.get("answer_grounding_gap_counts")),
         "mean_processing_time_ms": item.get(
             "mean_processing_time_ms",
             item.get("mean_elapsed_time_ms"),
@@ -4741,6 +4895,19 @@ def _format_metric(value: Any) -> str:
     if math.isclose(parsed, round(parsed)):
         return str(int(round(parsed)))
     return f"{parsed:.4f}".rstrip("0").rstrip(".")
+
+
+def _format_counts_inline(value: Any) -> str:
+    counts = _mapping(value)
+    if not counts:
+        return "-"
+    return ", ".join(f"{key}:{counts[key]}" for key in sorted(counts))
+
+
+def _compact_json(value: Any) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _mean(values: Any) -> float:
