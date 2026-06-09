@@ -348,6 +348,18 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert suite["build"]["visual_state_coverage"]["transcript_only_units"] == 0
     assert suite["build"]["visual_state_coverage"]["coverage_gate"]["status"] == "not_configured"
     assert suite["build"]["visual_state_coverage"]["interval_duration_seconds"]["buckets"]["15-30s"] == 1
+    visual_vlm = suite["build"]["visual_vlm_coverage_summary"]
+    assert visual_vlm["visual_state_interval"]["source"] == "sampled_frame_midpoints"
+    assert visual_vlm["visual_state_interval"]["evidence_units_with_visual_state"] == 2
+    assert visual_vlm["visual_entity_channels"]["ocr_only_entity_count"] == 1
+    assert visual_vlm["visual_entity_channels"]["ocr_only_ratio"] == 1.0
+    assert visual_vlm["visual_entity_channels"]["vlm_object_description_entity_count"] == 0
+    assert visual_vlm["visual_entity_channels"]["detected_text_entity_count"] == 0
+    assert visual_vlm["evidence_unit_channels"]["units_with_detected_text"] == 0
+    assert visual_vlm["object_link_coverage"]["units_with_candidate_link"] == 0
+    assert visual_vlm["object_link_coverage"]["units_with_verified_link"] == 0
+    assert visual_vlm["object_link_coverage"]["units_with_timestamp_fallback_link"] == 1
+    assert visual_vlm["object_link_coverage"]["timestamp_fallback_counted_as_verified"] is False
     assert suite["build"]["source_quality_counts"]["units_with_concept"] == 1
     assert suite["build"]["source_quality_counts"]["units_with_concept_relation"] == 1
     assert suite["build"]["concept_field_coverage"][
@@ -462,6 +474,8 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
         assert sensitive not in public_text
     assert "Timestamp-only overlap is not counted" in run.summary_path.read_text(encoding="utf-8")
     assert "Visual-state interval overlap" in run.summary_path.read_text(encoding="utf-8")
+    assert "VLM object-description entities" in run.summary_path.read_text(encoding="utf-8")
+    assert "object link unit ratios" in run.summary_path.read_text(encoding="utf-8")
     assert "redacted" in public_text
 
 
@@ -705,6 +719,10 @@ def test_evidence_unit_smoke_dry_run_does_not_contact_meilisearch(tmp_path: Path
     assert payload["dry_run"] is True
     assert payload["suites"][0]["build"]["status"] == "dry_run"
     assert payload["suites"][0]["index"]["status"] == "dry_run"
+    assert payload["suites"][0]["build"]["visual_vlm_coverage_summary"]["status"] == "dry_run"
+    assert payload["suites"][0]["build"]["visual_vlm_coverage_summary"][
+        "object_link_coverage"
+    ]["timestamp_fallback_counted_as_verified"] is False
 
 
 def test_evidence_unit_smoke_public_safe_slice_dry_run_records_targets(

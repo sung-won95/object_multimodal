@@ -120,6 +120,9 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert target["source_quality"]["visual_entity_detected_text_count"] == 1
     assert target["source_quality"]["visual_description_count"] == 1
     assert target["visual_states"][0]["detected_text"] == ["Gradient Descent"]
+    assert target["visual_states"][0]["interval_source"] == "sampled_frame_midpoint"
+    assert target["visual_states"][0]["valid_start_time"] <= target["end_time"]
+    assert target["visual_states"][0]["valid_end_time"] >= target["start_time"]
     assert target["visual_entities"][0]["detected_text"] == ["descent"]
     assert summary["counts"]["units_with_detected_text"] >= 1
     assert summary["counts"]["units_with_visual_description"] >= 1

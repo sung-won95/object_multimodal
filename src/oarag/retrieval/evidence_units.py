@@ -1304,6 +1304,7 @@ def _visual_state_context(state: dict[str, Any]) -> dict[str, Any]:
             "frame_ids": state.get("frame_ids", []),
             "valid_start_time": state.get("valid_start_time"),
             "valid_end_time": state.get("valid_end_time"),
+            "interval_source": state.get("interval_source"),
             "state_summary": state.get("state_summary", ""),
             "detected_text": state.get("detected_text", []),
         }.items()

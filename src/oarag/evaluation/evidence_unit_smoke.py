@@ -648,6 +648,13 @@ def _artifact_summary(
                 "status": "dry_run",
                 "skip_reason": "dry_run_requested",
             },
+            "visual_vlm_coverage_summary": _visual_vlm_coverage_summary(
+                build_summary=None,
+                vlm_object_evidence_coverage={
+                    "status": "dry_run",
+                    "skip_reason": "dry_run_requested",
+                },
+            ),
         }
     vlm_object_evidence_coverage = validate_vlm_object_evidence(
         project_dir=project_dir,
@@ -700,6 +707,10 @@ def _artifact_summary(
             ),
             "verified_alignment_note": _verified_alignment_note(counts),
             "vlm_object_evidence_coverage": vlm_object_evidence_coverage,
+            "visual_vlm_coverage_summary": _visual_vlm_coverage_summary(
+                build_summary=build_summary,
+                vlm_object_evidence_coverage=vlm_object_evidence_coverage,
+            ),
         }
 
     rows = _evidence_unit_rows(project_dir=project_dir, evidence_units=evidence_units)
@@ -778,6 +789,26 @@ def _artifact_summary(
         ),
         "verified_alignment_note": _verified_alignment_note(source_quality),
         "vlm_object_evidence_coverage": vlm_object_evidence_coverage,
+        "visual_vlm_coverage_summary": _visual_vlm_coverage_summary(
+            build_summary={
+                "counts": {
+                    "evidence_units_total": len(rows),
+                    "units_with_candidate_link": source_quality["units_with_candidate_link"],
+                    "units_with_verified_link": source_quality["has_verified_link"],
+                    "units_with_timestamp_fallback_link": source_quality[
+                        "units_with_timestamp_fallback_link"
+                    ],
+                    "units_with_detected_text": source_quality["has_detected_text"],
+                    "units_with_visual_description": source_quality["has_visual_description"],
+                },
+                "visual_state_coverage": _loaded_visual_state_coverage(
+                    evidence_units=rows,
+                    visual_states=visual_state_rows,
+                ),
+                "link_diagnostics": link_diagnostics,
+            },
+            vlm_object_evidence_coverage=vlm_object_evidence_coverage,
+        ),
     }
 
 
@@ -1765,6 +1796,10 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
         vlm_coverage = _mapping(build.get("vlm_object_evidence_coverage"))
         entity_coverage = _mapping(vlm_coverage.get("visual_entity_coverage"))
         unit_coverage = _mapping(vlm_coverage.get("evidence_unit_coverage"))
+        visual_vlm_summary = _mapping(build.get("visual_vlm_coverage_summary"))
+        visual_entity_channels = _mapping(visual_vlm_summary.get("visual_entity_channels"))
+        evidence_unit_channels = _mapping(visual_vlm_summary.get("evidence_unit_channels"))
+        object_link_coverage = _mapping(visual_vlm_summary.get("object_link_coverage"))
         visual_coverage = _mapping(build.get("visual_state_coverage"))
         concept_coverage = _mapping(build.get("concept_field_coverage"))
         interval_summary = _mapping(visual_coverage.get("interval_duration_seconds"))
@@ -1805,9 +1840,13 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- VLM evidence status: `{vlm_coverage.get('status')}`",
                 f"- paper-quality VLM entities: `{entity_coverage.get('paper_quality_vlm_entity_count', 0)}`",
                 f"- OCR-only entities: `{entity_coverage.get('ocr_only_entity_count', 0)}`",
+                f"- VLM object-description entities: `{visual_entity_channels.get('vlm_object_description_entity_count', 0)}`",
+                f"- detected-text entities: `{visual_entity_channels.get('detected_text_entity_count', 0)}`",
                 f"- units with VLM entity: `{unit_coverage.get('units_with_vlm_entity', 0)}`",
                 f"- units with visual description: `{unit_coverage.get('units_with_visual_description', 0)}`",
                 f"- units with detected text: `{unit_coverage.get('units_with_detected_text', 0)}`",
+                f"- visual/VLM unit ratios: `{json.dumps({key: evidence_unit_channels.get(key) for key in ('vlm_entity_ratio', 'visual_description_ratio', 'detected_text_ratio')}, sort_keys=True)}`",
+                f"- object link unit ratios: `{json.dumps({key: object_link_coverage.get(key) for key in ('candidate_link_unit_ratio', 'verified_link_unit_ratio', 'timestamp_fallback_unit_ratio')}, sort_keys=True)}`",
                 "",
             ]
         )
@@ -2387,6 +2426,171 @@ def _public_visual_state_coverage(value: Any) -> dict[str, Any]:
             "failure_count": int(gate.get("failure_count") or 0),
         },
         "public_note": coverage.get("public_note"),
+    }
+
+
+def _visual_vlm_coverage_summary(
+    *,
+    build_summary: dict[str, Any] | None,
+    vlm_object_evidence_coverage: dict[str, Any],
+) -> dict[str, Any]:
+    build = _mapping(build_summary)
+    counts = _mapping(build.get("counts"))
+    visual_state = _public_visual_state_coverage(build.get("visual_state_coverage"))
+    link_diagnostics = _mapping(build.get("link_diagnostics"))
+    candidate_support = _mapping(link_diagnostics.get("candidate_visual_support"))
+    verified_alignment = _mapping(link_diagnostics.get("verified_object_alignment"))
+    entity_coverage = _mapping(vlm_object_evidence_coverage.get("visual_entity_coverage"))
+    unit_coverage = _mapping(vlm_object_evidence_coverage.get("evidence_unit_coverage"))
+    entity_ratios = _mapping(entity_coverage.get("ratios"))
+    unit_ratios = _mapping(unit_coverage.get("ratios"))
+    evidence_units_total = int(
+        counts.get("evidence_units_total")
+        or unit_coverage.get("evidence_units_total")
+        or visual_state.get("evidence_units_total")
+        or 0
+    )
+    visual_entities_total = int(entity_coverage.get("visual_entities_total") or 0)
+    candidate_link_units = int(
+        counts.get("units_with_candidate_link")
+        or unit_coverage.get("units_with_candidate_link")
+        or candidate_support.get("units_with_candidate_link")
+        or 0
+    )
+    verified_link_units = int(
+        counts.get("units_with_verified_link")
+        or unit_coverage.get("units_with_verified_link")
+        or verified_alignment.get("units_with_verified_object_alignment")
+        or 0
+    )
+    timestamp_fallback_units = int(
+        counts.get("units_with_timestamp_fallback_link")
+        or unit_coverage.get("units_with_timestamp_fallback_link")
+        or candidate_support.get("units_with_timestamp_fallback_link")
+        or 0
+    )
+    return {
+        "status": vlm_object_evidence_coverage.get("status") or build.get("status"),
+        "visual_state_interval": {
+            "source": visual_state.get("source"),
+            "visual_states_total": visual_state["visual_states_total"],
+            "evidence_units_with_visual_state": visual_state[
+                "evidence_units_with_visual_state"
+            ],
+            "evidence_units_total": evidence_units_total,
+            "unit_coverage_ratio": visual_state.get("unit_coverage_ratio"),
+            "coverage_gate_status": _mapping(visual_state.get("coverage_gate")).get("status"),
+        },
+        "visual_entity_channels": {
+            "visual_entities_total": visual_entities_total,
+            "ocr_only_entity_count": int(entity_coverage.get("ocr_only_entity_count") or 0),
+            "ocr_only_ratio": entity_ratios.get("ocr_only")
+            if "ocr_only" in entity_ratios
+            else _ratio_or_none(
+                int(entity_coverage.get("ocr_only_entity_count") or 0),
+                visual_entities_total,
+            ),
+            "vlm_source_entity_count": int(entity_coverage.get("vlm_source_entity_count") or 0),
+            "paper_quality_vlm_entity_count": int(
+                entity_coverage.get("paper_quality_vlm_entity_count") or 0
+            ),
+            "vlm_object_description_entity_count": int(
+                entity_coverage.get("vlm_object_description_entity_count") or 0
+            ),
+            "vlm_object_description_ratio": entity_ratios.get("vlm_object_description")
+            if "vlm_object_description" in entity_ratios
+            else _ratio_or_none(
+                int(entity_coverage.get("vlm_object_description_entity_count") or 0),
+                visual_entities_total,
+            ),
+            "detected_text_entity_count": int(entity_coverage.get("detected_text_entity_count") or 0),
+            "detected_text_ratio": entity_ratios.get("detected_text")
+            if "detected_text" in entity_ratios
+            else _ratio_or_none(
+                int(entity_coverage.get("detected_text_entity_count") or 0),
+                visual_entities_total,
+            ),
+        },
+        "evidence_unit_channels": {
+            "evidence_units_total": evidence_units_total,
+            "units_with_vlm_entity": int(unit_coverage.get("units_with_vlm_entity") or 0),
+            "units_with_visual_description": int(
+                unit_coverage.get("units_with_visual_description")
+                or counts.get("units_with_visual_description")
+                or 0
+            ),
+            "units_with_detected_text": int(
+                unit_coverage.get("units_with_detected_text")
+                or counts.get("units_with_detected_text")
+                or 0
+            ),
+            "units_using_ocr_only": int(unit_coverage.get("units_using_ocr_only") or 0),
+            "vlm_entity_ratio": unit_ratios.get("units_with_vlm_entity")
+            if "units_with_vlm_entity" in unit_ratios
+            else _ratio_or_none(
+                int(unit_coverage.get("units_with_vlm_entity") or 0),
+                evidence_units_total,
+            ),
+            "visual_description_ratio": unit_ratios.get("units_with_visual_description")
+            if "units_with_visual_description" in unit_ratios
+            else _ratio_or_none(
+                int(
+                    unit_coverage.get("units_with_visual_description")
+                    or counts.get("units_with_visual_description")
+                    or 0
+                ),
+                evidence_units_total,
+            ),
+            "detected_text_ratio": unit_ratios.get("units_with_detected_text")
+            if "units_with_detected_text" in unit_ratios
+            else _ratio_or_none(
+                int(
+                    unit_coverage.get("units_with_detected_text")
+                    or counts.get("units_with_detected_text")
+                    or 0
+                ),
+                evidence_units_total,
+            ),
+        },
+        "object_link_coverage": {
+            "units_with_candidate_link": candidate_link_units,
+            "candidate_links": int(
+                counts.get("candidate_links")
+                or candidate_support.get("candidate_links")
+                or 0
+            ),
+            "units_with_verified_link": verified_link_units,
+            "verified_links": int(
+                counts.get("verified_links")
+                or verified_alignment.get("verified_links")
+                or 0
+            ),
+            "units_with_timestamp_fallback_link": timestamp_fallback_units,
+            "timestamp_fallback_links": int(
+                counts.get("timestamp_fallback_links")
+                or candidate_support.get("timestamp_fallback_links")
+                or 0
+            ),
+            "candidate_link_unit_ratio": _ratio_or_none(
+                candidate_link_units,
+                evidence_units_total,
+            ),
+            "verified_link_unit_ratio": _ratio_or_none(
+                verified_link_units,
+                evidence_units_total,
+            ),
+            "timestamp_fallback_unit_ratio": _ratio_or_none(
+                timestamp_fallback_units,
+                evidence_units_total,
+            ),
+            "timestamp_fallback_counted_as_verified": False,
+        },
+        "public_note": (
+            "OCR-only, VLM object-description, detected text, candidate links, verified "
+            "links, and timestamp fallback links are reported as separate public-safe "
+            "aggregates. Timestamp-only fallback remains candidate/fallback support and "
+            "is never counted as verified object alignment."
+        ),
     }
 
 
