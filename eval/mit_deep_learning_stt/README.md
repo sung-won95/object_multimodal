@@ -11,6 +11,8 @@
 - `benchmark_manifest.json`: 바로 실행 가능한 retrieval benchmark manifest
 - `domain_lexicon.json`: MIT Deep Learning 질의 확장을 위한 보수적 약어/동의어 seed
 - `benchmark_matrix_manifest.json`: 9-variant retrieval-answer matrix manifest
+- `public_safe_eval_slice_schema.json`: public-safe evidence-unit evaluation slice schema
+- `mit_lec01_02_public_safe_eval_slice.json`: 2-lecture, 24-target public-safe slice for target-rank diagnostics
 - `paper_bundle_manifest.json`: `run-paper-bundle`용 MIT paper matrix manifest
 - `summary.json`: row count, split, modality 분포 요약
 
@@ -33,6 +35,26 @@ python -m oarag benchmark-retrieval \
 이 seed는 MIT OpenCourseWare 6.7960 Deep Learning 강의자료와 STT seed labels에서 파생된 보조 lexicon이며, 원자료와 동일하게 CC BY-NC-SA 4.0 출처 조건을 따른다.
 
 Matrix benchmark에서 lexicon variant를 쓰려면 manifest 또는 suite에 `"domain_lexicon": "domain_lexicon.json"`을 두고, variant의 `"use_domain_lexicon"`을 `true`로 둔다.
+
+## Public-Safe Evidence-Unit Slice
+
+`mit_lec01_02_public_safe_eval_slice.json` fixes 24 query targets across two MIT
+lecture projects for accuracy-improvement diagnostics. It intentionally stores
+query IDs, concept aliases, expected modality/query type, target segment IDs, and
+timestamp buckets only. Raw query text, transcript excerpts, reference answers,
+raw evidence text, and private local paths are excluded from the manifest and
+from public smoke outputs.
+
+Dry-run wiring check:
+
+```bash
+python -m oarag evidence-unit-smoke \
+  --manifest eval/mit_deep_learning_stt/mit_lec01_02_public_safe_eval_slice.json \
+  --dry-run
+```
+
+When private artifacts and Meilisearch indexes are available, the same manifest
+can be run without `--dry-run` to produce public-safe target-rank diagnostics.
 
 ## Paper Matrix Use
 

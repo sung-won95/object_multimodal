@@ -1,0 +1,282 @@
+{
+  "schema_version": "evidence-unit-public-safe-slice-v1",
+  "run_id": "mit_lec01_02_public_safe_eval_slice_v1",
+  "output_dir": "../../reports/paper/evidence_units_retrieval_smoke/mit_lec01_02_public_safe_eval_slice_v1",
+  "min_query_targets": 20,
+  "evaluation_slice": {
+    "slice_id": "mit_lec01_02_public_safe_v1",
+    "course": "MIT 6.7960 Deep Learning, Fall 2024",
+    "lecture_count": 2,
+    "split": "public_safe_accuracy_dev",
+    "privacy": {
+      "raw_query_text": "excluded",
+      "transcript_excerpt": "excluded",
+      "raw_answer_text": "excluded",
+      "raw_evidence_text": "excluded",
+      "private_paths": "excluded",
+      "public_outputs": "query_ids_targets_and_aggregates_only"
+    }
+  },
+  "suites": [
+    {
+      "suite_id": "mitdl_lec01_public_safe_slice",
+      "project_id": "mit_deep_learning_stt__mit6_7960f24_lec01_mp4_56139a7a",
+      "index": "mit_deep_learning_stt_evidence_units",
+      "segment_index": "mit_deep_learning_stt_segments",
+      "limit": 5,
+      "target_rank_limit": 50,
+      "queries": [
+        {
+          "query_id": "mitdl_ps_l01_q001",
+          "query_label": "lecture01 optimizer concept target",
+          "concept_aliases": ["gradient descent", "cost function", "optimization"],
+          "expected_modality": "audio",
+          "query_type": "concept_explanation",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000426",
+          "timestamp_hint_bucket": "20-25m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q002",
+          "query_label": "lecture01 backpropagation slide target",
+          "concept_aliases": ["back propagation", "parallel distributed processing", "multilayer perceptron"],
+          "expected_modality": "both",
+          "query_type": "multimodal_grounded",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000285",
+          "timestamp_hint_bucket": "15-20m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q003",
+          "query_label": "lecture01 perceptron target",
+          "concept_aliases": ["perceptron", "linear threshold unit"],
+          "expected_modality": "both",
+          "query_type": "definition_lookup",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000152",
+          "timestamp_hint_bucket": "05-10m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q004",
+          "query_label": "lecture01 multilayer network target",
+          "concept_aliases": ["multilayer perceptron", "hidden layer", "neural network"],
+          "expected_modality": "audio",
+          "query_type": "concept_explanation",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000244",
+          "timestamp_hint_bucket": "10-15m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q005",
+          "query_label": "lecture01 representation learning target",
+          "concept_aliases": ["representation learning", "features", "deep learning"],
+          "expected_modality": "both",
+          "query_type": "multimodal_grounded",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000071",
+          "timestamp_hint_bucket": "00-05m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q006",
+          "query_label": "lecture01 supervised learning target",
+          "concept_aliases": ["supervised learning", "training data", "labels"],
+          "expected_modality": "audio",
+          "query_type": "definition_lookup",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000118",
+          "timestamp_hint_bucket": "05-10m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q007",
+          "query_label": "lecture01 neural network history target",
+          "concept_aliases": ["neural network history", "connectionism", "deep learning timeline"],
+          "expected_modality": "both",
+          "query_type": "visual_object_reference",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000198",
+          "timestamp_hint_bucket": "10-15m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q008",
+          "query_label": "lecture01 activation concept target",
+          "concept_aliases": ["activation function", "nonlinearity", "neuron output"],
+          "expected_modality": "audio",
+          "query_type": "concept_explanation",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000336",
+          "timestamp_hint_bucket": "15-20m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q009",
+          "query_label": "lecture01 objective function target",
+          "concept_aliases": ["objective function", "loss surface", "cost minimization"],
+          "expected_modality": "both",
+          "query_type": "formula_table_lookup",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000454",
+          "timestamp_hint_bucket": "20-25m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q010",
+          "query_label": "lecture01 learning algorithm target",
+          "concept_aliases": ["learning algorithm", "parameter update", "training loop"],
+          "expected_modality": "audio",
+          "query_type": "audio_reasoning",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000512",
+          "timestamp_hint_bucket": "25-30m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q011",
+          "query_label": "lecture01 model capacity target",
+          "concept_aliases": ["model capacity", "layers", "parameters"],
+          "expected_modality": "both",
+          "query_type": "multimodal_grounded",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000589",
+          "timestamp_hint_bucket": "30-35m"
+        },
+        {
+          "query_id": "mitdl_ps_l01_q012",
+          "query_label": "lecture01 generalization target",
+          "concept_aliases": ["generalization", "test data", "training performance"],
+          "expected_modality": "audio",
+          "query_type": "concept_explanation",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec01_mp4_000641",
+          "timestamp_hint_bucket": "35-40m"
+        }
+      ]
+    },
+    {
+      "suite_id": "mitdl_lec02_public_safe_slice",
+      "project_id": "mit_deep_learning_stt__mit6_7960f24_lec02_mp4_137b37f3",
+      "index": "mit_deep_learning_stt_evidence_units",
+      "segment_index": "mit_deep_learning_stt_segments",
+      "limit": 5,
+      "target_rank_limit": 50,
+      "queries": [
+        {
+          "query_id": "mitdl_ps_l02_q001",
+          "query_label": "lecture02 prediction loss target",
+          "concept_aliases": ["loss", "prediction", "ground truth"],
+          "expected_modality": "both",
+          "query_type": "multimodal_grounded",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000022",
+          "timestamp_hint_bucket": "00-05m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q002",
+          "query_label": "lecture02 autograd target",
+          "concept_aliases": ["PyTorch autograd", "gradients", "automatic differentiation"],
+          "expected_modality": "audio",
+          "query_type": "definition_lookup",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000177",
+          "timestamp_hint_bucket": "10-15m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q003",
+          "query_label": "lecture02 chain rule target",
+          "concept_aliases": ["chain rule", "backpropagation", "gradient flow"],
+          "expected_modality": "audio",
+          "query_type": "concept_explanation",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000214",
+          "timestamp_hint_bucket": "15-20m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q004",
+          "query_label": "lecture02 optimizer step target",
+          "concept_aliases": ["optimizer step", "parameter update", "learning rate"],
+          "expected_modality": "both",
+          "query_type": "formula_table_lookup",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000263",
+          "timestamp_hint_bucket": "20-25m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q005",
+          "query_label": "lecture02 stochastic gradient target",
+          "concept_aliases": ["stochastic gradient descent", "minibatch", "training sample"],
+          "expected_modality": "audio",
+          "query_type": "audio_reasoning",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000318",
+          "timestamp_hint_bucket": "25-30m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q006",
+          "query_label": "lecture02 computation graph target",
+          "concept_aliases": ["computation graph", "forward pass", "backward pass"],
+          "expected_modality": "both",
+          "query_type": "visual_object_reference",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000356",
+          "timestamp_hint_bucket": "30-35m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q007",
+          "query_label": "lecture02 cross entropy target",
+          "concept_aliases": ["cross entropy", "classification loss", "softmax"],
+          "expected_modality": "both",
+          "query_type": "multimodal_grounded",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000401",
+          "timestamp_hint_bucket": "35-40m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q008",
+          "query_label": "lecture02 overfitting target",
+          "concept_aliases": ["overfitting", "validation loss", "regularization"],
+          "expected_modality": "audio",
+          "query_type": "concept_explanation",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000452",
+          "timestamp_hint_bucket": "40-45m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q009",
+          "query_label": "lecture02 initialization target",
+          "concept_aliases": ["weight initialization", "random initialization", "training stability"],
+          "expected_modality": "audio",
+          "query_type": "definition_lookup",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000508",
+          "timestamp_hint_bucket": "45-50m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q010",
+          "query_label": "lecture02 normalization target",
+          "concept_aliases": ["normalization", "batch normalization", "training dynamics"],
+          "expected_modality": "both",
+          "query_type": "multimodal_grounded",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000566",
+          "timestamp_hint_bucket": "50-55m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q011",
+          "query_label": "lecture02 dropout target",
+          "concept_aliases": ["dropout", "regularization", "network robustness"],
+          "expected_modality": "both",
+          "query_type": "visual_object_reference",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000619",
+          "timestamp_hint_bucket": "55-60m"
+        },
+        {
+          "query_id": "mitdl_ps_l02_q012",
+          "query_label": "lecture02 training loop target",
+          "concept_aliases": ["training loop", "forward pass", "loss backward"],
+          "expected_modality": "audio",
+          "query_type": "audio_reasoning",
+          "target_kind": "segment",
+          "expected_segment_id": "seg_mit6_7960f24_lec02_mp4_000672",
+          "timestamp_hint_bucket": "60-65m"
+        }
+      ]
+    }
+  ]
+}

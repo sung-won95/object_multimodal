@@ -30,6 +30,7 @@ from oarag.vision.vlm_evidence_validator import validate_vlm_object_evidence
 
 
 PUBLIC_SCHEMA_VERSION = "evidence-unit-retrieval-smoke-public-v1"
+PUBLIC_SAFE_SLICE_SCHEMA_VERSION = "evidence-unit-public-safe-slice-v1"
 DEFAULT_OUTPUT_ROOT = Path("reports") / "paper" / "evidence_units_retrieval_smoke"
 DEFAULT_INDEX_PREFIX = "evidence_units_smoke"
 DEFAULT_TARGET_RANK_LIMIT = 50
@@ -68,8 +69,10 @@ def run_evidence_unit_smoke(
     quality_rerank: bool = False,
     modality_aware_rerank: bool = False,
 ) -> EvidenceUnitSmokeRun:
-    manifest = _read_json(manifest_path)
+    raw_manifest = _read_json(manifest_path)
     base_dir = manifest_path.expanduser().resolve().parent
+    manifest = _normalize_manifest(raw_manifest, base_dir=base_dir)
+    slice_summary = _public_safe_slice_summary(manifest)
     run_id = str(manifest.get("run_id") or f"evidence_unit_smoke_{int(time.time())}")
     resolved_repo_root = (repo_root or default_paths().repo_root).expanduser().resolve()
     resolved_output_dir = _resolve_output_dir(
@@ -116,6 +119,7 @@ def run_evidence_unit_smoke(
         dry_run=dry_run,
         quality_rerank=quality_rerank,
         modality_aware_rerank=modality_aware_rerank,
+        slice_summary=slice_summary,
     )
     metrics_path = resolved_output_dir / "metrics.json"
     query_results_path = resolved_output_dir / "query_results.jsonl"
@@ -209,6 +213,17 @@ def _run_suite(
     query_rows: list[dict[str, Any]] = []
     if dry_run:
         index_summary = {"status": "dry_run", "skip_reason": "dry_run_requested"}
+        query_rows = [
+            _dry_run_query_row(
+                run_id=run_id,
+                suite_id=suite_id,
+                query_row=query_row,
+                index_uid=index_uid,
+                segment_index_uid=segment_index_uid,
+                target_rank_limit=target_rank_limit,
+            )
+            for query_row in queries
+        ]
     elif not health["available"]:
         index_summary = {
             "status": "skipped",
@@ -288,6 +303,10 @@ def _run_suite(
         "target_rank_diagnostics": _target_rank_inspection(query_rows),
         "rerank_diagnostics": _rerank_inspection(query_rows),
         "modality_aware_rerank_diagnostics": _modality_aware_rerank_inspection(query_rows),
+        "evaluation_slice": _suite_public_safe_slice_summary(
+            suite_id=suite_id,
+            query_rows=query_rows,
+        ),
     }
     return suite_summary, query_rows
 
@@ -321,10 +340,8 @@ def _query_row(
 ) -> dict[str, Any]:
     query_id = _query_id(query_row)
     query_text = _query_text(query_row)
-    expected_segment_ids = set(_string_list(query_row.get("expected_segment_ids")))
-    expected_segment_id = _optional_str(query_row.get("expected_segment_id"))
-    if expected_segment_id:
-        expected_segment_ids.add(expected_segment_id)
+    expected_segment_ids = _expected_segment_ids(query_row)
+    expected_evidence_unit_ids = _expected_evidence_unit_ids(query_row)
 
     response = query_project_evidence_units(
         client=client,  # type: ignore[arg-type]
@@ -338,23 +355,33 @@ def _query_row(
     candidates = _list_of_dicts(response.get("candidates"))
     base_candidates = _list_of_dicts(response.get("base_candidates")) or candidates
     top_candidate = candidates[0] if candidates else {}
-    expected_match = _candidate_matches_expected(top_candidate, expected_segment_ids)
+    expected_match = _candidate_matches_expected(
+        top_candidate,
+        expected_segment_ids,
+        expected_evidence_unit_ids,
+    )
     target_diagnostics = _target_diagnostics(
         candidates=candidates,
         expected_segment_ids=expected_segment_ids,
+        expected_evidence_unit_ids=expected_evidence_unit_ids,
         search_depth=target_rank_limit,
         query_text=query_text,
     )
     base_target_diagnostics = _target_diagnostics(
         candidates=base_candidates,
         expected_segment_ids=expected_segment_ids,
+        expected_evidence_unit_ids=expected_evidence_unit_ids,
         search_depth=target_rank_limit,
         query_text=query_text,
     )
     reranked_candidates = _quality_rerank_candidates(candidates) if quality_rerank else []
     reranked_top_candidate = reranked_candidates[0] if reranked_candidates else {}
     reranked_expected_match = (
-        _candidate_matches_expected(reranked_top_candidate, expected_segment_ids)
+        _candidate_matches_expected(
+            reranked_top_candidate,
+            expected_segment_ids,
+            expected_evidence_unit_ids,
+        )
         if quality_rerank
         else None
     )
@@ -362,6 +389,7 @@ def _query_row(
         _target_diagnostics(
             candidates=reranked_candidates,
             expected_segment_ids=expected_segment_ids,
+            expected_evidence_unit_ids=expected_evidence_unit_ids,
             search_depth=target_rank_limit,
             query_text=query_text,
         )
@@ -381,6 +409,7 @@ def _query_row(
         "suite_id": suite_id,
         "query_id": query_id,
         "query_label": _optional_public_label(query_row),
+        "evaluation_target": _public_evaluation_target(query_row),
         "privacy": _privacy_policy(),
         "index_ref": _index_ref(index_uid),
         "segment_baseline_index_ref": _index_ref(segment_index_uid) if segment_index_uid else None,
@@ -414,6 +443,7 @@ def _query_row(
             base_top_candidate=top_candidate,
             reranked_candidates=reranked_candidates,
             expected_segment_ids=expected_segment_ids,
+            expected_evidence_unit_ids=expected_evidence_unit_ids,
             base_target_diagnostics=target_diagnostics,
             reranked_target_diagnostics=reranked_target_diagnostics,
         ),
@@ -479,6 +509,7 @@ def _skipped_query_row(
         "suite_id": suite_id,
         "query_id": _query_id(query_row),
         "query_label": _optional_public_label(query_row),
+        "evaluation_target": _public_evaluation_target(query_row),
         "privacy": _privacy_policy(),
         "index_ref": _index_ref(index_uid),
         "segment_baseline_index_ref": _index_ref(segment_index_uid) if segment_index_uid else None,
@@ -488,16 +519,14 @@ def _skipped_query_row(
         "top_evidence_unit": None,
         "top_hit_memo": {
             "expected_target_configured": bool(
-                _optional_str(query_row.get("expected_segment_id"))
-                or _string_list(query_row.get("expected_segment_ids"))
+                _expected_target_configured(query_row)
             ),
             "top_expected_match": None,
             "public_note": "index/query skipped; no top-hit judgment",
         },
         "target_diagnostics": {
             "target_configured": bool(
-                _optional_str(query_row.get("expected_segment_id"))
-                or _string_list(query_row.get("expected_segment_ids"))
+                _expected_target_configured(query_row)
             ),
             "target_found_in_top_k": None,
             "target_rank_bucket": "not_queried",
@@ -513,6 +542,57 @@ def _skipped_query_row(
             "status": "not_queried",
         },
         "segment_baseline": {"status": "skipped", "skip_reason": skip_reason},
+        "rag_input_inspectable": False,
+    }
+
+
+def _dry_run_query_row(
+    *,
+    run_id: str,
+    suite_id: str,
+    query_row: dict[str, Any],
+    index_uid: str,
+    segment_index_uid: str | None,
+    target_rank_limit: int,
+) -> dict[str, Any]:
+    target_configured = _expected_target_configured(query_row)
+    return {
+        "schema_version": PUBLIC_SCHEMA_VERSION,
+        "run_id": run_id,
+        "suite_id": suite_id,
+        "query_id": _query_id(query_row),
+        "query_label": _optional_public_label(query_row),
+        "evaluation_target": _public_evaluation_target(query_row),
+        "privacy": _privacy_policy(),
+        "index_ref": _index_ref(index_uid),
+        "segment_baseline_index_ref": _index_ref(segment_index_uid) if segment_index_uid else None,
+        "status": "dry_run",
+        "skip_reason": "dry_run_requested",
+        "search_hit_count": 0,
+        "top_evidence_unit": None,
+        "top_hit_memo": {
+            "expected_target_configured": target_configured,
+            "top_expected_match": None,
+            "target_rank_bucket": "not_queried",
+            "public_note": "dry run records target configuration without querying private content",
+        },
+        "target_diagnostics": {
+            "target_configured": target_configured,
+            "target_found_in_top_k": None,
+            "target_rank": None,
+            "target_rank_bucket": "not_queried" if target_configured else "not_configured",
+            "target_search_depth": target_rank_limit,
+        },
+        "base_target_diagnostics": None,
+        "rerank_diagnostics": {
+            "enabled": False,
+            "status": "not_queried",
+        },
+        "modality_aware_rerank": {
+            "enabled": False,
+            "status": "not_queried",
+        },
+        "segment_baseline": {"status": "dry_run", "skip_reason": "dry_run_requested"},
         "rag_input_inspectable": False,
     }
 
@@ -804,10 +884,12 @@ def _target_diagnostics(
     *,
     candidates: list[dict[str, Any]],
     expected_segment_ids: set[str],
+    expected_evidence_unit_ids: set[str],
     search_depth: int,
     query_text: str,
 ) -> dict[str, Any]:
-    if not expected_segment_ids:
+    expected_evidence_unit_ids = expected_evidence_unit_ids or set()
+    if not expected_segment_ids and not expected_evidence_unit_ids:
         return {
             "target_configured": False,
             "target_found_in_top_k": None,
@@ -817,7 +899,11 @@ def _target_diagnostics(
     target_candidate = None
     target_rank = None
     for rank, candidate in enumerate(candidates, start=1):
-        if _candidate_matches_expected(candidate, expected_segment_ids):
+        if _candidate_matches_expected(
+            candidate,
+            expected_segment_ids,
+            expected_evidence_unit_ids,
+        ):
             target_candidate = candidate
             target_rank = rank
             break
@@ -1215,6 +1301,7 @@ def _rerank_diagnostics(
     base_top_candidate: dict[str, Any],
     reranked_candidates: list[dict[str, Any]],
     expected_segment_ids: set[str],
+    expected_evidence_unit_ids: set[str],
     base_target_diagnostics: dict[str, Any],
     reranked_target_diagnostics: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1225,8 +1312,17 @@ def _rerank_diagnostics(
         }
     reranked_top = reranked_candidates[0] if reranked_candidates else {}
     rerank = _mapping(reranked_top.get("quality_rerank"))
-    base_top_match = _candidate_matches_expected(base_top_candidate, expected_segment_ids)
-    reranked_top_match = _candidate_matches_expected(reranked_top, expected_segment_ids)
+    expected_evidence_unit_ids = expected_evidence_unit_ids or set()
+    base_top_match = _candidate_matches_expected(
+        base_top_candidate,
+        expected_segment_ids,
+        expected_evidence_unit_ids,
+    )
+    reranked_top_match = _candidate_matches_expected(
+        reranked_top,
+        expected_segment_ids,
+        expected_evidence_unit_ids,
+    )
     return {
         "enabled": True,
         "status": "computed",
@@ -1276,6 +1372,109 @@ def _top_hit_memo(
     }
 
 
+def _public_safe_slice_summary(manifest: dict[str, Any]) -> dict[str, Any]:
+    if manifest.get("schema_version") != PUBLIC_SAFE_SLICE_SCHEMA_VERSION:
+        return {"enabled": False}
+    queries = _manifest_query_rows(manifest)
+    summary = _query_metadata_summary(queries)
+    slice_info = _mapping(manifest.get("evaluation_slice") or manifest.get("slice"))
+    return {
+        "enabled": True,
+        "schema_version": PUBLIC_SAFE_SLICE_SCHEMA_VERSION,
+        "slice_id": slice_info.get("slice_id") or manifest.get("slice_id") or manifest.get("run_id"),
+        "lecture_count": int(slice_info.get("lecture_count") or 0),
+        "query_target_count": len(queries),
+        "target_configured_count": summary["target_configured_count"],
+        "expected_modality_counts": summary["expected_modality_counts"],
+        "query_type_counts": summary["query_type_counts"],
+        "concept_alias_coverage": summary["concept_alias_coverage"],
+        "timestamp_hint_counts": summary["timestamp_hint_counts"],
+        "privacy": "raw_query_text/transcripts/answers/evidence_text/local_paths_excluded",
+        "public_note": (
+            "This slice stores public-safe query IDs, concept-alias counts, target "
+            "configuration, modality/query-type aggregates, and timestamp-hint buckets. "
+            "Raw query text and raw evidence text are excluded."
+        ),
+    }
+
+
+def _suite_public_safe_slice_summary(
+    *,
+    suite_id: str,
+    query_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    targets = [_mapping(row.get("evaluation_target")) for row in query_rows]
+    summary = _query_metadata_summary(targets)
+    return {
+        "suite_id": suite_id,
+        "query_target_count": len(query_rows),
+        "target_configured_count": summary["target_configured_count"],
+        "expected_modality_counts": summary["expected_modality_counts"],
+        "query_type_counts": summary["query_type_counts"],
+        "concept_alias_coverage": summary["concept_alias_coverage"],
+        "timestamp_hint_counts": summary["timestamp_hint_counts"],
+    }
+
+
+def _query_metadata_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    modality_counts = Counter()
+    query_type_counts = Counter()
+    timestamp_hint_counts = Counter()
+    target_configured_count = 0
+    alias_total = 0
+    queries_with_aliases = 0
+    max_aliases = 0
+    for row in rows:
+        if _expected_target_configured(row):
+            target_configured_count += 1
+        modality = _optional_str(row.get("expected_modality"))
+        if modality:
+            modality_counts[modality] += 1
+        query_type = _optional_str(row.get("query_type"))
+        if query_type:
+            query_type_counts[query_type] += 1
+        hint_bucket = _optional_str(row.get("timestamp_hint_bucket"))
+        if hint_bucket:
+            timestamp_hint_counts[hint_bucket] += 1
+        alias_count = _concept_alias_count(row)
+        alias_total += alias_count
+        max_aliases = max(max_aliases, alias_count)
+        if alias_count:
+            queries_with_aliases += 1
+    return {
+        "target_configured_count": target_configured_count,
+        "expected_modality_counts": dict(modality_counts),
+        "query_type_counts": dict(query_type_counts),
+        "timestamp_hint_counts": dict(timestamp_hint_counts),
+        "concept_alias_coverage": {
+            "queries_with_aliases": queries_with_aliases,
+            "queries_without_aliases": len(rows) - queries_with_aliases,
+            "concept_alias_total": alias_total,
+            "max_aliases_per_query": max_aliases,
+        },
+    }
+
+
+def _public_evaluation_target(query_row: dict[str, Any]) -> dict[str, Any]:
+    target_kind = _optional_str(query_row.get("target_kind"))
+    if not target_kind:
+        target_kind = "evidence_unit" if _expected_evidence_unit_ids(query_row) else "segment"
+    return {
+        "target_configured": _expected_target_configured(query_row),
+        "target_kind": target_kind,
+        "target_ref_count": len(_expected_segment_ids(query_row))
+        + len(_expected_evidence_unit_ids(query_row)),
+        "expected_modality": _optional_str(query_row.get("expected_modality")),
+        "query_type": _optional_str(query_row.get("query_type")),
+        "concept_alias_count": _concept_alias_count(query_row),
+        "timestamp_hint_bucket": _optional_str(query_row.get("timestamp_hint_bucket")),
+        "public_note": (
+            "Target metadata is public-safe: raw query text, raw answers, transcript "
+            "excerpts, local paths, and raw evidence text are not emitted."
+        ),
+    }
+
+
 def _summary_payload(
     *,
     run_id: str,
@@ -1286,6 +1485,7 @@ def _summary_payload(
     dry_run: bool,
     quality_rerank: bool,
     modality_aware_rerank: bool,
+    slice_summary: dict[str, Any],
 ) -> dict[str, Any]:
     status_counts = Counter(str(row.get("status") or "unknown") for row in query_rows)
     return {
@@ -1302,6 +1502,7 @@ def _summary_payload(
         "suite_count": len(suites),
         "query_count": len(query_rows),
         "query_status_counts": dict(status_counts),
+        "evaluation_slice": slice_summary,
         "suites": suites,
         "rag_input_inspection": _rag_input_inspection(query_rows, {}),
         "target_rank_diagnostics": _target_rank_inspection(query_rows),
@@ -1337,6 +1538,24 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
     ]
     if payload["meilisearch"].get("skip_reason"):
         lines.append(f"- skip reason: `{payload['meilisearch']['skip_reason']}`")
+    slice_summary = _mapping(payload.get("evaluation_slice"))
+    if slice_summary.get("enabled") is True:
+        alias_coverage = _mapping(slice_summary.get("concept_alias_coverage"))
+        lines.extend(
+            [
+                "",
+                "## Evaluation Slice",
+                "",
+                f"- slice id: `{slice_summary.get('slice_id')}`",
+                f"- query targets: `{slice_summary.get('query_target_count', 0)}`",
+                f"- targets configured: `{slice_summary.get('target_configured_count', 0)}`",
+                f"- expected modalities: `{json.dumps(slice_summary.get('expected_modality_counts', {}), sort_keys=True)}`",
+                f"- query types: `{json.dumps(slice_summary.get('query_type_counts', {}), sort_keys=True)}`",
+                f"- queries with concept aliases: `{alias_coverage.get('queries_with_aliases', 0)}`",
+                f"- concept alias total: `{alias_coverage.get('concept_alias_total', 0)}`",
+                f"- privacy: `{slice_summary.get('privacy')}`",
+            ]
+        )
     lines.extend(["", "## Suites", ""])
     for suite in payload.get("suites", []):
         build = suite.get("build", {})
@@ -1983,9 +2202,17 @@ def _path_from_build_summary(summary: dict[str, Any]) -> Path | None:
     return Path(str(value)) if value else None
 
 
-def _candidate_matches_expected(candidate: dict[str, Any], expected_segment_ids: set[str]) -> bool | None:
-    if not expected_segment_ids:
+def _candidate_matches_expected(
+    candidate: dict[str, Any],
+    expected_segment_ids: set[str],
+    expected_evidence_unit_ids: set[str] | None = None,
+) -> bool | None:
+    expected_evidence_unit_ids = expected_evidence_unit_ids or set()
+    if not expected_segment_ids and not expected_evidence_unit_ids:
         return None
+    evidence_unit_id = _optional_str(candidate.get("evidence_unit_id"))
+    if evidence_unit_id and evidence_unit_id in expected_evidence_unit_ids:
+        return True
     target = _optional_str(candidate.get("target_segment_id"))
     source_ids = set(_string_list(candidate.get("source_segment_ids")))
     return bool((target and target in expected_segment_ids) or (source_ids & expected_segment_ids))
@@ -2194,6 +2421,90 @@ def _resolve_output_dir(
     return configured.resolve()
 
 
+def _normalize_manifest(manifest: dict[str, Any], *, base_dir: Path) -> dict[str, Any]:
+    if manifest.get("schema_version") == PUBLIC_SAFE_SLICE_SCHEMA_VERSION:
+        _validate_public_safe_slice_manifest(manifest, base_dir=base_dir)
+    return manifest
+
+
+def _validate_public_safe_slice_manifest(manifest: dict[str, Any], *, base_dir: Path) -> None:
+    del base_dir  # Reserved for future relative private-query overlays.
+    queries = _manifest_query_rows(manifest)
+    min_targets = _positive_int(manifest.get("min_query_targets", 20), field_name="min_query_targets")
+    if len(queries) < min_targets:
+        raise ValueError(
+            f"public-safe evaluation slice requires at least {min_targets} query targets"
+        )
+    banned_keys = {
+        "query",
+        "query_text",
+        "query_text_ko",
+        "raw_query",
+        "reference_answer",
+        "raw_answer",
+        "answer_text",
+        "evidence_text",
+        "raw_evidence_text",
+        "transcript_excerpt",
+        "transcript_text",
+        "private_path",
+        "local_path",
+    }
+    for suite_index, suite in enumerate(_manifest_suites(manifest), start=1):
+        if not isinstance(suite, dict):
+            raise ValueError(f"public-safe suite #{suite_index} must be a JSON object")
+        if not (_optional_str(suite.get("project_id")) or _optional_str(suite.get("project_dir"))):
+            raise ValueError(f"public-safe suite #{suite_index} requires project_id or project_dir")
+        for query_index, query in enumerate(_suite_queries(suite), start=1):
+            present_banned = sorted(key for key in banned_keys if key in query)
+            if present_banned:
+                raise ValueError(
+                    "public-safe query target must not contain raw/private fields: "
+                    + ", ".join(present_banned)
+                )
+            if not _optional_str(query.get("query_id") or query.get("id")):
+                raise ValueError(
+                    f"public-safe suite #{suite_index} query #{query_index} requires query_id"
+                )
+            if not _expected_target_configured(query):
+                raise ValueError(
+                    f"public-safe suite #{suite_index} query #{query_index} requires a target id"
+                )
+            if not _optional_str(query.get("expected_modality")):
+                raise ValueError(
+                    f"public-safe suite #{suite_index} query #{query_index} requires expected_modality"
+                )
+            if not _optional_str(query.get("query_type")):
+                raise ValueError(
+                    f"public-safe suite #{suite_index} query #{query_index} requires query_type"
+                )
+            if _concept_alias_count(query) <= 0:
+                raise ValueError(
+                    f"public-safe suite #{suite_index} query #{query_index} requires concept_aliases"
+                )
+
+
+def _manifest_suites(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    suites = manifest.get("suites") or []
+    if not isinstance(suites, list):
+        raise ValueError("evidence-unit-smoke manifest requires a list under 'suites'")
+    return [suite for suite in suites if isinstance(suite, dict)]
+
+
+def _manifest_query_rows(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for suite in _manifest_suites(manifest):
+        rows.extend(_suite_queries(suite))
+    return rows
+
+
+def _suite_queries(suite: dict[str, Any]) -> list[dict[str, Any]]:
+    queries = suite.get("queries") or []
+    if not isinstance(queries, list):
+        raise ValueError("suite queries must be a list")
+    return [query for query in queries if isinstance(query, dict)]
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.expanduser().read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -2219,7 +2530,9 @@ def _privacy_policy() -> dict[str, Any]:
 def _query_text(query_row: dict[str, Any]) -> str:
     value = _optional_str(query_row.get("query_text") or query_row.get("query"))
     if not value:
-        raise ValueError("query row requires query_text or query")
+        value = _synthetic_public_safe_query_text(query_row)
+    if not value:
+        raise ValueError("query row requires query_text/query or public-safe concept_aliases")
     return value
 
 
@@ -2229,6 +2542,65 @@ def _query_id(query_row: dict[str, Any]) -> str:
 
 def _optional_public_label(query_row: dict[str, Any]) -> str | None:
     return _optional_str(query_row.get("query_label") or query_row.get("label"))
+
+
+def _synthetic_public_safe_query_text(query_row: dict[str, Any]) -> str | None:
+    aliases = _query_concept_aliases(query_row)
+    if not aliases:
+        return None
+    parts = [
+        " ".join(aliases),
+        _optional_str(query_row.get("expected_modality")) or "",
+        _optional_str(query_row.get("query_type")) or "",
+    ]
+    return " ".join(part for part in parts if part).strip()
+
+
+def _query_concept_aliases(query_row: dict[str, Any]) -> list[str]:
+    aliases = query_row.get("concept_aliases")
+    if aliases is None:
+        aliases = query_row.get("concept_alias")
+    return _string_list(aliases)
+
+
+def _concept_alias_count(query_row: dict[str, Any]) -> int:
+    if "concept_alias_count" in query_row:
+        return int(query_row.get("concept_alias_count") or 0)
+    return len(_query_concept_aliases(query_row))
+
+
+def _expected_segment_ids(query_row: dict[str, Any]) -> set[str]:
+    values = set(_string_list(query_row.get("expected_segment_ids")))
+    value = _optional_str(
+        query_row.get("expected_segment_id")
+        or query_row.get("target_segment_id")
+        or query_row.get("gold_segment_id")
+    )
+    if value:
+        values.add(value)
+    return values
+
+
+def _expected_evidence_unit_ids(query_row: dict[str, Any]) -> set[str]:
+    values = set(
+        _string_list(
+            query_row.get("expected_evidence_unit_ids")
+            or query_row.get("target_evidence_unit_ids")
+        )
+    )
+    value = _optional_str(
+        query_row.get("expected_evidence_unit_id")
+        or query_row.get("target_evidence_unit_id")
+    )
+    if value:
+        values.add(value)
+    return values
+
+
+def _expected_target_configured(query_row: dict[str, Any]) -> bool:
+    if "target_configured" in query_row:
+        return bool(query_row.get("target_configured"))
+    return bool(_expected_segment_ids(query_row) or _expected_evidence_unit_ids(query_row))
 
 
 def _optional_path(value: Any) -> Path | None:

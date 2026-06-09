@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://object-multimodal.local/schemas/evidence-unit-public-safe-slice-v1.json",
+  "title": "Evidence Unit Public-Safe Evaluation Slice",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "run_id",
+    "evaluation_slice",
+    "suites"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "evidence-unit-public-safe-slice-v1"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "min_query_targets": {
+      "type": "integer",
+      "minimum": 20
+    },
+    "evaluation_slice": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "slice_id",
+        "lecture_count",
+        "privacy"
+      ],
+      "properties": {
+        "slice_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lecture_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "privacy": {
+          "type": "object"
+        }
+      }
+    },
+    "suites": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "suite_id",
+          "project_id",
+          "queries"
+        ],
+        "properties": {
+          "suite_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "project_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "queries": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "query_id",
+                "concept_aliases",
+                "expected_modality",
+                "query_type",
+                "expected_segment_id",
+                "target_kind"
+              ],
+              "not": {
+                "anyOf": [
+                  {"required": ["query"]},
+                  {"required": ["query_text"]},
+                  {"required": ["query_text_ko"]},
+                  {"required": ["reference_answer"]},
+                  {"required": ["raw_answer"]},
+                  {"required": ["answer_text"]},
+                  {"required": ["evidence_text"]},
+                  {"required": ["raw_evidence_text"]},
+                  {"required": ["transcript_excerpt"]},
+                  {"required": ["transcript_text"]},
+                  {"required": ["private_path"]},
+                  {"required": ["local_path"]}
+                ]
+              },
+              "properties": {
+                "query_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "concept_aliases": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "expected_modality": {
+                  "enum": ["audio", "visual", "both"]
+                },
+                "query_type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "target_kind": {
+                  "enum": ["segment", "evidence_unit"]
+                },
+                "expected_segment_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "timestamp_hint_bucket": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
