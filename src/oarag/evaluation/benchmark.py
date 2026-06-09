@@ -42,6 +42,13 @@ from oarag.retrieval.project_query import (
     WINDOW_HIT_SOURCE,
     query_project,
 )
+from oarag.retrieval.teaching_moments import (
+    DEFAULT_SPAN_CANDIDATE_POOL_LIMIT,
+    DEFAULT_SPAN_WINDOW_SECONDS,
+    TEACHING_MOMENT_HIT_SOURCE,
+    public_teaching_moment_candidate_diagnostics,
+    query_project_teaching_moments,
+)
 from oarag.retrieval.vectors import LOCAL_HASH_VECTOR_SOURCE
 from oarag.core.schemas import EduVidQARecord, SearchCandidate
 
@@ -172,6 +179,18 @@ DEFAULT_MATRIX_VARIANTS = [
         "evidence_unit_priority": "quality",
         "evidence_unit_rerank": MODALITY_AWARE_RERANK,
         "candidate_pool_limit": 30,
+        "use_domain_lexicon": False,
+    },
+]
+OPTIONAL_MATRIX_VARIANTS = [
+    {
+        "variant_id": "teaching_moment_span",
+        "label": "Teaching moment span rerank",
+        "answer_matrix_role": "teaching_moment_span",
+        "index_kind": TEACHING_MOMENT_HIT_SOURCE,
+        "anchor_index_kind": SEGMENT_HIT_SOURCE,
+        "candidate_pool_limit": DEFAULT_SPAN_CANDIDATE_POOL_LIMIT,
+        "span_window_seconds": DEFAULT_SPAN_WINDOW_SECONDS,
         "use_domain_lexicon": False,
     },
 ]
@@ -573,7 +592,10 @@ def run_retrieval_answer_matrix_suite(
         "query_count": len(queries),
         "result_count": len(rows),
         "variant_count": len(variant_metrics),
-        "supported_variant_ids": [variant["variant_id"] for variant in _matrix_variants({})],
+        "supported_variant_ids": [
+            str(variant["variant_id"])
+            for variant in [*DEFAULT_MATRIX_VARIANTS, *OPTIONAL_MATRIX_VARIANTS]
+        ],
         "variants": variant_metrics,
         "variant_metrics": {str(item["variant_id"]): item for item in variant_metrics},
         "dataset_descriptor": _dataset_descriptor(
@@ -1258,7 +1280,8 @@ def _ablation_modes(suite: dict[str, Any]) -> list[str]:
 
 def _matrix_variants(suite: dict[str, Any]) -> list[dict[str, Any]]:
     default_by_id = {
-        str(variant["variant_id"]): dict(variant) for variant in DEFAULT_MATRIX_VARIANTS
+        str(variant["variant_id"]): dict(variant)
+        for variant in [*DEFAULT_MATRIX_VARIANTS, *OPTIONAL_MATRIX_VARIANTS]
     }
     raw_variants = suite.get("variants") or DEFAULT_MATRIX_VARIANTS
     if isinstance(raw_variants, str):
@@ -1318,6 +1341,26 @@ def _run_matrix_query(
 ) -> dict[str, Any]:
     started = time.perf_counter()
     index_kind = _normalize_index_kind(variant.get("index_kind", SEGMENT_HIT_SOURCE))
+    if index_kind == TEACHING_MOMENT_HIT_SOURCE:
+        return _run_teaching_moment_matrix_query(
+            client=client,
+            suite=suite,
+            variant=variant,
+            base_dir=base_dir,
+            project_dir=project_dir,
+            run_id=run_id,
+            suite_id=suite_id,
+            domain=domain,
+            query_id=query_id,
+            query_row=query_row,
+            query_text=query_text,
+            expected_ranges=expected_ranges,
+            expected_segment_ids=expected_segment_ids,
+            expected_window_ids=expected_window_ids,
+            include_answer=include_answer,
+            deltas=deltas,
+            started=started,
+        )
     if index_kind == EVIDENCE_UNIT_HIT_SOURCE:
         return _run_evidence_unit_matrix_query(
             client=client,
@@ -1489,6 +1532,188 @@ def _run_matrix_query(
         "semantic_retrieval": _public_semantic_retrieval(
             response.get("retrieval_context")
         ),
+        "top_candidate": _public_matrix_candidate(top_bundle),
+        "answer": answer_summary,
+        "answer_grounding": answer_grounding,
+        "processing_time_ms": response.get("processing_time_ms"),
+        "elapsed_time_ms": elapsed_ms,
+        "warning_count": len(response.get("warnings") or []),
+    }
+    row["answer_failure_reason"] = _answer_failure_reason(row)
+    return row
+
+
+def _run_teaching_moment_matrix_query(
+    *,
+    client: SearchClient,
+    suite: dict[str, Any],
+    variant: dict[str, Any],
+    base_dir: Path,
+    project_dir: Path,
+    run_id: str,
+    suite_id: str,
+    domain: str,
+    query_id: str,
+    query_row: dict[str, Any],
+    query_text: str,
+    expected_ranges: list[tuple[float, float]],
+    expected_segment_ids: list[str],
+    expected_window_ids: list[str],
+    include_answer: bool,
+    deltas: list[int],
+    started: float,
+) -> dict[str, Any]:
+    index_uid = _matrix_index_uid(
+        suite=suite,
+        variant=variant,
+        index_kind=TEACHING_MOMENT_HIT_SOURCE,
+    )
+    visual_index_uid = _optional_str(_variant_value(suite, variant, "visual_index"))
+    use_domain_lexicon = _bool_config(variant, "use_domain_lexicon", default=False)
+    domain_lexicon_path = (
+        _resolve_benchmark_domain_lexicon_path(
+            value=_variant_value(suite, variant, "domain_lexicon"),
+            base_dir=base_dir,
+            project_dir=project_dir,
+        )
+        if use_domain_lexicon
+        else None
+    )
+    hybrid_retrieval_enabled = _bool_config(variant, "hybrid_retrieval", default=False)
+    hybrid_query_vector = (
+        _matrix_query_vector_config(
+            suite=suite,
+            variant=variant,
+            query_row=query_row,
+            base_dir=base_dir,
+            project_dir=project_dir,
+        )
+        if hybrid_retrieval_enabled
+        else {}
+    )
+    response = query_project_teaching_moments(
+        client=client,
+        index_uid=index_uid,
+        project_dir=project_dir,
+        query=query_text,
+        anchor_index_kind=str(_variant_value(suite, variant, "anchor_index_kind") or SEGMENT_HIT_SOURCE),
+        visual_index_uid=visual_index_uid,
+        limit=int(_variant_value(suite, variant, "limit") or 5),
+        candidate_pool_limit=_optional_int(
+            _variant_value(suite, variant, "candidate_pool_limit")
+        ),
+        segments_path=_optional_path(_variant_value(suite, variant, "segments")),
+        frames_manifest_path=_optional_path(_variant_value(suite, variant, "frames_manifest")),
+        visual_entities_path=_optional_path(_variant_value(suite, variant, "visual_entities")),
+        entity_links_path=_optional_path(_variant_value(suite, variant, "entity_links")),
+        evidence_units_path=_optional_path(_variant_value(suite, variant, "evidence_units")),
+        domain_lexicon_path=domain_lexicon_path,
+        disable_domain_lexicon=not use_domain_lexicon,
+        span_window_seconds=_optional_float(_variant_value(suite, variant, "span_window_seconds")),
+        span_window_before_seconds=_optional_float(
+            _variant_value(suite, variant, "span_window_before_seconds")
+        ),
+        span_window_after_seconds=_optional_float(
+            _variant_value(suite, variant, "span_window_after_seconds")
+        ),
+        span_neighbor_count=int(_variant_value(suite, variant, "span_neighbor_count") or 2),
+        rerank_backend=str(_variant_value(suite, variant, "rerank_backend") or "deterministic"),
+        hybrid_retrieval=hybrid_retrieval_enabled,
+        hybrid_embedder=str(
+            _variant_value(suite, variant, "hybrid_embedder") or DEFAULT_HYBRID_EMBEDDER
+        ),
+        hybrid_semantic_ratio=(
+            _optional_float(_variant_value(suite, variant, "hybrid_semantic_ratio"))
+            or DEFAULT_HYBRID_SEMANTIC_RATIO
+        ),
+        hybrid_query_vector_embedder=hybrid_query_vector.get("embedder"),
+        hybrid_query_vector_name=hybrid_query_vector.get("name"),
+        hybrid_query_vector_dimensions=hybrid_query_vector.get("dimensions"),
+        hybrid_query_vector_manifest_path=hybrid_query_vector.get("manifest_path"),
+    )
+    answer_enabled = _bool_config(variant, "include_answer", default=include_answer)
+    answer = compose_answer(response) if answer_enabled else None
+    answer_grounding = _answer_grounding_metrics(
+        answer=answer,
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+        expected_ranges=expected_ranges,
+    )
+    answer_summary = _public_answer_summary(answer)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 4)
+    bundles = _list_of_dicts(response.get("bundles"))
+    candidate_errors = [
+        _local_candidate_error(
+            bundle.get("candidate") if isinstance(bundle.get("candidate"), dict) else None,
+            expected_ranges,
+        )
+        for bundle in bundles
+    ]
+    best_error = min((error for error in candidate_errors if error is not None), default=None)
+    top_error = candidate_errors[0] if candidate_errors else None
+    hit_by_delta = {
+        str(delta): best_error is not None and best_error <= delta for delta in deltas
+    }
+    top_bundle = bundles[0] if bundles else None
+    top_candidate = (
+        top_bundle.get("candidate")
+        if isinstance(top_bundle, dict) and isinstance(top_bundle.get("candidate"), dict)
+        else None
+    )
+    object_link_diagnostics = _matrix_object_link_diagnostics(top_bundle)
+    target_rank_diagnostics = _matrix_target_rank_diagnostics(
+        bundles=bundles,
+        expected_segment_ids=expected_segment_ids,
+        expected_window_ids=expected_window_ids,
+    )
+
+    row = {
+        "schema_version": MATRIX_SCHEMA_VERSION,
+        "status": "queried",
+        "run_id": run_id,
+        "suite_id": suite_id,
+        "suite_type": "retrieval_answer_matrix",
+        "domain": domain,
+        "variant_id": variant["variant_id"],
+        "variant_label": variant["label"],
+        "query_id": query_id,
+        "query_label": _optional_public_label(query_row),
+        "privacy": _matrix_privacy_payload(),
+        "config": _public_matrix_config(
+            suite=suite,
+            variant=variant,
+            index_uid=index_uid,
+            visual_index_uid=visual_index_uid,
+            index_kind=TEACHING_MOMENT_HIT_SOURCE,
+            use_domain_lexicon=use_domain_lexicon,
+            query_vector_config=hybrid_query_vector,
+        ),
+        "expected_time_available": bool(expected_ranges),
+        "expected_segment_available": bool(expected_segment_ids),
+        "expected_window_available": bool(expected_window_ids),
+        "search_hit_count": (response.get("counts") or {}).get("anchor_bundle_count"),
+        "bundle_count": len(bundles),
+        "best_abs_error": best_error,
+        "top1_abs_error": top_error,
+        "top1_expected_segment_match": _top_candidate_matches(
+            top_candidate=top_candidate,
+            expected_segment_ids=expected_segment_ids,
+        ),
+        "target_rank": target_rank_diagnostics["target_rank"],
+        "target_rank_bucket": target_rank_diagnostics["target_rank_bucket"],
+        "target_rank_diagnostics": target_rank_diagnostics,
+        "hit_by_delta": hit_by_delta,
+        "mrr": _reciprocal_rank(candidate_errors, deltas=max(deltas)),
+        "evidence_covered": bool(bundles),
+        "frame_backed": _bundles_have_frames(bundles),
+        "linked_entity_backed": _bundles_have_linked_entities(bundles),
+        "candidate_visual_support": object_link_diagnostics["candidate_visual_support"],
+        "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
+        "object_link_diagnostics": object_link_diagnostics,
+        "object_evidence_coverage": _matrix_object_evidence_coverage(top_bundle),
+        "teaching_moment_span": _public_teaching_moment_span(response.get("retrieval_context")),
+        "query_expansion": _public_query_expansion(response.get("query_expansion")),
+        "semantic_retrieval": _public_semantic_retrieval(response.get("retrieval_context")),
         "top_candidate": _public_matrix_candidate(top_bundle),
         "answer": answer_summary,
         "answer_grounding": answer_grounding,
@@ -2042,6 +2267,7 @@ def _matrix_variant_metrics(
                 is True
             )
         ),
+        "teaching_moment_span": _matrix_teaching_moment_span_metrics(rows),
         "modality_aware_rerank": _matrix_modality_aware_rerank_metrics(rows),
         "object_evidence_coverage_counts": _object_evidence_coverage_counts(rows),
         "visual_state_coverage_ratio": _coverage_bool_ratio(rows, "has_visual_state"),
@@ -2114,6 +2340,35 @@ def _matrix_variant_metrics(
     for delta in deltas:
         metric[f"hit_at_{delta}s"] = _ratio_hit(rows, str(delta))
     return metric
+
+
+def _matrix_teaching_moment_span_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    diagnostics = [_mapping(row.get("teaching_moment_span")) for row in rows]
+    enabled = [diag for diag in diagnostics if diag.get("enabled") is True]
+    reason_counts: Counter[str] = Counter()
+    component_presence: Counter[str] = Counter()
+    relevance_buckets: Counter[str] = Counter()
+    top_changed_count = 0
+    for diag in enabled:
+        if diag.get("top_changed") is True:
+            top_changed_count += 1
+        for key, value in _mapping(diag.get("reason_code_counts")).items():
+            reason_counts[str(key)] += int(value or 0)
+        for key, value in _mapping(diag.get("score_component_presence_counts")).items():
+            component_presence[str(key)] += int(value or 0)
+        for key, value in _mapping(diag.get("query_relevance_bucket_counts")).items():
+            relevance_buckets[str(key)] += int(value or 0)
+    return {
+        "enabled_query_count": len(enabled),
+        "top_changed_count": top_changed_count,
+        "reason_code_counts": dict(sorted(reason_counts.items())),
+        "score_component_presence_counts": dict(sorted(component_presence.items())),
+        "query_relevance_bucket_counts": dict(sorted(relevance_buckets.items())),
+        "public_note": (
+            "Teaching-moment span metrics are aggregate-only and exclude raw query, "
+            "transcript, answer, evidence text, paths, and raw candidate ids."
+        ),
+    }
 
 
 def _matrix_modality_aware_rerank_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2189,11 +2444,22 @@ def _normalize_index_kind(value: Any) -> str:
         "lecture-window": WINDOW_HIT_SOURCE,
         "evidence-unit": EVIDENCE_UNIT_HIT_SOURCE,
         "evidence-units": EVIDENCE_UNIT_HIT_SOURCE,
+        "teaching-moment": TEACHING_MOMENT_HIT_SOURCE,
+        "teaching-moment-span": TEACHING_MOMENT_HIT_SOURCE,
+        "teaching-moments": TEACHING_MOMENT_HIT_SOURCE,
+        "explanation-span": TEACHING_MOMENT_HIT_SOURCE,
     }
     result = aliases.get(normalized)
     if result is None:
         valid = ", ".join(
-            sorted({SEGMENT_HIT_SOURCE, WINDOW_HIT_SOURCE, EVIDENCE_UNIT_HIT_SOURCE})
+            sorted(
+                {
+                    SEGMENT_HIT_SOURCE,
+                    WINDOW_HIT_SOURCE,
+                    EVIDENCE_UNIT_HIT_SOURCE,
+                    TEACHING_MOMENT_HIT_SOURCE,
+                }
+            )
         )
         raise ValueError(f"Unsupported retrieval_answer_matrix index_kind: {value}. Valid: {valid}")
     return result
@@ -2235,6 +2501,15 @@ def _matrix_index_uid(*, suite: dict[str, Any], variant: dict[str, Any], index_k
         if window_index:
             return window_index
         raise ValueError("retrieval_answer_matrix window variant requires window_index")
+    if index_kind == TEACHING_MOMENT_HIT_SOURCE:
+        anchor_index = _optional_str(
+            variant.get("anchor_index")
+            or variant.get("segment_index")
+            or suite.get("index")
+        )
+        if anchor_index:
+            return anchor_index
+        raise ValueError("retrieval_answer_matrix teaching-moment variant requires index")
     index = _optional_str(suite.get("index"))
     if not index:
         raise ValueError("retrieval_answer_matrix suite requires index")
@@ -2457,6 +2732,20 @@ def _public_matrix_variant_config(variant: dict[str, Any]) -> dict[str, Any]:
                 else None
             )
         )
+    if config["index_kind"] == TEACHING_MOMENT_HIT_SOURCE:
+        config["anchor_index_kind"] = str(variant.get("anchor_index_kind") or SEGMENT_HIT_SOURCE)
+        config["span_window_seconds"] = _optional_float(
+            variant.get("span_window_seconds")
+        )
+        config["span_window_before_seconds"] = _optional_float(
+            variant.get("span_window_before_seconds")
+        )
+        config["span_window_after_seconds"] = _optional_float(
+            variant.get("span_window_after_seconds")
+        )
+        config["span_neighbor_count"] = _optional_int(
+            variant.get("span_neighbor_count")
+        )
     candidate_pool_limit = _optional_int(variant.get("candidate_pool_limit"))
     if candidate_pool_limit is not None:
         config["candidate_pool_limit"] = candidate_pool_limit
@@ -2476,6 +2765,8 @@ def _answer_matrix_role(variant: dict[str, Any]) -> str | None:
         return "evidence_unit_meili_graph"
     if variant_id == "evidence_unit_quality_rerank":
         return "evidence_unit_quality_rerank"
+    if variant_id == "teaching_moment_span":
+        return "teaching_moment_span"
     return None
 
 
@@ -2574,6 +2865,35 @@ def _public_evidence_unit_rerank(value: Any) -> dict[str, Any]:
     }
 
 
+def _public_teaching_moment_span(value: Any) -> dict[str, Any]:
+    context = value if isinstance(value, dict) else {}
+    span = _mapping(context.get("teaching_moment_span"))
+    if not span or span.get("enabled") is not True:
+        return {"enabled": False, "strategy": None}
+    return {
+        "schema_version": span.get("schema_version"),
+        "enabled": True,
+        "strategy": span.get("strategy"),
+        "candidate_count": int(span.get("candidate_count") or 0),
+        "base_candidate_count": int(span.get("base_candidate_count") or 0),
+        "top_changed": bool(span.get("top_changed")),
+        "base_top_ref": span.get("base_top_ref"),
+        "reranked_top_ref": span.get("reranked_top_ref"),
+        "reranked_top_score": span.get("reranked_top_score"),
+        "reranked_top_score_bucket": span.get("reranked_top_score_bucket"),
+        "span_window": _mapping(span.get("span_window")),
+        "reason_code_counts": _mapping(span.get("reason_code_counts")),
+        "score_component_presence_counts": _mapping(
+            span.get("score_component_presence_counts")
+        ),
+        "query_relevance_bucket_counts": _mapping(
+            span.get("query_relevance_bucket_counts")
+        ),
+        "privacy": _mapping(span.get("privacy")),
+        "public_note": span.get("public_note"),
+    }
+
+
 def _public_candidate_modality_rerank(candidate: dict[str, Any]) -> dict[str, Any] | None:
     rerank = _mapping(candidate.get("modality_aware_rerank"))
     if not rerank:
@@ -2662,6 +2982,7 @@ def _public_matrix_candidate(bundle: dict[str, Any] | None) -> dict[str, Any] | 
         "verified_object_alignment": object_link_diagnostics["verified_object_alignment"],
         "object_evidence_coverage": coverage,
         "modality_aware_rerank": _public_candidate_modality_rerank(candidate),
+        "teaching_moment_span": public_teaching_moment_candidate_diagnostics(candidate),
     }
     if source == EVIDENCE_UNIT_HIT_SOURCE or candidate.get("evidence_unit_id"):
         public_candidate["evidence_unit_citation"] = _public_evidence_unit_candidate_citation(
