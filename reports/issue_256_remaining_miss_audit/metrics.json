@@ -1,0 +1,30 @@
+{
+  "candidate_variant_row_count": 2,
+  "cause_counts": {
+    "candidate_depth_issue": 2,
+    "evaluation_match_issue": 0,
+    "missing_search_field": 1,
+    "query_cleaning_issue": 1,
+    "verified_coverage_issue": 1
+  },
+  "input_status": "synthetic_fixture",
+  "meili_depth_found_counts": {
+    "10": 0,
+    "100": 1,
+    "30": 1,
+    "5": 0,
+    "50": 1
+  },
+  "public_note": "This audit is public-safe: raw query text, raw answers, transcript excerpts, raw candidate ids, evidence text, and local absolute paths are excluded. Gold labels are consumed only through benchmark post-processing diagnostics, not as search input.",
+  "quality_bucket_delta_counts": {
+    "same": 1,
+    "target_stronger": 1
+  },
+  "remaining_miss_seed_count": 2,
+  "schema_version": "remaining-miss-audit-public-v1",
+  "target_search_field_coverage_bucket_counts": {
+    "full": 1,
+    "minimal": 1
+  },
+  "unrun_reason": "1-4 lecture benchmark query_results were not available in this isolated worktree; wrote a synthetic fixture smoke report instead."
+}
