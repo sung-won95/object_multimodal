@@ -24,7 +24,7 @@
       "index": "mit_deep_learning_stt_evidence_units",
       "segment_index": "mit_deep_learning_stt_segments",
       "limit": 5,
-      "target_rank_limit": 50,
+      "target_rank_limit": 100,
       "queries": [
         {
           "query_id": "mitdl_ps_l01_q001",
@@ -154,7 +154,7 @@
       "index": "mit_deep_learning_stt_evidence_units",
       "segment_index": "mit_deep_learning_stt_segments",
       "limit": 5,
-      "target_rank_limit": 50,
+      "target_rank_limit": 100,
       "queries": [
         {
           "query_id": "mitdl_ps_l02_q001",

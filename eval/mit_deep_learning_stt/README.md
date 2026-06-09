@@ -43,7 +43,10 @@ lecture projects for accuracy-improvement diagnostics. It intentionally stores
 query IDs, concept aliases, expected modality/query type, target segment IDs, and
 timestamp buckets only. Raw query text, transcript excerpts, reference answers,
 raw evidence text, and private local paths are excluded from the manifest and
-from public smoke outputs.
+from public smoke outputs. Candidate-depth diagnostics use a 100-hit Meili-only
+pool and report target found buckets (`top1`, `top5`, `top10`, `top50`,
+`top100`, `not_found`), `target_found@50`, `target_found@100`, and aggregate
+public-safe not_found reason codes.
 
 Dry-run wiring check:
 
@@ -55,6 +58,8 @@ python -m oarag evidence-unit-smoke \
 
 When private artifacts and Meilisearch indexes are available, the same manifest
 can be run without `--dry-run` to produce public-safe target-rank diagnostics.
+The dry-run baseline is 24 configured targets with no query execution; live
+baseline recall values are recorded only in the generated public-safe report.
 
 ## Paper Matrix Use
 
