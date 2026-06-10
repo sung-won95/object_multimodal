@@ -36,6 +36,34 @@ python -m oarag benchmark-retrieval \
 
 Matrix benchmark에서 lexicon variant를 쓰려면 manifest 또는 suite에 `"domain_lexicon": "domain_lexicon.json"`을 두고, variant의 `"use_domain_lexicon"`을 `true`로 둔다.
 
+## Human Audit Completion Gate
+
+Issue #270 must not be closed with automatically generated labels alone. Before
+closing that issue, replace or extend this seed set with a human-audited
+evaluation CSV and run:
+
+```bash
+python scripts/validate_mit_deep_learning_eval_dataset.py \
+  --queries eval/mit_deep_learning_stt/queries.csv \
+  --readme eval/mit_deep_learning_stt/README.md \
+  --require-readme-audit-summary
+```
+
+The gate requires at least 240 queries across the 24 lecture videos listed in
+`benchmark_matrix_manifest.json`, at least 10 queries per video, dev/test split
+balance, required question-type coverage, and at least 20% human audit coverage.
+A human-audited label is a row whose
+`annotator_id` is non-empty and does not start with `codex_`; a CSV where every
+annotator is `codex_*` must fail. The validator also checks numeric timestamps
+and `end >= start` without printing raw query text, reference answers, or
+transcripts.
+
+When the audited expansion lands, this README must include a short human audit
+result summary with audited label counts, timestamp correction policy, and mean
+timestamp correction if corrections were made. The current 48-row seed is
+expected to fail this completion gate until a real person audits the expanded
+labels.
+
 ## Public-Safe Evidence-Unit Slice
 
 `mit_lec01_02_public_safe_eval_slice.json` fixes 24 query targets across two MIT
