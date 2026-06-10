@@ -360,11 +360,12 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert visual_vlm["object_link_coverage"]["units_with_verified_link"] == 0
     assert visual_vlm["object_link_coverage"]["units_with_timestamp_fallback_link"] == 1
     assert visual_vlm["object_link_coverage"]["timestamp_fallback_counted_as_verified"] is False
-    assert suite["build"]["source_quality_counts"]["units_with_concept"] == 1
+    assert suite["build"]["source_quality_counts"]["units_with_concept"] == 2
     assert suite["build"]["source_quality_counts"]["units_with_concept_relation"] == 1
+    assert suite["build"]["concept_field_coverage"]["evidence_units_with_concepts"] == 2
     assert suite["build"]["concept_field_coverage"][
         "evidence_units_with_concept_search_text"
-    ] == 1
+    ] == 2
     assert suite["build"]["concept_field_coverage"][
         "timestamp_only_concept_relation_mentions"
     ] == 1
