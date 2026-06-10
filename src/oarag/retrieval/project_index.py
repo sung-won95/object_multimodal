@@ -639,10 +639,16 @@ def index_project_evidence_units(
         "has_visual_state": 0,
         "has_visual_entity": 0,
         "has_vlm_entity": 0,
+        "has_vlm_visible_text": 0,
+        "has_ocr_engine_evidence": 0,
+        "uses_ocr_only": 0,
         "has_concept": 0,
         "has_concept_relation": 0,
         "has_verified_link": 0,
         "has_timestamp_fallback_link": 0,
+        "ocr_engine_entity_count": 0,
+        "ocr_engine_link_count": 0,
+        "vlm_visible_text_count": 0,
     }
     documents = (
         _evidence_unit_index_document(document)
@@ -665,8 +671,11 @@ def index_project_evidence_units(
             source_quality = document.get("source_quality")
             if isinstance(source_quality, dict):
                 for key in source_quality_counts:
-                    if source_quality.get(key) is True:
+                    value = source_quality.get(key)
+                    if value is True:
                         source_quality_counts[key] += 1
+                    elif key.endswith("_count"):
+                        source_quality_counts[key] += int(value or 0)
             if _evidence_unit_has_concept_fields(document):
                 source_quality_counts["has_concept"] += (
                     0
@@ -1527,6 +1536,7 @@ def _evidence_unit_search_enrichment_fields(document: dict[str, Any]) -> dict[st
                 "visual_entities.text",
                 "visual_entities.visual_description",
                 "visual_entities.entity_type",
+                "visual_entities.visible_text",
                 "visual_entities.detected_text",
                 "visual_entities.position",
                 "visual_entities.relations",

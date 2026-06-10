@@ -78,12 +78,14 @@ UNDECLARED_BENCHMARK_WARNING = (
 MATRIX_LINK_DIAGNOSTICS_PUBLIC_NOTE = (
     "candidate_visual_support is candidate/fallback visual evidence for retrieval "
     "inspection. verified_object_alignment requires explicit verified link metadata; "
-    "timestamp fallback is not counted as verified object alignment."
+    "timestamp fallback is not counted as verified object alignment. OCR engine evidence "
+    "is reported separately from VLM visible text."
 )
 VERIFIED_ALIGNMENT_COVERAGE_PUBLIC_NOTE = (
     "Verified coverage is aggregate-only and public-safe. candidate_visual_support is "
     "reported separately from verified_object_alignment; timestamp fallback never counts "
-    "as verified alignment or paper-claim eligible support."
+    "as verified alignment or paper-claim eligible support. OCR engine diagnostic "
+    "evidence is separated from VLM visible text coverage."
 )
 CANDIDATE_LINK_SIGNAL_KEYS = (
     "temporal_overlap",
@@ -648,6 +650,8 @@ def run_retrieval_answer_matrix_suite(
         "visual_state_coverage_ratio",
         "visual_entity_coverage_ratio",
         "vlm_entity_coverage_ratio",
+        "vlm_visible_text_coverage_ratio",
+        "ocr_engine_coverage_ratio",
         "ocr_only_coverage_ratio",
         "candidate_link_coverage_ratio",
         "verified_link_coverage_ratio",
@@ -2307,6 +2311,8 @@ def _matrix_variant_metrics(
         "visual_state_coverage_ratio": _coverage_bool_ratio(rows, "has_visual_state"),
         "visual_entity_coverage_ratio": _coverage_bool_ratio(rows, "has_visual_entity"),
         "vlm_entity_coverage_ratio": _coverage_bool_ratio(rows, "has_vlm_entity"),
+        "vlm_visible_text_coverage_ratio": _coverage_bool_ratio(rows, "has_vlm_visible_text"),
+        "ocr_engine_coverage_ratio": _coverage_bool_ratio(rows, "has_ocr_engine_evidence"),
         "ocr_only_coverage_ratio": _coverage_bool_ratio(rows, "uses_ocr_only"),
         "candidate_link_coverage_ratio": _coverage_bool_ratio(rows, "has_candidate_link"),
         "verified_link_coverage_ratio": _coverage_bool_ratio(rows, "has_verified_link"),
@@ -3748,12 +3754,17 @@ def _matrix_object_evidence_coverage(bundle: dict[str, Any] | None) -> dict[str,
             "has_visual_state": False,
             "has_visual_entity": False,
             "has_vlm_entity": False,
+            "has_vlm_visible_text": False,
+            "has_ocr_engine_evidence": False,
             "uses_ocr_only": False,
             "has_candidate_link": False,
             "has_verified_link": False,
             "has_timestamp_fallback_link": False,
             "visual_state_count": 0,
             "visual_entity_count": 0,
+            "ocr_engine_entity_count": 0,
+            "ocr_engine_link_count": 0,
+            "vlm_visible_text_count": 0,
             "candidate_link_count": 0,
             "verified_link_count": 0,
             "timestamp_fallback_link_count": 0,
@@ -3778,10 +3789,27 @@ def _matrix_object_evidence_coverage(bundle: dict[str, Any] | None) -> dict[str,
         visual_description_count = int(source_quality.get("visual_description_count") or 0)
         detected_text_count = int(source_quality.get("visual_state_detected_text_count") or 0)
         detected_text_count += int(source_quality.get("visual_entity_detected_text_count") or 0)
+        ocr_engine_entity_count = int(
+            source_quality.get("ocr_engine_entity_count")
+            or source_quality.get("excluded_ocr_engine_entity_count")
+            or 0
+        )
+        ocr_engine_link_count = int(
+            source_quality.get("ocr_engine_link_count")
+            or source_quality.get("excluded_ocr_engine_link_count")
+            or 0
+        )
+        vlm_visible_text_count = int(source_quality.get("vlm_visible_text_count") or 0)
+        has_ocr_engine_evidence = bool(source_quality.get("has_ocr_engine_evidence")) or bool(
+            ocr_engine_entity_count or ocr_engine_link_count
+        )
         return {
             "has_visual_state": visual_state_count > 0,
             "has_visual_entity": visual_entity_count > 0,
             "has_vlm_entity": bool(source_quality.get("has_vlm_entity")),
+            "has_vlm_visible_text": bool(source_quality.get("has_vlm_visible_text"))
+            or vlm_visible_text_count > 0,
+            "has_ocr_engine_evidence": has_ocr_engine_evidence,
             "uses_ocr_only": bool(source_quality.get("uses_ocr_only")),
             "has_candidate_link": int(source_quality.get("candidate_link_count") or 0) > 0,
             "has_verified_link": bool(source_quality.get("has_verified_link"))
@@ -3790,6 +3818,9 @@ def _matrix_object_evidence_coverage(bundle: dict[str, Any] | None) -> dict[str,
             or int(source_quality.get("timestamp_fallback_link_count") or 0) > 0,
             "visual_state_count": visual_state_count,
             "visual_entity_count": visual_entity_count,
+            "ocr_engine_entity_count": ocr_engine_entity_count,
+            "ocr_engine_link_count": ocr_engine_link_count,
+            "vlm_visible_text_count": vlm_visible_text_count,
             "candidate_link_count": int(source_quality.get("candidate_link_count") or 0),
             "verified_link_count": int(source_quality.get("verified_link_count") or 0),
             "timestamp_fallback_link_count": int(
@@ -3821,18 +3852,36 @@ def _matrix_object_evidence_coverage(bundle: dict[str, Any] | None) -> dict[str,
     detected_text_count = sum(
         1
         for entity in visual_entities
-        if str(entity.get("detected_text") or entity.get("text") or "").strip()
+        if str(
+            entity.get("visible_text")
+            or entity.get("detected_text")
+            or entity.get("text")
+            or ""
+        ).strip()
+    )
+    ocr_engine_entity_count = sum(
+        1 for entity in visual_entities if _matrix_visual_entity_is_ocr_engine(entity)
+    )
+    vlm_visible_text_count = sum(
+        1
+        for entity in visual_entities
+        if _matrix_visual_entity_is_vlm(entity) and _matrix_visual_entity_has_visible_text(entity)
     )
     return {
         "has_visual_state": False,
         "has_visual_entity": bool(visual_entities),
         "has_vlm_entity": has_vlm_entity,
+        "has_vlm_visible_text": vlm_visible_text_count > 0,
+        "has_ocr_engine_evidence": ocr_engine_entity_count > 0,
         "uses_ocr_only": bool(visual_entities) and not has_vlm_entity,
         "has_candidate_link": candidate_link_count > 0,
         "has_verified_link": verified_link_count > 0,
         "has_timestamp_fallback_link": timestamp_fallback_link_count > 0,
         "visual_state_count": 0,
         "visual_entity_count": len(visual_entities),
+        "ocr_engine_entity_count": ocr_engine_entity_count,
+        "ocr_engine_link_count": 0,
+        "vlm_visible_text_count": vlm_visible_text_count,
         "candidate_link_count": candidate_link_count,
         "verified_link_count": verified_link_count,
         "timestamp_fallback_link_count": timestamp_fallback_link_count,
@@ -3842,6 +3891,12 @@ def _matrix_object_evidence_coverage(bundle: dict[str, Any] | None) -> dict[str,
 
 
 def _matrix_visual_entity_is_vlm(entity: dict[str, Any]) -> bool:
+    has_vlm_marker = bool(
+        str(entity.get("source_model") or "").strip()
+        or str(entity.get("model") or "").strip()
+    )
+    if _matrix_visual_entity_has_ocr_engine_marker(entity) and not has_vlm_marker:
+        return False
     source_text = " ".join(
         str(entity.get(key) or "")
         for key in ("source", "source_model", "model", "entity_type")
@@ -3851,6 +3906,31 @@ def _matrix_visual_entity_is_vlm(entity: dict[str, Any]) -> bool:
         or "vision" in source_text
         or str(entity.get("visual_description") or "").strip()
     )
+
+
+def _matrix_visual_entity_is_ocr_engine(entity: dict[str, Any]) -> bool:
+    return (
+        _matrix_visual_entity_has_ocr_engine_marker(entity)
+        and not _matrix_visual_entity_is_vlm(entity)
+    )
+
+
+def _matrix_visual_entity_has_ocr_engine_marker(entity: dict[str, Any]) -> bool:
+    markers = [
+        str(entity.get(key) or "").strip().casefold()
+        for key in ("source", "backend", "parser_version", "entity_type")
+    ]
+    source_text = " ".join(markers)
+    return bool(
+        any(marker.startswith(("ocr", "local-ocr")) for marker in markers if marker)
+        or "tesseract" in source_text
+        or "local-ocr" in source_text
+        or "ocr_text" in markers
+    )
+
+
+def _matrix_visual_entity_has_visible_text(entity: dict[str, Any]) -> bool:
+    return bool(str(entity.get("visible_text") or entity.get("detected_text") or "").strip())
 
 
 def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, Any]:
@@ -3865,9 +3945,14 @@ def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, 
                 timestamp_fallback_link_count=0,
                 candidate_link_signal_counts=_zero_count_map(CANDIDATE_LINK_SIGNAL_KEYS),
                 has_vlm_entity=False,
+                has_vlm_visible_text=False,
+                has_ocr_engine_evidence=False,
                 uses_ocr_only=False,
                 visual_description_count=0,
                 detected_text_count=0,
+                ocr_engine_entity_count=0,
+                ocr_engine_link_count=0,
+                vlm_visible_text_count=0,
             ),
             "verified_object_alignment": _matrix_verified_object_alignment(
                 verified_link_count=0,
@@ -3921,6 +4006,14 @@ def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, 
             timestamp_fallback_link_count=timestamp_fallback_link_count,
             candidate_link_signal_counts=candidate_signal_counts,
             has_vlm_entity=any(_matrix_visual_entity_is_vlm(entity) for entity in visual_entities),
+            has_vlm_visible_text=any(
+                _matrix_visual_entity_is_vlm(entity)
+                and _matrix_visual_entity_has_visible_text(entity)
+                for entity in visual_entities
+            ),
+            has_ocr_engine_evidence=any(
+                _matrix_visual_entity_is_ocr_engine(entity) for entity in visual_entities
+            ),
             uses_ocr_only=bool(visual_entities)
             and not any(_matrix_visual_entity_is_vlm(entity) for entity in visual_entities),
             visual_description_count=sum(
@@ -3931,7 +4024,22 @@ def _matrix_object_link_diagnostics(bundle: dict[str, Any] | None) -> dict[str, 
             detected_text_count=sum(
                 1
                 for entity in visual_entities
-                if str(entity.get("detected_text") or entity.get("text") or "").strip()
+                if str(
+                    entity.get("visible_text")
+                    or entity.get("detected_text")
+                    or entity.get("text")
+                    or ""
+                ).strip()
+            ),
+            ocr_engine_entity_count=sum(
+                1 for entity in visual_entities if _matrix_visual_entity_is_ocr_engine(entity)
+            ),
+            ocr_engine_link_count=0,
+            vlm_visible_text_count=sum(
+                1
+                for entity in visual_entities
+                if _matrix_visual_entity_is_vlm(entity)
+                and _matrix_visual_entity_has_visible_text(entity)
             ),
         ),
         "verified_object_alignment": _matrix_verified_object_alignment(
@@ -4006,12 +4114,38 @@ def _matrix_object_link_diagnostics_from_source_quality(
             timestamp_fallback_link_count=timestamp_fallback_link_count,
             candidate_link_signal_counts=candidate_signal_counts,
             has_vlm_entity=bool(source_quality.get("has_vlm_entity")),
+            has_vlm_visible_text=bool(source_quality.get("has_vlm_visible_text"))
+            or int(source_quality.get("vlm_visible_text_count") or 0) > 0,
+            has_ocr_engine_evidence=bool(source_quality.get("has_ocr_engine_evidence"))
+            or int(
+                source_quality.get("ocr_engine_entity_count")
+                or source_quality.get("excluded_ocr_engine_entity_count")
+                or 0
+            )
+            > 0
+            or int(
+                source_quality.get("ocr_engine_link_count")
+                or source_quality.get("excluded_ocr_engine_link_count")
+                or 0
+            )
+            > 0,
             uses_ocr_only=bool(source_quality.get("uses_ocr_only")),
             visual_description_count=int(source_quality.get("visual_description_count") or 0),
             detected_text_count=(
                 int(source_quality.get("visual_state_detected_text_count") or 0)
                 + int(source_quality.get("visual_entity_detected_text_count") or 0)
             ),
+            ocr_engine_entity_count=int(
+                source_quality.get("ocr_engine_entity_count")
+                or source_quality.get("excluded_ocr_engine_entity_count")
+                or 0
+            ),
+            ocr_engine_link_count=int(
+                source_quality.get("ocr_engine_link_count")
+                or source_quality.get("excluded_ocr_engine_link_count")
+                or 0
+            ),
+            vlm_visible_text_count=int(source_quality.get("vlm_visible_text_count") or 0),
         ),
         "verified_object_alignment": _matrix_verified_object_alignment(
             verified_link_count=verified_link_count,
@@ -4043,9 +4177,14 @@ def _matrix_candidate_visual_support(
     timestamp_fallback_link_count: int,
     candidate_link_signal_counts: dict[str, int],
     has_vlm_entity: bool,
+    has_vlm_visible_text: bool,
+    has_ocr_engine_evidence: bool,
     uses_ocr_only: bool,
     visual_description_count: int,
     detected_text_count: int,
+    ocr_engine_entity_count: int,
+    ocr_engine_link_count: int,
+    vlm_visible_text_count: int,
 ) -> dict[str, Any]:
     has_support = bool(
         frame_backed
@@ -4060,9 +4199,15 @@ def _matrix_candidate_visual_support(
         "visual_state_count": visual_state_count,
         "visual_entity_count": visual_entity_count,
         "has_vlm_entity": has_vlm_entity,
+        "has_vlm_visible_text": has_vlm_visible_text,
+        "has_ocr_engine_evidence": has_ocr_engine_evidence,
         "uses_ocr_only": uses_ocr_only,
         "visual_description_count": visual_description_count,
         "detected_text_count": detected_text_count,
+        "ocr_engine_entity_count": ocr_engine_entity_count,
+        "ocr_engine_link_count": ocr_engine_link_count,
+        "vlm_visible_text_count": vlm_visible_text_count,
+        "ocr_engine_counted_as_candidate_visual_support": False,
         "candidate_link_count": candidate_link_count,
         "timestamp_fallback_link_count": timestamp_fallback_link_count,
         "candidate_link_signal_counts": _public_count_map(
@@ -4734,6 +4879,8 @@ def _object_evidence_coverage_counts(rows: list[dict[str, Any]]) -> dict[str, in
         "has_visual_state",
         "has_visual_entity",
         "has_vlm_entity",
+        "has_vlm_visible_text",
+        "has_ocr_engine_evidence",
         "uses_ocr_only",
         "has_candidate_link",
         "has_verified_link",
@@ -4744,6 +4891,9 @@ def _object_evidence_coverage_counts(rows: list[dict[str, Any]]) -> dict[str, in
         {
             "visual_state_count": 0,
             "visual_entity_count": 0,
+            "ocr_engine_entity_count": 0,
+            "ocr_engine_link_count": 0,
+            "vlm_visible_text_count": 0,
             "candidate_link_count": 0,
             "verified_link_count": 0,
             "timestamp_fallback_link_count": 0,
@@ -4758,6 +4908,9 @@ def _object_evidence_coverage_counts(rows: list[dict[str, Any]]) -> dict[str, in
                 counts[key] += 1
         counts["visual_state_count"] += int(coverage.get("visual_state_count") or 0)
         counts["visual_entity_count"] += int(coverage.get("visual_entity_count") or 0)
+        counts["ocr_engine_entity_count"] += int(coverage.get("ocr_engine_entity_count") or 0)
+        counts["ocr_engine_link_count"] += int(coverage.get("ocr_engine_link_count") or 0)
+        counts["vlm_visible_text_count"] += int(coverage.get("vlm_visible_text_count") or 0)
         counts["candidate_link_count"] += int(coverage.get("candidate_link_count") or 0)
         counts["verified_link_count"] += int(coverage.get("verified_link_count") or 0)
         counts["timestamp_fallback_link_count"] += int(
@@ -4854,8 +5007,12 @@ def _verified_alignment_missing_reason(row: dict[str, Any]) -> str:
     fallback_link_count = int(support.get("timestamp_fallback_link_count") or 0)
     if fallback_link_count and not candidate_link_count:
         return "timestamp_fallback_only_not_verified"
+    if bool(coverage.get("has_vlm_visible_text")):
+        return "vlm_visible_text_without_verified_link"
     if bool(coverage.get("has_vlm_entity")):
         return "vlm_object_without_verified_link"
+    if bool(coverage.get("has_ocr_engine_evidence")):
+        return "ocr_engine_without_verified_link"
     if bool(coverage.get("uses_ocr_only")):
         return "ocr_only_without_verified_link"
     if candidate_link_count:
@@ -5337,8 +5494,8 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 "Evidence-unit rows may be queried or skipped; skipped variants report zero hit/MRR "
                 "and a public-safe skip reason in JSON metrics.",
                 "",
-                "| suite | variant | queries | skipped | pool | Hit@10s | MRR | target in pool | frame-backed | linked-backed | candidate support | verified align | VLM | grounded | cite P | cite R | expected hit | unsupported | abstain | primary failures | latency ms |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |",
+                "| suite | variant | queries | skipped | pool | Hit@10s | MRR | target in pool | frame-backed | linked-backed | candidate support | verified align | VLM | VLM text | OCR engine | grounded | cite P | cite R | expected hit | unsupported | abstain | primary failures | latency ms |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |",
             ]
         )
         for suite, variant in matrix_variants:
@@ -5346,6 +5503,7 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                 "| {suite_id} | {variant_id} | {query_count} | {skipped} | {pool} | "
                 "{hit10} | {mrr} | {target_pool} | "
                 "{frame} | {linked} | {candidate_support} | {verified_align} | {vlm} | "
+                "{vlm_text} | {ocr_engine} | "
                 "{grounded} | {precision} | {recall} | {hit} | "
                 "{unsupported} | {abstain} | {failures} | {latency} |".format(
                     suite_id=suite.get("suite_id"),
@@ -5361,6 +5519,8 @@ def _summary_markdown(metrics: dict[str, Any]) -> str:
                     candidate_support=_format_metric(variant.get("candidate_visual_support_ratio")),
                     verified_align=_format_metric(variant.get("verified_object_alignment_ratio")),
                     vlm=_format_metric(variant.get("vlm_entity_coverage_ratio")),
+                    vlm_text=_format_metric(variant.get("vlm_visible_text_coverage_ratio")),
+                    ocr_engine=_format_metric(variant.get("ocr_engine_coverage_ratio")),
                     grounded=_format_metric(variant.get("grounded_answer_ratio")),
                     precision=_format_metric(variant.get("answer_citation_precision")),
                     recall=_format_metric(variant.get("answer_citation_recall")),
@@ -5487,6 +5647,8 @@ def _write_metrics_summary_csv(path: Path, metrics: dict[str, Any]) -> None:
         "visual_state_coverage_ratio",
         "visual_entity_coverage_ratio",
         "vlm_entity_coverage_ratio",
+        "vlm_visible_text_coverage_ratio",
+        "ocr_engine_coverage_ratio",
         "ocr_only_coverage_ratio",
         "candidate_link_coverage_ratio",
         "verified_link_coverage_ratio",
@@ -5602,6 +5764,8 @@ def _metrics_summary_row(
         "visual_state_coverage_ratio": item.get("visual_state_coverage_ratio"),
         "visual_entity_coverage_ratio": item.get("visual_entity_coverage_ratio"),
         "vlm_entity_coverage_ratio": item.get("vlm_entity_coverage_ratio"),
+        "vlm_visible_text_coverage_ratio": item.get("vlm_visible_text_coverage_ratio"),
+        "ocr_engine_coverage_ratio": item.get("ocr_engine_coverage_ratio"),
         "ocr_only_coverage_ratio": item.get("ocr_only_coverage_ratio"),
         "candidate_link_coverage_ratio": item.get("candidate_link_coverage_ratio"),
         "verified_link_coverage_ratio": item.get("verified_link_coverage_ratio"),

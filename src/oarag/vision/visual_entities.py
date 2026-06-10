@@ -123,7 +123,9 @@ class VlmJsonlVisualEntityExtractor:
             visual_description = _optional_str(
                 entity_payload.get("visual_description")
             ) or _optional_str(entity_payload.get("description"))
-            detected_text = _optional_str(entity_payload.get("detected_text"))
+            detected_text = _optional_str(
+                entity_payload.get("detected_text") or entity_payload.get("visible_text")
+            )
             text = _optional_str(entity_payload.get("text"))
             if text is None:
                 text = (

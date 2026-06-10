@@ -313,13 +313,19 @@ def _public_evidence_unit_hits() -> list[dict]:
                 "has_visual_state": True,
                 "has_visual_entity": True,
                 "has_vlm_entity": False,
+                "has_vlm_visible_text": False,
+                "has_ocr_engine_evidence": True,
                 "has_verified_link": False,
                 "uses_ocr_only": True,
                 "has_detected_text": True,
                 "has_visual_description": False,
                 "visual_state_detected_text_count": 1,
                 "visual_entity_detected_text_count": 1,
+                "vlm_visible_text_count": 0,
                 "visual_description_count": 0,
+                "ocr_engine_entity_count": 1,
+                "ocr_engine_link_count": 1,
+                "ocr_engine_counted_as_candidate_visual_support": False,
                 "has_timestamp_fallback_link": False,
                 "candidate_link_count": 1,
                 "timestamp_fallback_link_count": 0,
@@ -330,6 +336,12 @@ def _public_evidence_unit_hits() -> list[dict]:
                     "has_candidate_visual_support": True,
                     "visual_state_count": 1,
                     "visual_entity_count": 1,
+                    "has_vlm_visible_text": False,
+                    "vlm_visible_text_count": 0,
+                    "has_ocr_engine_evidence": True,
+                    "ocr_engine_entity_count": 1,
+                    "ocr_engine_link_count": 1,
+                    "ocr_engine_counted_as_candidate_visual_support": False,
                     "candidate_link_count": 1,
                     "timestamp_fallback_link_count": 0,
                     "candidate_link_signal_counts": candidate_signal_counts,
@@ -369,13 +381,18 @@ def _public_evidence_unit_hits() -> list[dict]:
                 "has_visual_state": True,
                 "has_visual_entity": True,
                 "has_vlm_entity": True,
+                "has_vlm_visible_text": True,
+                "has_ocr_engine_evidence": False,
                 "has_verified_link": True,
                 "uses_ocr_only": False,
                 "has_detected_text": True,
                 "has_visual_description": True,
                 "visual_state_detected_text_count": 1,
                 "visual_entity_detected_text_count": 1,
+                "vlm_visible_text_count": 1,
                 "visual_description_count": 1,
+                "ocr_engine_entity_count": 0,
+                "ocr_engine_link_count": 0,
                 "has_timestamp_fallback_link": False,
                 "candidate_link_count": 0,
                 "timestamp_fallback_link_count": 0,
@@ -386,6 +403,11 @@ def _public_evidence_unit_hits() -> list[dict]:
                     "has_candidate_visual_support": True,
                     "visual_state_count": 1,
                     "visual_entity_count": 1,
+                    "has_vlm_visible_text": True,
+                    "vlm_visible_text_count": 1,
+                    "has_ocr_engine_evidence": False,
+                    "ocr_engine_entity_count": 0,
+                    "ocr_engine_link_count": 0,
                     "candidate_link_count": 0,
                     "timestamp_fallback_link_count": 0,
                     "candidate_link_signal_counts": verified_signal_counts,
@@ -1165,6 +1187,12 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
         "verified_object_alignment_ratio"
     ] == 1.0
     assert suite["variant_metrics"]["evidence_unit_verified"]["vlm_entity_coverage_ratio"] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_verified"][
+        "vlm_visible_text_coverage_ratio"
+    ] == 1.0
+    assert suite["variant_metrics"]["evidence_unit_candidate"][
+        "ocr_engine_coverage_ratio"
+    ] == 1.0
     assert suite["variant_metrics"]["evidence_unit_candidate"]["ocr_only_coverage_ratio"] == 1.0
     assert suite["variant_metrics"]["evidence_unit_quality_rerank"][
         "modality_aware_rerank"
@@ -1220,7 +1248,7 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     ] == 1.0
     assert suite["variant_metrics"]["evidence_unit_candidate"][
         "verified_alignment_coverage"
-    ]["missing_reason_counts"] == {"ocr_only_without_verified_link": 1}
+    ]["missing_reason_counts"] == {"ocr_engine_without_verified_link": 1}
     assert suite["variant_metrics"]["evidence_unit_verified"][
         "verified_alignment_coverage"
     ]["verified_object_alignment_ratio"] == 1.0
@@ -1404,7 +1432,9 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert "candidate_only_visual_support_ratio" in metrics_csv
     assert "verified_alignment_missing_reason_counts" in metrics_csv
     assert "evidence_unit_verified_failure_stage_reason_counts" in metrics_csv
-    assert "ocr_only_without_verified_link" in metrics_csv
+    assert "ocr_engine_coverage_ratio" in metrics_csv
+    assert "vlm_visible_text_coverage_ratio" in metrics_csv
+    assert "ocr_engine_without_verified_link" in metrics_csv
     assert "abstention_ratio" in metrics_csv
     assert "answer_failure_reason_counts" in metrics_csv
     summary = run.summary_path.read_text(encoding="utf-8")
@@ -1412,7 +1442,9 @@ def test_retrieval_answer_matrix_fixture_writes_aggregate_outputs(tmp_path: Path
     assert "Verified Object Alignment Coverage" in summary
     assert "candidate support" in summary
     assert "verified align" in summary
-    assert "ocr_only_without_verified_link" in summary
+    assert "OCR engine" in summary
+    assert "VLM text" in summary
+    assert "ocr_engine_without_verified_link" in summary
     assert "ok:grounded_expected_citation" in summary
     assert "primary failures" in summary
     assert "deterministic expected hint overlap" in summary
