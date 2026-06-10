@@ -1618,6 +1618,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     retrieval_gate.add_argument("--metrics", required=True, type=Path)
     retrieval_gate.add_argument("--config", required=True, type=Path)
+    retrieval_gate.add_argument(
+        "--semantic-smoke",
+        type=Path,
+        help="Optional semantic_smoke.json produced by the same benchmark run.",
+    )
     retrieval_gate.set_defaults(func=cmd_check_retrieval_gate)
 
     paper_experiment = subparsers.add_parser(
@@ -2964,7 +2969,11 @@ def cmd_paper_metric_intervals(args: argparse.Namespace) -> None:
 
 
 def cmd_check_retrieval_gate(args: argparse.Namespace) -> None:
-    result = check_retrieval_quality_gate(metrics_path=args.metrics, config_path=args.config)
+    result = check_retrieval_quality_gate(
+        metrics_path=args.metrics,
+        config_path=args.config,
+        semantic_smoke_path=args.semantic_smoke,
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not result["passed"]:
         raise SystemExit(1)

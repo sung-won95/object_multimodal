@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import oarag.evaluation.experiment as experiment_module
 from oarag.evaluation.experiment import PaperExperimentError, run_paper_experiment
 
 
@@ -207,6 +208,7 @@ def test_run_paper_experiment_public_fixture_writes_end_to_end_artifacts(
         run_id="paper_e2e_fixture",
         gate_config_path=fixture_dir / "retrieval_quality_gate.json",
         repo_root=Path.cwd(),
+        fail_on_gate=False,
         command=[
             "oarag",
             "run-paper-experiment",
@@ -227,17 +229,20 @@ def test_run_paper_experiment_public_fixture_writes_end_to_end_artifacts(
     assert (output_dir / "paper_report" / "reproducibility.json").exists()
     assert (output_dir / "quality_gate_result.json").exists()
     assert (output_dir / "experiment_manifest.json").exists()
-    assert run.quality_gate_result["passed"] is True
+    assert run.quality_gate_result["passed"] is False
+    assert run.quality_gate_result["failures"][0]["code"] == (
+        "semantic_smoke_provider_unbacked_hybrid_metrics"
+    )
 
     experiment_manifest = json.loads(
         (output_dir / "experiment_manifest.json").read_text(encoding="utf-8")
     )
     assert experiment_manifest["schema_version"] == "paper-experiment-manifest-v1"
-    assert experiment_manifest["status"] == "passed"
+    assert experiment_manifest["status"] == "failed"
     assert experiment_manifest["artifacts"]["metrics"] == "metrics.json"
     assert experiment_manifest["artifacts"]["paper_report_dir"] == "paper_report"
     assert experiment_manifest["stages"][2]["stage"] == "quality_gate"
-    assert experiment_manifest["stages"][2]["status"] == "passed"
+    assert experiment_manifest["stages"][2]["status"] == "failed"
 
     public_text = "\n".join(
         [
@@ -266,6 +271,48 @@ def test_run_paper_experiment_public_fixture_writes_end_to_end_artifacts(
         str(tmp_path),
     ]:
         assert sensitive not in public_text
+
+
+def test_run_paper_experiment_passes_semantic_smoke_to_quality_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture_dir = Path("tests/fixtures/public_retrieval_ablation_project").resolve()
+    output_dir = tmp_path / "paper_experiment"
+    captured: dict[str, Path] = {}
+
+    def fake_gate(
+        *,
+        metrics_path: Path,
+        config_path: Path,
+        semantic_smoke_path: Path | None = None,
+    ) -> dict:
+        captured["metrics_path"] = metrics_path
+        captured["config_path"] = config_path
+        if semantic_smoke_path is not None:
+            captured["semantic_smoke_path"] = semantic_smoke_path
+        return {
+            "schema_version": "retrieval-quality-gate-result-v1",
+            "gate_id": "patched_test_gate",
+            "passed": True,
+            "failure_count": 0,
+            "failures": [],
+            "privacy": {"payload": "aggregate_metrics_only"},
+        }
+
+    monkeypatch.setattr(experiment_module, "check_retrieval_quality_gate", fake_gate)
+
+    run_paper_experiment(
+        client=FakePaperExperimentClient(),
+        manifest_path=fixture_dir / "benchmark_matrix_manifest.json",
+        output_dir=output_dir,
+        gate_config_path=fixture_dir / "retrieval_quality_gate.json",
+        repo_root=Path.cwd(),
+    )
+
+    assert captured["metrics_path"] == output_dir.resolve() / "metrics.json"
+    assert captured["config_path"] == fixture_dir / "retrieval_quality_gate.json"
+    assert captured["semantic_smoke_path"] == output_dir.resolve() / "semantic_smoke.json"
 
 
 def test_run_paper_experiment_gate_failure_names_stage(tmp_path: Path) -> None:

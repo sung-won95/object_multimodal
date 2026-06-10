@@ -1,7 +1,16 @@
 {
   "schema_version": "retrieval-quality-gate-v1",
-  "gate_id": "mit_deep_learning_stt_paper_matrix_completeness_gate_v1",
-  "note": "MIT paper bundle completeness guard. Thresholds verify metric presence and bundle continuity; replace with stricter paper thresholds before making performance claims.",
+  "gate_id": "mit_deep_learning_stt_paper_matrix_regression_gate_v1",
+  "note": "MIT Deep Learning STT retrieval regression gate derived from #267 full_provider_matrix_v1 aggregate metrics. Thresholds are public-safe regression floors, not paper performance claims.",
+  "baseline_artifact": {
+    "run_id": "mit_deep_learning_stt_full_provider_matrix_v1",
+    "query_count": 48,
+    "threshold_policy": "suite aggregate and per-variant metric thresholds use 90% of #267 observed values; observed zero variant metrics require allow_zero_threshold with a public-safe reason."
+  },
+  "hybrid_variant_ids": [
+    "hybrid",
+    "window_hybrid"
+  ],
   "suites": [
     {
       "suite_id": "mitdl_lec01",
@@ -19,10 +28,161 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.25,
+        "mrr_at_max_delta": 0.175,
+        "grounded_answer_ratio": 0.35
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.1125,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.5625,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        }
       }
     },
     {
@@ -41,10 +201,137 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.25,
+        "mrr_at_max_delta": 0.5,
+        "grounded_answer_ratio": 0.2
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.5625,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": 0.225,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": 0.1125,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        }
       }
     },
     {
@@ -63,10 +350,133 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.5,
+        "mrr_at_max_delta": 0.4625,
+        "grounded_answer_ratio": 0.4
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.5625,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.9
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        }
       }
     },
     {
@@ -85,10 +495,89 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.55,
+        "mrr_at_max_delta": 0.37,
+        "grounded_answer_ratio": 0.4
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.6,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.54,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.15,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.15,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.09,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        }
       }
     },
     {
@@ -107,10 +596,81 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.65,
+        "mrr_at_max_delta": 0.55,
+        "grounded_answer_ratio": 0.55
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "window": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.675,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.675,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        }
       }
     },
     {
@@ -129,10 +689,129 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.45,
+        "mrr_at_max_delta": 0.3017,
+        "grounded_answer_ratio": 0.3
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.54,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.375,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        }
       }
     },
     {
@@ -151,10 +830,189 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.05,
+        "mrr_at_max_delta": 0.01,
+        "grounded_answer_ratio": 0.15
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.09,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        }
       }
     },
     {
@@ -173,10 +1031,117 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.35,
+        "mrr_at_max_delta": 0.2625,
+        "grounded_answer_ratio": 0.45
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.225,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.225,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.5625,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     },
     {
@@ -195,10 +1160,165 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.2,
+        "mrr_at_max_delta": 0.16,
+        "grounded_answer_ratio": 0.1
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.54,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        }
       }
     },
     {
@@ -217,10 +1337,149 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.3,
+        "mrr_at_max_delta": 0.2917,
+        "grounded_answer_ratio": 0.2
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.6,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.2625,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.2625,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": 0.6,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        }
       }
     },
     {
@@ -239,10 +1498,117 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.3,
+        "mrr_at_max_delta": 0.2183,
+        "grounded_answer_ratio": 0.5
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.09,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": 0.225,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.15,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.15,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     },
     {
@@ -261,10 +1627,129 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.55,
+        "mrr_at_max_delta": 0.4142,
+        "grounded_answer_ratio": 0.25
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.6,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": 0.1125,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "rerank": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.1125,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.1125,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.54,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     },
     {
@@ -283,10 +1768,117 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.4,
+        "mrr_at_max_delta": 0.4,
+        "grounded_answer_ratio": 0.3
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "window": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     },
     {
@@ -305,10 +1897,89 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.45,
+        "mrr_at_max_delta": 0.5125,
+        "grounded_answer_ratio": 0.4
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "window": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.5625,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.675,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.675,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        }
       }
     },
     {
@@ -327,10 +1998,165 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.25,
+        "mrr_at_max_delta": 0.0992,
+        "grounded_answer_ratio": 0.15
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.54,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.09,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.1125,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.15,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        }
       }
     },
     {
@@ -349,10 +2175,121 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.5,
+        "mrr_at_max_delta": 0.3326,
+        "grounded_answer_ratio": 0.15
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.24,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.1125,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.54,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.6,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.6,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        }
       }
     },
     {
@@ -371,10 +2308,109 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.4,
+        "mrr_at_max_delta": 0.36,
+        "grounded_answer_ratio": 0.65
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.54,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.225,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.225,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        }
       }
     },
     {
@@ -393,10 +2429,85 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.4,
+        "mrr_at_max_delta": 0.4666,
+        "grounded_answer_ratio": 0.5
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.15,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     },
     {
@@ -415,10 +2526,129 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.5,
+        "mrr_at_max_delta": 0.4416,
+        "grounded_answer_ratio": 0.4
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.6,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.675,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        }
       }
     },
     {
@@ -437,10 +2667,113 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.4,
+        "mrr_at_max_delta": 0.425,
+        "grounded_answer_ratio": 0.4
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.675,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     },
     {
@@ -459,10 +2792,85 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.5,
+        "mrr_at_max_delta": 0.5,
+        "grounded_answer_ratio": 0.4
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "window": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.9
+        },
+        "rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     },
     {
@@ -481,10 +2889,125 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.4,
+        "mrr_at_max_delta": 0.385,
+        "grounded_answer_ratio": 0.15
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.54,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.9,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.675,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.675,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.9
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.225,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     },
     {
@@ -503,10 +3026,125 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.35,
+        "mrr_at_max_delta": 0.2767,
+        "grounded_answer_ratio": 0.3
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "hybrid": {
+          "hit_at_10s": 0.9,
+          "mrr_at_max_delta": 0.315,
+          "grounded_answer_ratio": 0.9,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.225,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.6,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     },
     {
@@ -525,15 +3163,134 @@
         "evidence_unit_quality_rerank"
       ],
       "thresholds": {
-        "hit_at_10s": 0,
-        "mrr_at_max_delta": 0,
-        "grounded_answer_ratio": 0,
-        "expected_citation_hit_ratio": 0
+        "hit_at_10s": 0.3,
+        "mrr_at_max_delta": 0.2017,
+        "grounded_answer_ratio": 0.15
+      },
+      "variant_thresholds": {
+        "segment_lexical": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "domain_lexicon": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.225,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        },
+        "hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.09,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "window_hybrid": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "rerank": {
+          "hit_at_10s": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "mrr_at_max_delta": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          }
+        },
+        "evidence_unit_candidate": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_verified": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.45,
+          "grounded_answer_ratio": {
+            "threshold": 0,
+            "allow_zero_threshold": true,
+            "reason": "Observed zero in #267 full_provider_matrix_v1 provider-backed baseline; keep zero regression floor until this variant metric improves."
+          },
+          "expected_citation_hit_ratio": 0.45
+        },
+        "evidence_unit_quality_rerank": {
+          "hit_at_10s": 0.45,
+          "mrr_at_max_delta": 0.15,
+          "grounded_answer_ratio": 0.45,
+          "expected_citation_hit_ratio": 0.45
+        }
       }
     }
   ],
   "privacy": {
-    "payload": "suite_ids_required_variants_and_metric_thresholds_only",
+    "payload": "suite_ids_required_variants_metric_thresholds_and_public_safe_zero_reasons_only",
     "raw_queries": "excluded",
     "answer_text": "excluded",
     "transcript_content": "excluded",
