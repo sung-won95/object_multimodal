@@ -452,6 +452,7 @@ def test_index_project_segments_applies_hybrid_embedder_profile_and_live_smoke(
         hybrid_embedder_name="lecture_embedder",
         hybrid_embedder_dimensions=768,
         hybrid_embedder_live_smoke=True,
+        allow_local_hash_vectors=True,
     )
 
     settings_call = next(call for call in client.calls if call[0] == "update_settings")
@@ -495,6 +496,23 @@ def test_index_project_segments_applies_hybrid_embedder_profile_and_live_smoke(
     assert all(isinstance(item, float) for item in vector)
 
 
+def test_index_project_segments_requires_manifest_for_user_provided_vectors(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    segments_path = project_dir / "segments" / "lecture_segments.jsonl"
+    write_jsonl(segments_path, [{"segment_id": "s1", "transcript_text": "alpha"}])
+
+    with pytest.raises(ValueError, match="requires vector_manifest"):
+        index_project_segments(
+            FakeMeiliClient(),
+            index_uid="local_segments",
+            project_dir=project_dir,
+            hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+            hybrid_embedder_dimensions=4,
+        )
+
+
 def test_index_project_segments_can_append_without_reconfiguring_shared_index(
     tmp_path: Path,
 ) -> None:
@@ -512,6 +530,7 @@ def test_index_project_segments_can_append_without_reconfiguring_shared_index(
         hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
         hybrid_embedder_dimensions=4,
         hybrid_embedder_live_smoke=True,
+        allow_local_hash_vectors=True,
     )
 
     assert ("delete_index", "shared_segments") not in client.calls
@@ -853,6 +872,7 @@ def test_index_project_windows_applies_hybrid_embedder_profile(tmp_path: Path) -
         neighbor_count=0,
         hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
         hybrid_embedder_dimensions=512,
+        allow_local_hash_vectors=True,
     )
 
     settings_call = next(call for call in client.calls if call[0] == "update_settings")
@@ -967,6 +987,7 @@ def test_index_project_visual_entities_applies_hybrid_embedder_profile(
         hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
         hybrid_embedder_dimensions=4,
         hybrid_embedder_live_smoke=True,
+        allow_local_hash_vectors=True,
     )
 
     settings_call = next(call for call in client.calls if call[0] == "update_settings")
@@ -1024,6 +1045,7 @@ def test_index_project_visual_entities_can_append_without_reconfiguring_shared_i
         hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
         hybrid_embedder_dimensions=4,
         hybrid_embedder_live_smoke=True,
+        allow_local_hash_vectors=True,
     )
 
     assert ("delete_index", "shared_visual_entities") not in client.calls

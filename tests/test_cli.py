@@ -107,6 +107,7 @@ def test_index_project_accepts_project_id() -> None:
     assert args.hybrid_embedder_dimensions is None
     assert args.hybrid_embedder_live_smoke is False
     assert args.vector_manifest is None
+    assert args.allow_local_hash_vectors is False
 
 
 def test_index_project_accepts_project_dir() -> None:
@@ -166,6 +167,7 @@ def test_cmd_index_project_forwards_settings_profile(monkeypatch, capsys) -> Non
     assert calls["index_kwargs"]["hybrid_embedder_profile"] is None
     assert calls["index_kwargs"]["hybrid_embedder_config"] is None
     assert calls["index_kwargs"]["vector_manifest"] is None
+    assert calls["index_kwargs"]["allow_local_hash_vectors"] is False
     assert json.loads(capsys.readouterr().out)["settings_profile"] == (
         LECTURE_SEGMENT_LEGACY_SETTINGS_PROFILE
     )
@@ -208,6 +210,7 @@ def test_cmd_index_project_forwards_hybrid_embedder_options(monkeypatch, capsys)
             "--hybrid-embedder-live-smoke",
             "--vector-manifest",
             "manifests/segment_vectors.json",
+            "--allow-local-hash-vectors",
         ]
     )
 
@@ -222,6 +225,7 @@ def test_cmd_index_project_forwards_hybrid_embedder_options(monkeypatch, capsys)
     assert calls["index_kwargs"]["hybrid_embedder_dimensions"] == 768
     assert calls["index_kwargs"]["hybrid_embedder_live_smoke"] is True
     assert calls["index_kwargs"]["vector_manifest"] == Path("manifests/segment_vectors.json")
+    assert calls["index_kwargs"]["allow_local_hash_vectors"] is True
     assert json.loads(capsys.readouterr().out)["hybrid_embedder_live_smoke"] is True
 
 
@@ -594,6 +598,13 @@ def test_index_project_evidence_units_cli_defaults() -> None:
     assert args.batch_size == 500
     assert args.reset is False
     assert args.settings_profile == EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE
+    assert args.hybrid_embedder_profile is None
+    assert args.hybrid_embedder_config is None
+    assert args.hybrid_embedder_name == "default"
+    assert args.hybrid_embedder_dimensions is None
+    assert args.hybrid_embedder_live_smoke is False
+    assert args.vector_manifest is None
+    assert args.allow_local_hash_vectors is False
 
 
 def test_cmd_index_project_evidence_units_forwards_inputs(monkeypatch, capsys) -> None:
@@ -632,6 +643,14 @@ def test_cmd_index_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
             "--batch-size",
             "100",
             "--reset",
+            "--hybrid-embedder-profile",
+            HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+            "--hybrid-embedder-dimensions",
+            "384",
+            "--hybrid-embedder-live-smoke",
+            "--vector-manifest",
+            "manifests/evidence_vectors.json",
+            "--allow-local-hash-vectors",
         ]
     )
 
@@ -644,6 +663,13 @@ def test_cmd_index_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
     assert calls["index_kwargs"]["evidence_units"].as_posix() == "segments/evidence_units.jsonl"
     assert calls["index_kwargs"]["batch_size"] == 100
     assert calls["index_kwargs"]["reset"] is True
+    assert calls["index_kwargs"]["hybrid_embedder_profile"] == (
+        HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE
+    )
+    assert calls["index_kwargs"]["hybrid_embedder_dimensions"] == 384
+    assert calls["index_kwargs"]["hybrid_embedder_live_smoke"] is True
+    assert calls["index_kwargs"]["vector_manifest"].as_posix() == "manifests/evidence_vectors.json"
+    assert calls["index_kwargs"]["allow_local_hash_vectors"] is True
     assert json.loads(capsys.readouterr().out)["indexed_documents"] == 2
 
 
@@ -674,6 +700,7 @@ def test_index_project_windows_cli_defaults() -> None:
     assert args.hybrid_embedder_dimensions is None
     assert args.hybrid_embedder_live_smoke is False
     assert args.vector_manifest is None
+    assert args.allow_local_hash_vectors is False
     assert args.neighbor_count == 1
 
 
@@ -714,6 +741,7 @@ def test_cmd_index_project_windows_forwards_settings_profile(monkeypatch, capsys
             "3",
             "--window-after-seconds",
             "5",
+            "--allow-local-hash-vectors",
         ]
     )
 
@@ -728,6 +756,7 @@ def test_cmd_index_project_windows_forwards_settings_profile(monkeypatch, capsys
     assert calls["index_kwargs"]["hybrid_embedder_dimensions"] == 512
     assert calls["index_kwargs"]["windows"].as_posix() == "segments/lecture_windows.jsonl"
     assert calls["index_kwargs"]["vector_manifest"] is None
+    assert calls["index_kwargs"]["allow_local_hash_vectors"] is True
     assert calls["index_kwargs"]["window_before_seconds"] == 3.0
     assert calls["index_kwargs"]["window_after_seconds"] == 5.0
     assert json.loads(capsys.readouterr().out)["settings_profile"] == (
@@ -753,7 +782,13 @@ def test_index_project_visual_entities_cli_defaults() -> None:
     assert args.batch_size == 500
     assert args.reset is False
     assert args.settings_profile == VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
+    assert args.hybrid_embedder_profile is None
+    assert args.hybrid_embedder_config is None
+    assert args.hybrid_embedder_name == "default"
+    assert args.hybrid_embedder_dimensions is None
+    assert args.hybrid_embedder_live_smoke is False
     assert args.vector_manifest is None
+    assert args.allow_local_hash_vectors is False
 
 
 def test_cmd_index_project_visual_entities_forwards_settings_profile(monkeypatch, capsys) -> None:
@@ -798,6 +833,7 @@ def test_cmd_index_project_visual_entities_forwards_settings_profile(monkeypatch
     assert calls["index_kwargs"]["settings_profile"] == VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
     assert calls["index_kwargs"]["visual_entities"].as_posix() == "manifests/visual_entities.jsonl"
     assert calls["index_kwargs"]["vector_manifest"] is None
+    assert calls["index_kwargs"]["allow_local_hash_vectors"] is False
     assert json.loads(capsys.readouterr().out)["settings_profile"] == (
         VISUAL_ENTITY_DEFAULT_SETTINGS_PROFILE
     )

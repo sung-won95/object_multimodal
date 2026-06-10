@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from oarag.meili import HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE
 from oarag.retrieval.evidence_unit_index import query_project_evidence_units
 from oarag.retrieval.evidence_units import build_project_evidence_units, build_project_visual_states
 from oarag.retrieval.project_index import index_project_evidence_units
@@ -758,6 +761,88 @@ def test_index_project_evidence_units_indexes_artifact_and_preserves_fallback_st
     assert indexed["verified_entity_link_ids"] == []
 
 
+def test_index_project_evidence_units_requires_manifest_for_user_provided_vectors(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
+    _write_jsonl(
+        project_dir / "segments" / "evidence_units.jsonl",
+        [
+            {
+                "evidence_unit_id": "evu_seg_1",
+                "project_id": "sample_project",
+                "video_id": "sample_video",
+                "evidence_text": "Gradient descent evidence.",
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="requires vector_manifest"):
+        index_project_evidence_units(
+            _FakeMeiliClient(),
+            index_uid="sample_evidence_units",
+            project_dir=project_dir,
+            hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+            hybrid_embedder_dimensions=3,
+        )
+
+
+def test_index_project_evidence_units_attaches_provider_manifest_vectors(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
+    _write_jsonl(
+        project_dir / "segments" / "evidence_units.jsonl",
+        [
+            {
+                "evidence_unit_id": "evu_seg_1",
+                "project_id": "sample_project",
+                "video_id": "sample_video",
+                "evidence_text": "Gradient descent evidence.",
+                "semantic_text": "Gradient descent evidence with visual arrow context.",
+                "alignment_status": "verified",
+            }
+        ],
+    )
+    _write_vector_manifest(
+        project_dir / "manifests" / "evidence_vectors.json",
+        records=[
+            {
+                "id": "evu_seg_1",
+                "embedder": "default",
+                "dimensions": 3,
+                "vector": [0.5, 0.25, 0.125],
+            }
+        ],
+        dimensions=3,
+    )
+    client = _FakeMeiliClient()
+
+    summary = index_project_evidence_units(
+        client,
+        index_uid="sample_evidence_units",
+        project_dir=project_dir,
+        hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
+        hybrid_embedder_dimensions=3,
+        vector_manifest=Path("manifests/evidence_vectors.json"),
+    )
+
+    assert client.settings["embedders"] == {
+        "default": {"source": "userProvided", "dimensions": 3}
+    }
+    assert client.documents[0]["_vectors"]["default"] == [0.5, 0.25, 0.125]
+    assert summary["document_vectors"]["generator"] is None
+    assert summary["document_vectors"]["purpose"] == "real_embedding_manifest"
+    assert summary["document_vectors"]["quality_claim"] == "provider_embedding"
+    assert summary["document_vectors"]["manifest_vector_count"] == 1
+    assert summary["document_vectors"]["expected_vector_count"] == 1
+    assert summary["document_vectors"]["generated_vector_count"] == 0
+    assert summary["embedding_backend"]["quality_claim"] == "provider_embedding"
+    assert summary["embedding_backend"]["warnings"] == []
+    assert "warnings" not in summary
+    assert summary["hybrid_embedder_profile"] == HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE
+
+
 def test_query_project_evidence_units_returns_required_fields(tmp_path: Path) -> None:
     project_dir = tmp_path / "artifacts" / "projects" / "sample_project"
     _write_jsonl(
@@ -984,6 +1069,39 @@ def _segment(segment_id: str, start_time: float, end_time: float, text: str) -> 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+
+def _write_vector_manifest(
+    path: Path,
+    *,
+    records: list[dict],
+    embedder: str = "default",
+    dimensions: int = 3,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "oarag-vector-manifest-v1",
+                "kind": "document",
+                "embedder": embedder,
+                "provider": {
+                    "provider": "openai_compatible",
+                    "model": "text-embedding-test",
+                    "dimensions": dimensions,
+                },
+                "dimensions": dimensions,
+                "embedders": {
+                    embedder: {
+                        "source": "userProvided",
+                        "dimensions": dimensions,
+                    }
+                },
+                "records": records,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _read_jsonl(path: Path) -> list[dict]:
