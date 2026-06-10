@@ -432,6 +432,7 @@ def test_public_userprovided_vector_fixture_live_smoke() -> None:
             hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
             hybrid_embedder_dimensions=3,
             hybrid_embedder_live_smoke=True,
+            allow_local_hash_vectors=True,
         )
         window_summary = index_project_windows(
             client,
@@ -442,6 +443,7 @@ def test_public_userprovided_vector_fixture_live_smoke() -> None:
             hybrid_embedder_profile=HYBRID_EMBEDDER_MANUAL_SETTINGS_PROFILE,
             hybrid_embedder_dimensions=3,
             hybrid_embedder_live_smoke=True,
+            allow_local_hash_vectors=True,
         )
 
         assert segment_summary["hybrid_embedder_live_smoke"]["ok"] is True

@@ -347,6 +347,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Meilisearch settings profile to apply to lecture_segments.",
     )
     _add_hybrid_embedder_index_options(index_project)
+    _add_local_hash_vector_override(index_project)
     index_project.set_defaults(func=cmd_index_project)
 
     build_windows = subparsers.add_parser(
@@ -583,11 +584,18 @@ def build_parser() -> argparse.ArgumentParser:
     index_evidence_units.add_argument("--batch-size", type=int, default=500)
     index_evidence_units.add_argument("--reset", action="store_true")
     index_evidence_units.add_argument(
+        "--vector-manifest",
+        type=Path,
+        help="Optional real embedding vector manifest. Relative paths resolve from project dir.",
+    )
+    index_evidence_units.add_argument(
         "--settings-profile",
         choices=evidence_unit_settings_profile_names(),
         default=EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
         help="Meilisearch settings profile to apply to evidence unit documents.",
     )
+    _add_hybrid_embedder_index_options(index_evidence_units)
+    _add_local_hash_vector_override(index_evidence_units)
     index_evidence_units.set_defaults(func=cmd_index_project_evidence_units)
 
     index_windows = subparsers.add_parser(
@@ -636,6 +644,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Meilisearch settings profile to apply to lecture window documents.",
     )
     _add_hybrid_embedder_index_options(index_windows)
+    _add_local_hash_vector_override(index_windows)
     index_windows.add_argument(
         "--window-seconds",
         type=float,
@@ -696,6 +705,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Meilisearch settings profile to apply to visual_entities.",
     )
     _add_hybrid_embedder_index_options(index_visual_entities)
+    _add_local_hash_vector_override(index_visual_entities)
     index_visual_entities.set_defaults(func=cmd_index_project_visual_entities)
 
     ingest = subparsers.add_parser("ingest-video", help="Ingest a local lecture video")
@@ -2124,6 +2134,18 @@ def _add_hybrid_embedder_index_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_local_hash_vector_override(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--allow-local-hash-vectors",
+        action="store_true",
+        help=(
+            "Allow local_hash_v1 document vectors for dependency-free smoke tests. "
+            "Without this flag, userProvided hybrid document indexing requires "
+            "--vector-manifest."
+        ),
+    )
+
+
 def _hybrid_embedder_config_from_args(args: argparse.Namespace) -> dict | None:
     if args.hybrid_embedder_config is None:
         return None
@@ -2262,6 +2284,7 @@ def cmd_index_project(args: argparse.Namespace) -> None:
         hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
         hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
         vector_manifest=args.vector_manifest,
+        allow_local_hash_vectors=args.allow_local_hash_vectors,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -2351,6 +2374,13 @@ def cmd_index_project_evidence_units(args: argparse.Namespace) -> None:
         reset=args.reset,
         evidence_units=args.evidence_units,
         settings_profile=args.settings_profile,
+        hybrid_embedder_profile=args.hybrid_embedder_profile,
+        hybrid_embedder_config=_hybrid_embedder_config_from_args(args),
+        hybrid_embedder_name=args.hybrid_embedder_name,
+        hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
+        hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
+        vector_manifest=args.vector_manifest,
+        allow_local_hash_vectors=args.allow_local_hash_vectors,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -2381,6 +2411,7 @@ def cmd_index_project_windows(args: argparse.Namespace) -> None:
         hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
         hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
         vector_manifest=args.vector_manifest,
+        allow_local_hash_vectors=args.allow_local_hash_vectors,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -2402,6 +2433,7 @@ def cmd_index_project_visual_entities(args: argparse.Namespace) -> None:
         hybrid_embedder_dimensions=args.hybrid_embedder_dimensions,
         hybrid_embedder_live_smoke=args.hybrid_embedder_live_smoke,
         vector_manifest=args.vector_manifest,
+        allow_local_hash_vectors=args.allow_local_hash_vectors,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

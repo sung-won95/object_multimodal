@@ -392,6 +392,7 @@ def index_project_windows(
     hybrid_embedder_dimensions: int | None = None,
     hybrid_embedder_live_smoke: bool = False,
     vector_manifest: Path | None = None,
+    allow_local_hash_vectors: bool = False,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     build_requested = _window_build_inputs_requested(
@@ -466,6 +467,11 @@ def index_project_windows(
         path=vector_manifest,
     )
     _validate_vector_manifest_for_specs(vector_specs, vector_manifest_index)
+    _enforce_document_vector_policy(
+        vector_specs,
+        vector_manifest=vector_manifest_index,
+        allow_local_hash_vectors=allow_local_hash_vectors,
+    )
     vector_summary = _new_document_vector_summary(
         vector_specs,
         vector_manifest=vector_manifest_index,
@@ -559,18 +565,52 @@ def index_project_evidence_units(
     configure_index: bool = True,
     evidence_units: Path | None = None,
     settings_profile: str = EVIDENCE_UNIT_DEFAULT_SETTINGS_PROFILE,
+    hybrid_embedder_profile: str | None = None,
+    hybrid_embedder_config: dict[str, Any] | None = None,
+    hybrid_embedder_name: str = DEFAULT_HYBRID_EMBEDDER_NAME,
+    hybrid_embedder_dimensions: int | None = None,
+    hybrid_embedder_live_smoke: bool = False,
+    vector_manifest: Path | None = None,
+    allow_local_hash_vectors: bool = False,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     evidence_units_path = evidence_unit_artifact_path(
         resolved_project_dir,
         evidence_units=evidence_units,
     )
-    settings = evidence_unit_settings(settings_profile)
+    hybrid_settings, hybrid_snapshot = _resolve_hybrid_embedder_settings(
+        profile=hybrid_embedder_profile,
+        config=hybrid_embedder_config,
+        embedder_name=hybrid_embedder_name,
+        dimensions=hybrid_embedder_dimensions,
+        live_smoke=hybrid_embedder_live_smoke,
+    )
+    settings = merge_hybrid_embedder_settings(
+        evidence_unit_settings(settings_profile),
+        hybrid_settings,
+    )
+    vector_specs = _user_provided_vector_specs(settings)
+    vector_manifest_index = _load_index_vector_manifest(
+        project_dir=resolved_project_dir,
+        path=vector_manifest,
+    )
+    _validate_vector_manifest_for_specs(vector_specs, vector_manifest_index)
+    _enforce_document_vector_policy(
+        vector_specs,
+        vector_manifest=vector_manifest_index,
+        allow_local_hash_vectors=allow_local_hash_vectors,
+    )
+    vector_summary = _new_document_vector_summary(
+        vector_specs,
+        vector_manifest=vector_manifest_index,
+    )
     settings_snapshot = evidence_unit_settings_snapshot(
         settings,
         profile=settings_profile,
+        redact_secrets=hybrid_snapshot is not None,
     )
 
+    hybrid_live_smoke = None
     if configure_index:
         if reset:
             client.wait_task(client.delete_index(index_uid), ignored_error_codes={"index_not_found"})
@@ -583,7 +623,13 @@ def index_project_evidence_units(
             index_uid=index_uid,
             settings=settings,
             settings_profile=settings_profile,
-            hybrid_snapshot=None,
+            hybrid_snapshot=hybrid_snapshot,
+        )
+        hybrid_live_smoke = _run_hybrid_embedder_live_smoke(
+            client,
+            index_uid=index_uid,
+            hybrid_snapshot=hybrid_snapshot,
+            requested=hybrid_embedder_live_smoke,
         )
 
     indexed_documents = 0
@@ -602,7 +648,14 @@ def index_project_evidence_units(
         _evidence_unit_index_document(document)
         for document in iter_jsonl_documents(evidence_units_path)
     )
-    for batch in iter_batches(documents, batch_size=batch_size):
+    indexed_documents_iter = _documents_with_user_provided_vectors(
+        documents,
+        specs=vector_specs,
+        summary=vector_summary,
+        vector_manifest=vector_manifest_index,
+        id_fields=("evidence_unit_id",),
+    )
+    for batch in iter_batches(indexed_documents_iter, batch_size=batch_size):
         client.wait_task(client.add_documents(index_uid, batch))
         indexed_documents += len(batch)
         indexed_batches += 1
@@ -628,7 +681,9 @@ def index_project_evidence_units(
                     else 1
                 )
 
-    return {
+    _finalize_document_vector_summary(vector_summary)
+
+    summary = {
         "index": index_uid,
         "project_dir": str(resolved_project_dir),
         "evidence_units_path": str(evidence_units_path),
@@ -642,7 +697,15 @@ def index_project_evidence_units(
         "settings_profile": settings_snapshot["profile"],
         "settings_hash": settings_snapshot["hash"],
         "settings_snapshot": settings_snapshot,
+        "document_vectors": vector_summary,
     }
+    _attach_embedding_backend_report(summary, vector_summary)
+    _attach_hybrid_embedder_summary(
+        summary,
+        hybrid_snapshot=hybrid_snapshot,
+        live_smoke=hybrid_live_smoke,
+    )
+    return summary
 
 
 def index_project_segments(
@@ -662,6 +725,7 @@ def index_project_segments(
     hybrid_embedder_dimensions: int | None = None,
     hybrid_embedder_live_smoke: bool = False,
     vector_manifest: Path | None = None,
+    allow_local_hash_vectors: bool = False,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     segments_path = segment_artifact_path(resolved_project_dir, segments=segments)
@@ -687,6 +751,11 @@ def index_project_segments(
         path=vector_manifest,
     )
     _validate_vector_manifest_for_specs(vector_specs, vector_manifest_index)
+    _enforce_document_vector_policy(
+        vector_specs,
+        vector_manifest=vector_manifest_index,
+        allow_local_hash_vectors=allow_local_hash_vectors,
+    )
     vector_summary = _new_document_vector_summary(
         vector_specs,
         vector_manifest=vector_manifest_index,
@@ -785,6 +854,7 @@ def index_project_visual_entities(
     hybrid_embedder_dimensions: int | None = None,
     hybrid_embedder_live_smoke: bool = False,
     vector_manifest: Path | None = None,
+    allow_local_hash_vectors: bool = False,
 ) -> dict[str, Any]:
     resolved_project_dir = project_dir.expanduser().resolve()
     visual_entities_path = visual_entity_artifact_path(
@@ -808,6 +878,11 @@ def index_project_visual_entities(
         path=vector_manifest,
     )
     _validate_vector_manifest_for_specs(vector_specs, vector_manifest_index)
+    _enforce_document_vector_policy(
+        vector_specs,
+        vector_manifest=vector_manifest_index,
+        allow_local_hash_vectors=allow_local_hash_vectors,
+    )
     vector_summary = _new_document_vector_summary(
         vector_specs,
         vector_manifest=vector_manifest_index,
@@ -1092,6 +1167,21 @@ def _validate_vector_manifest_for_specs(
             )
 
 
+def _enforce_document_vector_policy(
+    specs: list[dict[str, Any]],
+    *,
+    vector_manifest: LoadedVectorManifest | None,
+    allow_local_hash_vectors: bool,
+) -> None:
+    if not specs or vector_manifest is not None or allow_local_hash_vectors:
+        return
+    raise ValueError(
+        "userProvided hybrid embedder indexing requires vector_manifest with "
+        "provider-backed document vectors. Pass allow_local_hash_vectors=True "
+        "only for local smoke tests that intentionally use local_hash_v1."
+    )
+
+
 def _new_document_vector_summary(
     specs: list[dict[str, Any]],
     *,
@@ -1308,6 +1398,7 @@ def _document_vector_text(document: dict[str, Any]) -> str:
         document,
         [
             LECTURE_SEGMENT_SEMANTIC_TEXT_FIELD,
+            "evidence_text",
             "transcript_window_text",
             "transcript_text",
             "normalized_text",
@@ -1322,6 +1413,7 @@ def _document_vector_text(document: dict[str, Any]) -> str:
             "frame_id",
             "segment_id",
             "window_id",
+            "evidence_unit_id",
         ],
     )
     if text:
@@ -1330,6 +1422,7 @@ def _document_vector_text(document: dict[str, Any]) -> str:
         {
             "segment_id": document.get("segment_id"),
             "window_id": document.get("window_id"),
+            "evidence_unit_id": document.get("evidence_unit_id"),
             "sample_id": document.get("sample_id"),
         },
         ensure_ascii=False,
