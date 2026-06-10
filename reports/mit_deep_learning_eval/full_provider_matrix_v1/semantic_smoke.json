@@ -1,0 +1,35 @@
+{
+  "schema_version": "semantic-live-smoke-aggregate-v1",
+  "run_id": "mit_deep_learning_stt_full_provider_matrix_v1",
+  "semantic_live_smoke": {
+    "ok": true,
+    "passed": true,
+    "method": "retrieval_answer_matrix_aggregate",
+    "provider_backed": true,
+    "quality_claim": "provider_embedding"
+  },
+  "counts": {
+    "hybrid_variant_count": 2,
+    "hybrid_query_result_count": 96,
+    "semantic_top_candidate_count": 96,
+    "query_vector_configured_count": 96,
+    "provider_backed_query_vector_count": 96,
+    "local_hash_query_vector_count": 0,
+    "undeclared_backend_query_count": 0,
+    "semantic_channel_query_count": 192
+  },
+  "hybrid_variant_ids": [
+    "hybrid",
+    "window_hybrid"
+  ],
+  "warnings": [],
+  "privacy": {
+    "payload": "aggregate_counts_and_variant_ids_only",
+    "raw_queries": "excluded",
+    "answer_text": "excluded",
+    "transcript_content": "excluded",
+    "candidate_evidence_text": "excluded",
+    "local_paths": "excluded",
+    "raw_vectors": "excluded"
+  }
+}
