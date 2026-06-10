@@ -82,6 +82,23 @@ human audit summary exists yet. Use `human_audit_sample.csv` as the initial
 48-row audit packet, then create a separate human-audited expanded CSV before
 using the expansion in benchmark claims or closing #270.
 
+After a person has checked the sampled labels against the lecture videos, fill
+`audit_status`, `auditor_id`, and any corrected `audited_*` fields in
+`human_audit_sample.csv`, then apply those decisions with:
+
+```bash
+python scripts/apply_mit_deep_learning_human_audit.py \
+  --candidates eval/mit_deep_learning_stt/candidates/expanded_seed_v1/queries_candidate.csv \
+  --audit-sample eval/mit_deep_learning_stt/candidates/expanded_seed_v1/human_audit_sample.csv \
+  --output-dir eval/mit_deep_learning_stt/candidates/expanded_seed_v1/audited
+```
+
+This script does not perform or replace the human audit. It only applies values
+that a real auditor entered after checking the videos, writes
+`queries_audited_candidate.csv`, and emits a public-safe
+`human_audit_results.md` section that can be copied into this README once the
+audited expanded CSV is ready for the completion gate.
+
 ## Public-Safe Evidence-Unit Slice
 
 `mit_lec01_02_public_safe_eval_slice.json` fixes 24 query targets across two MIT
