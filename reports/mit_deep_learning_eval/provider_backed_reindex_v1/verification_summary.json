@@ -1,0 +1,121 @@
+{
+  "schema_version": "oarag-provider-backed-reindex-verification-v1",
+  "issue": 266,
+  "verified_at": "2026-06-10",
+  "scope": {
+    "dataset": "mit_deep_learning_stt",
+    "suite_ids": [
+      "mitdl_lec01",
+      "mitdl_lec02",
+      "mitdl_lec03",
+      "mitdl_lec04"
+    ],
+    "reason": "Matches the pre-existing production shared index scope required by issue #266.",
+    "document_count_expected": 5263
+  },
+  "provider": {
+    "provider": "sentence_transformers",
+    "model": "sentence-transformers/all-MiniLM-L6-v2",
+    "dimensions": 384,
+    "local_files_only": true,
+    "quality_claim": "provider_embedding"
+  },
+  "vector_manifests": {
+    "privacy": "raw vectors excluded; manifests stored only under ignored artifacts/ paths",
+    "document_record_counts_by_kind": {
+      "segments": 5263,
+      "windows": 5263,
+      "evidence_units": 5263
+    },
+    "query_record_count": 48,
+    "per_suite_record_counts": [
+      {
+        "suite_id": "mitdl_lec01",
+        "segments": 1023,
+        "windows": 1023,
+        "evidence_units": 1023
+      },
+      {
+        "suite_id": "mitdl_lec02",
+        "segments": 1394,
+        "windows": 1394,
+        "evidence_units": 1394
+      },
+      {
+        "suite_id": "mitdl_lec03",
+        "segments": 1395,
+        "windows": 1395,
+        "evidence_units": 1395
+      },
+      {
+        "suite_id": "mitdl_lec04",
+        "segments": 1451,
+        "windows": 1451,
+        "evidence_units": 1451
+      }
+    ]
+  },
+  "meilisearch_indexes": {
+    "mit_deep_learning_stt_segments": {
+      "number_of_documents": 5263,
+      "hybrid_embedder_profile": "manual_user_provided_v1",
+      "vector_source": "provider_manifest"
+    },
+    "mit_deep_learning_stt_windows": {
+      "number_of_documents": 5263,
+      "hybrid_embedder_profile": "manual_user_provided_v1",
+      "vector_source": "provider_manifest"
+    },
+    "mit_deep_learning_stt_evidence_units": {
+      "number_of_documents": 5263,
+      "hybrid_embedder_profile": "manual_user_provided_v1",
+      "vector_source": "provider_manifest"
+    }
+  },
+  "local_hash_comparison": {
+    "index": "mit_deep_learning_stt_segments",
+    "sample_size": 20,
+    "threshold": 0.5,
+    "ok": true,
+    "max_cosine": 0.104168,
+    "min_cosine": -0.115268,
+    "mean_cosine": 0.015182,
+    "failure_count": 0
+  },
+  "semantic_smoke": {
+    "ok": true,
+    "provider_backed": true,
+    "quality_claim": "provider_embedding",
+    "local_hash_query_vector_count": 0,
+    "provider_backed_query_vector_count": 16,
+    "query_vector_configured_count": 16,
+    "hybrid_query_result_count": 16,
+    "semantic_channel_query_count": 32,
+    "warnings": []
+  },
+  "fail_closed_guard": {
+    "implemented_by_pr": 272,
+    "default_without_vector_manifest": "fails for userProvided hybrid document indexing",
+    "explicit_escape_hatch": "--allow-local-hash-vectors"
+  },
+  "verification_commands": [
+    "PYTHONPATH=src python3 scripts/index_mit_deep_learning_retrieval_indexes.py --manifest <private_lec01_04_manifest> --reset --stages segment,window --hybrid-embedder-profile manual_user_provided_v1 --hybrid-embedder-dimensions 384 --hybrid-embedder-live-smoke --segment-vector-manifest-relative manifests/provider_vectors/segment_vectors.json --window-vector-manifest-relative manifests/provider_vectors/window_vectors.json",
+    "PYTHONPATH=src python3 -m oarag index-project-evidence-units --project-dir <suite project> --index mit_deep_learning_stt_evidence_units --hybrid-embedder-profile manual_user_provided_v1 --hybrid-embedder-dimensions 384 --vector-manifest manifests/provider_vectors/evidence_unit_vectors.json",
+    "PYTHONPATH=src python3 -m oarag benchmark-retrieval --manifest <private_provider_benchmark_manifest> --output-dir reports/mit_deep_learning_eval/provider_backed_reindex_v1",
+    "PYTHONPATH=src python3 - <<'EOF' # retrieveVectors=true sample cosine check against deterministic_text_vector EOF",
+    "python3 -m pytest -q"
+  ],
+  "test_result": {
+    "command": "python3 -m pytest -q",
+    "passed": 449,
+    "skipped": 4
+  },
+  "privacy": {
+    "raw_vectors": "excluded",
+    "raw_queries": "excluded",
+    "raw_transcripts": "excluded",
+    "candidate_evidence_text": "excluded",
+    "local_absolute_paths": "excluded",
+    "credentials": "excluded"
+  }
+}
