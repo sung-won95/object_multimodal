@@ -323,16 +323,35 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert suite["build"]["alignment_status_counts"] == {"candidate": 2}
     assert suite["build"]["source_quality_counts"]["units_with_candidate_link"] == 0
     assert suite["build"]["link_counts"]["verified_links"] == 0
-    assert suite["build"]["link_counts"]["timestamp_fallback_links"] == 1
+    assert suite["build"]["link_counts"]["timestamp_fallback_links"] == 0
+    assert suite["build"]["source_quality_counts"]["units_with_ocr_engine_evidence"] == 2
+    assert suite["build"]["link_counts"]["ocr_engine_links"] == 1
     assert suite["build"]["link_diagnostics"]["candidate_visual_support"][
         "units_with_candidate_visual_support"
     ] == 2
     assert suite["build"]["link_diagnostics"]["candidate_visual_support"][
         "units_with_timestamp_fallback_link"
-    ] == 1
+    ] == 0
     assert suite["build"]["link_diagnostics"]["candidate_link_signal_counts"][
         "timestamp_fallback"
+    ] == 0
+    assert suite["build"]["link_diagnostics"]["excluded_ocr_engine_evidence"][
+        "ocr_engine_links"
     ] == 1
+    assert suite["build"]["link_diagnostics"]["excluded_ocr_engine_evidence"][
+        "counted_as_candidate_visual_support"
+    ] is False
+    assert suite["build"]["ocr_engine_diagnostics"][
+        "main_path_excludes_ocr_engine_entities"
+    ] is True
+    assert suite["build"]["ocr_engine_diagnostics"]["input_ocr_engine_entities_total"] == 1
+    assert suite["build"]["ocr_engine_diagnostics"]["input_ocr_engine_links_total"] == 1
+    assert suite["build"]["ocr_engine_diagnostics"][
+        "evidence_units_with_ocr_engine_evidence"
+    ] == 2
+    assert suite["build"]["ocr_engine_diagnostics"][
+        "counted_as_candidate_visual_support"
+    ] is False
     assert suite["build"]["link_diagnostics"]["verified_object_alignment"][
         "units_with_verified_object_alignment"
     ] == 0
@@ -358,14 +377,16 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert visual_vlm["evidence_unit_channels"]["units_with_detected_text"] == 0
     assert visual_vlm["object_link_coverage"]["units_with_candidate_link"] == 0
     assert visual_vlm["object_link_coverage"]["units_with_verified_link"] == 0
-    assert visual_vlm["object_link_coverage"]["units_with_timestamp_fallback_link"] == 1
+    assert visual_vlm["object_link_coverage"]["units_with_timestamp_fallback_link"] == 0
     assert visual_vlm["object_link_coverage"]["timestamp_fallback_counted_as_verified"] is False
-    assert suite["build"]["source_quality_counts"]["units_with_concept"] == 2
+    assert visual_vlm["ocr_engine_diagnostics"]["input_ocr_engine_links_total"] == 1
+    assert visual_vlm["ocr_engine_diagnostics"]["counted_as_candidate_visual_support"] is False
+    assert suite["build"]["source_quality_counts"]["units_with_concept"] == 1
     assert suite["build"]["source_quality_counts"]["units_with_concept_relation"] == 1
-    assert suite["build"]["concept_field_coverage"]["evidence_units_with_concepts"] == 2
+    assert suite["build"]["concept_field_coverage"]["evidence_units_with_concepts"] == 1
     assert suite["build"]["concept_field_coverage"][
         "evidence_units_with_concept_search_text"
-    ] == 2
+    ] == 1
     assert suite["build"]["concept_field_coverage"][
         "timestamp_only_concept_relation_mentions"
     ] == 1
@@ -407,14 +428,14 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     assert rows[0]["target_diagnostics"]["target_rank"] == 2
     assert rows[0]["target_diagnostics"]["target_rank_bucket"] == "top5"
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_verified_link"] is False
-    assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_timestamp_fallback_link"] is True
+    assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_timestamp_fallback_link"] is False
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"]["has_concept"] is True
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"][
         "concept_field_coverage"
     ]["timestamp_only_concept_relation_count"] == 1
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"][
         "candidate_visual_support"
-    ]["timestamp_fallback_link_count"] == 1
+    ]["timestamp_fallback_link_count"] == 0
     assert rows[0]["target_diagnostics"]["target_evidence_unit_quality"][
         "verified_object_alignment"
     ]["verified_link_count"] == 0
@@ -452,7 +473,7 @@ def test_evidence_unit_smoke_available_path_writes_sanitized_outputs(tmp_path: P
     }
     assert payload["target_rank_diagnostics"]["found_target_candidate_link_signal_counts"][
         "timestamp_fallback"
-    ] == 1
+    ] == 0
     assert payload["target_rank_diagnostics"]["found_target_verified_link_source_counts"][
         "explicit_verified_flag"
     ] == 0

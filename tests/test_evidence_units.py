@@ -108,16 +108,27 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert target["source_segment_ids"] == ["seg_target", "seg_after"]
     assert "This gradient arrow" in target["transcript_window_text"]
     assert target["visual_state_ids"]
-    assert target["visual_entity_ids"] == ["ent_gradient_arrow", "ent_loss_ocr"]
-    assert target["candidate_entity_link_ids"] == ["link_gradient", "link_loss_timestamp"]
+    assert target["visual_entity_ids"] == ["ent_gradient_arrow"]
+    assert target["candidate_entity_link_ids"] == ["link_gradient"]
     assert target["verified_entity_link_ids"] == []
     assert target["candidate_entity_link_statuses"]["link_gradient"] == "candidate"
-    assert target["candidate_entity_link_statuses"]["link_loss_timestamp"] == "timestamp_fallback"
     assert target["alignment_status"] == "candidate"
     assert target["source_quality"]["has_vlm_entity"] is True
+    assert target["source_quality"]["has_vlm_visible_text"] is True
     assert target["source_quality"]["has_verified_link"] is False
-    assert target["source_quality"]["has_timestamp_fallback_link"] is True
+    assert target["source_quality"]["has_timestamp_fallback_link"] is False
+    assert target["source_quality"]["has_ocr_engine_evidence"] is True
+    assert target["source_quality"]["ocr_engine_entity_count"] == 1
+    assert target["source_quality"]["ocr_engine_link_count"] == 1
+    assert target["source_quality"]["ocr_engine_counted_as_candidate_visual_support"] is False
+    assert target["source_quality"]["uses_ocr_only"] is False
     assert target["source_quality"]["candidate_visual_support"]["paper_claim_eligible"] is False
+    assert (
+        target["source_quality"]["candidate_visual_support"][
+            "ocr_engine_counted_as_candidate_visual_support"
+        ]
+        is False
+    )
     assert target["source_quality"]["verified_object_alignment"]["paper_claim_eligible"] is False
     assert (
         target["source_quality"]["verified_object_alignment"][
@@ -129,6 +140,7 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert target["source_quality"]["has_visual_description"] is True
     assert target["source_quality"]["visual_state_detected_text_count"] == 1
     assert target["source_quality"]["visual_entity_detected_text_count"] == 1
+    assert target["source_quality"]["vlm_visible_text_count"] == 1
     assert target["source_quality"]["visual_description_count"] == 1
     assert "gradient" in target["transcript_keywords"]
     assert "descent" in target["transcript_keywords"]
@@ -141,6 +153,13 @@ def test_build_project_evidence_units_marks_timestamp_only_as_candidate_fallback
     assert target["visual_states"][0]["valid_end_time"] >= target["start_time"]
     assert target["visual_entities"][0]["detected_text"] == ["descent"]
     assert summary["counts"]["units_with_detected_text"] >= 1
+    assert summary["counts"]["main_visual_entities_total"] == 1
+    assert summary["counts"]["ocr_engine_visual_entities_total"] == 1
+    assert summary["counts"]["units_with_ocr_engine_evidence"] >= 1
+    assert summary["counts"]["units_with_vlm_visible_text"] >= 1
+    assert summary["ocr_engine_diagnostics"]["main_path_excludes_ocr_engine_entities"] is True
+    assert summary["ocr_engine_diagnostics"]["input_ocr_engine_entities_total"] == 1
+    assert summary["ocr_engine_diagnostics"]["input_ocr_engine_links_total"] == 1
     assert summary["counts"]["units_with_visual_description"] >= 1
     assert summary["counts"]["units_with_transcript_keywords"] >= 1
     assert summary["counts"]["units_with_visual_state_search_text"] >= 1

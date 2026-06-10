@@ -22,6 +22,7 @@ from oarag.retrieval.evidence_units import (
     CONCEPT_FIELD_PUBLIC_NOTE,
     LINK_DIAGNOSTICS_PUBLIC_NOTE,
     LINK_DIAGNOSTICS_SCHEMA_VERSION,
+    OCR_ENGINE_DIAGNOSTICS_PUBLIC_NOTE,
     SEARCH_FIELD_COVERAGE_SCHEMA_VERSION,
     SEARCH_FIELD_PUBLIC_NOTE,
     VERIFIED_LINK_SOURCE_KEYS,
@@ -647,6 +648,7 @@ def _artifact_summary(
             "source_quality_counts": {},
             "link_counts": {},
             "link_diagnostics": _empty_public_link_diagnostics(),
+            "ocr_engine_diagnostics": _empty_public_ocr_engine_diagnostics(),
             "visual_state_coverage": {},
             "concept_field_coverage": _empty_public_concept_field_coverage(),
             "search_field_coverage": _empty_public_search_field_coverage("dry_run"),
@@ -676,6 +678,12 @@ def _artifact_summary(
                 "units_with_visual_state": int(counts.get("units_with_visual_state") or 0),
                 "units_with_visual_entity": int(counts.get("units_with_visual_entity") or 0),
                 "units_with_vlm_entity": int(counts.get("units_with_vlm_entity") or 0),
+                "units_with_vlm_visible_text": int(
+                    counts.get("units_with_vlm_visible_text") or 0
+                ),
+                "units_with_ocr_engine_evidence": int(
+                    counts.get("units_with_ocr_engine_evidence") or 0
+                ),
                 "units_with_candidate_link": int(counts.get("units_with_candidate_link") or 0),
                 "units_with_verified_link": int(counts.get("units_with_verified_link") or 0),
                 "units_with_timestamp_fallback_link": int(
@@ -699,11 +707,15 @@ def _artifact_summary(
                 "candidate_links": int(counts.get("candidate_links") or 0),
                 "verified_links": int(counts.get("verified_links") or 0),
                 "timestamp_fallback_links": int(counts.get("timestamp_fallback_links") or 0),
+                "ocr_engine_links": int(counts.get("ocr_engine_links") or 0),
                 "concept_mentions": int(counts.get("concept_mentions") or 0),
                 "concept_relation_mentions": int(counts.get("concept_relation_mentions") or 0),
             },
             "link_diagnostics": _public_link_diagnostics(
                 build_summary.get("link_diagnostics")
+            ),
+            "ocr_engine_diagnostics": _public_ocr_engine_diagnostics(
+                build_summary.get("ocr_engine_diagnostics")
             ),
             "concept_field_coverage": _public_concept_field_coverage(
                 build_summary.get("concept_field_coverage")
@@ -731,6 +743,9 @@ def _artifact_summary(
         for key in ("has_visual_state", "has_visual_entity", "has_vlm_entity", "has_verified_link"):
             if quality.get(key) is True:
                 source_quality[key] += 1
+        for key in ("has_vlm_visible_text", "has_ocr_engine_evidence"):
+            if quality.get(key) is True:
+                source_quality[key] += 1
         for key in ("has_detected_text", "has_visual_description"):
             if quality.get(key) is True:
                 source_quality[key] += 1
@@ -751,6 +766,13 @@ def _artifact_summary(
         source_quality["candidate_links"] += int(quality.get("candidate_link_count") or 0)
         source_quality["verified_links"] += int(quality.get("verified_link_count") or 0)
         source_quality["timestamp_fallback_links"] += int(quality.get("timestamp_fallback_link_count") or 0)
+        source_quality["ocr_engine_links"] += int(quality.get("ocr_engine_link_count") or 0)
+        source_quality["ocr_engine_entity_mentions"] += int(
+            quality.get("ocr_engine_entity_count") or 0
+        )
+        source_quality["vlm_visible_text_mentions"] += int(
+            quality.get("vlm_visible_text_count") or 0
+        )
         source_quality["concept_mentions"] += int(
             quality.get("concept_count") or len(_string_list(row.get("concept_ids")))
         )
@@ -768,6 +790,8 @@ def _artifact_summary(
             "units_with_visual_state": source_quality["has_visual_state"],
             "units_with_visual_entity": source_quality["has_visual_entity"],
             "units_with_vlm_entity": source_quality["has_vlm_entity"],
+            "units_with_vlm_visible_text": source_quality["has_vlm_visible_text"],
+            "units_with_ocr_engine_evidence": source_quality["has_ocr_engine_evidence"],
             "units_with_candidate_link": source_quality["units_with_candidate_link"],
             "units_with_verified_link": source_quality["has_verified_link"],
             "units_with_timestamp_fallback_link": source_quality["units_with_timestamp_fallback_link"],
@@ -787,10 +811,12 @@ def _artifact_summary(
             "candidate_links": source_quality["candidate_links"],
             "verified_links": source_quality["verified_links"],
             "timestamp_fallback_links": source_quality["timestamp_fallback_links"],
+            "ocr_engine_links": source_quality["ocr_engine_links"],
             "concept_mentions": source_quality["concept_mentions"],
             "concept_relation_mentions": source_quality["concept_relation_mentions"],
         },
         "link_diagnostics": link_diagnostics,
+        "ocr_engine_diagnostics": _loaded_ocr_engine_diagnostics(rows),
         "concept_field_coverage": _loaded_concept_field_coverage(rows),
         "search_field_coverage": _loaded_search_field_coverage(rows),
         "visual_state_coverage": _loaded_visual_state_coverage(
@@ -808,14 +834,19 @@ def _artifact_summary(
                     "units_with_timestamp_fallback_link": source_quality[
                         "units_with_timestamp_fallback_link"
                     ],
+                    "units_with_ocr_engine_evidence": source_quality[
+                        "has_ocr_engine_evidence"
+                    ],
                     "units_with_detected_text": source_quality["has_detected_text"],
                     "units_with_visual_description": source_quality["has_visual_description"],
+                    "ocr_engine_links": source_quality["ocr_engine_links"],
                 },
                 "visual_state_coverage": _loaded_visual_state_coverage(
                     evidence_units=rows,
                     visual_states=visual_state_rows,
                 ),
                 "link_diagnostics": link_diagnostics,
+                "ocr_engine_diagnostics": _loaded_ocr_engine_diagnostics(rows),
             },
             vlm_object_evidence_coverage=vlm_object_evidence_coverage,
         ),
@@ -1876,6 +1907,7 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
         link_diagnostics = _mapping(build.get("link_diagnostics"))
         candidate_support = _mapping(link_diagnostics.get("candidate_visual_support"))
         verified_alignment = _mapping(link_diagnostics.get("verified_object_alignment"))
+        ocr_engine_diagnostics = _mapping(build.get("ocr_engine_diagnostics"))
         vlm_coverage = _mapping(build.get("vlm_object_evidence_coverage"))
         entity_coverage = _mapping(vlm_coverage.get("visual_entity_coverage"))
         unit_coverage = _mapping(vlm_coverage.get("evidence_unit_coverage"))
@@ -1901,6 +1933,7 @@ def _summary_markdown(payload: dict[str, Any]) -> str:
                 f"- link counts: `{json.dumps(build.get('link_counts', {}), sort_keys=True)}`",
                 f"- candidate visual support: `{json.dumps(candidate_support, sort_keys=True)}`",
                 f"- verified object alignment: `{json.dumps(verified_alignment, sort_keys=True)}`",
+                f"- OCR engine diagnostics: `{json.dumps(ocr_engine_diagnostics, sort_keys=True)}`",
                 f"- visual state source: `{visual_coverage.get('source') or 'unknown'}`",
                 f"- visual state coverage: `{visual_coverage.get('evidence_units_with_visual_state', 0)}`/`{visual_coverage.get('evidence_units_total', 0)}`",
                 f"- concept field coverage: `{concept_coverage.get('evidence_units_with_concept_search_text', 0)}`/`{concept_coverage.get('evidence_units_total', 0)}`",
@@ -2302,6 +2335,7 @@ def _public_link_diagnostics(value: Any) -> dict[str, Any]:
     diagnostics = _mapping(value)
     candidate_support = _mapping(diagnostics.get("candidate_visual_support"))
     verified_alignment = _mapping(diagnostics.get("verified_object_alignment"))
+    excluded_ocr = _mapping(diagnostics.get("excluded_ocr_engine_evidence"))
     return {
         "schema_version": diagnostics.get("schema_version") or LINK_DIAGNOSTICS_SCHEMA_VERSION,
         "evidence_units_total": int(diagnostics.get("evidence_units_total") or 0),
@@ -2337,6 +2371,17 @@ def _public_link_diagnostics(value: Any) -> dict[str, Any]:
                 verified_alignment.get("paper_claim_eligible_units") or 0
             ),
         },
+        "excluded_ocr_engine_evidence": {
+            "units_with_ocr_engine_evidence": int(
+                excluded_ocr.get("units_with_ocr_engine_evidence") or 0
+            ),
+            "ocr_engine_entity_mentions": int(
+                excluded_ocr.get("ocr_engine_entity_mentions") or 0
+            ),
+            "ocr_engine_links": int(excluded_ocr.get("ocr_engine_links") or 0),
+            "counted_as_candidate_visual_support": False,
+            "counted_as_verified_object_alignment": False,
+        },
         "candidate_link_signal_counts": _public_count_map(
             diagnostics.get("candidate_link_signal_counts")
             or candidate_support.get("candidate_link_signal_counts"),
@@ -2349,6 +2394,69 @@ def _public_link_diagnostics(value: Any) -> dict[str, Any]:
         ),
         "public_note": diagnostics.get("public_note") or LINK_DIAGNOSTICS_PUBLIC_NOTE,
     }
+
+
+def _public_ocr_engine_diagnostics(value: Any) -> dict[str, Any]:
+    diagnostics = _mapping(value)
+    return {
+        "source": diagnostics.get("source") or "visual_entities_artifact",
+        "role": diagnostics.get("role") or "baseline_fallback_diagnostic_only",
+        "main_path_excludes_ocr_engine_entities": bool(
+            diagnostics.get("main_path_excludes_ocr_engine_entities")
+        ),
+        "input_ocr_engine_entities_total": int(
+            diagnostics.get("input_ocr_engine_entities_total") or 0
+        ),
+        "input_ocr_engine_links_total": int(
+            diagnostics.get("input_ocr_engine_links_total") or 0
+        ),
+        "evidence_units_with_ocr_engine_evidence": int(
+            diagnostics.get("evidence_units_with_ocr_engine_evidence") or 0
+        ),
+        "ocr_engine_entity_mentions": int(
+            diagnostics.get("ocr_engine_entity_mentions") or 0
+        ),
+        "ocr_engine_link_mentions": int(diagnostics.get("ocr_engine_link_mentions") or 0),
+        "counted_as_candidate_visual_support": False,
+        "counted_as_verified_object_alignment": False,
+        "public_note": diagnostics.get("public_note") or OCR_ENGINE_DIAGNOSTICS_PUBLIC_NOTE,
+    }
+
+
+def _empty_public_ocr_engine_diagnostics() -> dict[str, Any]:
+    return _public_ocr_engine_diagnostics({})
+
+
+def _loaded_ocr_engine_diagnostics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    units_with_ocr = 0
+    entity_mentions = 0
+    link_mentions = 0
+    for row in rows:
+        quality = _mapping(row.get("source_quality"))
+        entity_count = int(
+            quality.get("ocr_engine_entity_count")
+            or quality.get("excluded_ocr_engine_entity_count")
+            or 0
+        )
+        link_count = int(
+            quality.get("ocr_engine_link_count")
+            or quality.get("excluded_ocr_engine_link_count")
+            or 0
+        )
+        if quality.get("has_ocr_engine_evidence") is True or entity_count or link_count:
+            units_with_ocr += 1
+        entity_mentions += entity_count
+        link_mentions += link_count
+    return _public_ocr_engine_diagnostics(
+        {
+            "source": "evidence_units_artifact",
+            "role": "baseline_fallback_diagnostic_only",
+            "main_path_excludes_ocr_engine_entities": True,
+            "evidence_units_with_ocr_engine_evidence": units_with_ocr,
+            "ocr_engine_entity_mentions": entity_mentions,
+            "ocr_engine_link_mentions": link_mentions,
+        }
+    )
 
 
 def _public_concept_field_coverage(value: Any) -> dict[str, Any]:
@@ -2683,6 +2791,9 @@ def _visual_vlm_coverage_summary(
     link_diagnostics = _mapping(build.get("link_diagnostics"))
     candidate_support = _mapping(link_diagnostics.get("candidate_visual_support"))
     verified_alignment = _mapping(link_diagnostics.get("verified_object_alignment"))
+    ocr_engine_diagnostics = _public_ocr_engine_diagnostics(
+        build.get("ocr_engine_diagnostics")
+    )
     entity_coverage = _mapping(vlm_object_evidence_coverage.get("visual_entity_coverage"))
     unit_coverage = _mapping(vlm_object_evidence_coverage.get("evidence_unit_coverage"))
     entity_ratios = _mapping(entity_coverage.get("ratios"))
@@ -2768,6 +2879,14 @@ def _visual_vlm_coverage_summary(
                 or 0
             ),
             "units_using_ocr_only": int(unit_coverage.get("units_using_ocr_only") or 0),
+            "units_with_ocr_engine_evidence": int(
+                counts.get("units_with_ocr_engine_evidence")
+                or ocr_engine_diagnostics.get("evidence_units_with_ocr_engine_evidence")
+                or 0
+            ),
+            "units_with_vlm_visible_text": int(
+                counts.get("units_with_vlm_visible_text") or 0
+            ),
             "vlm_entity_ratio": unit_ratios.get("units_with_vlm_entity")
             if "units_with_vlm_entity" in unit_ratios
             else _ratio_or_none(
@@ -2828,11 +2947,35 @@ def _visual_vlm_coverage_summary(
             ),
             "timestamp_fallback_counted_as_verified": False,
         },
+        "ocr_engine_diagnostics": {
+            "role": ocr_engine_diagnostics["role"],
+            "main_path_excludes_ocr_engine_entities": ocr_engine_diagnostics[
+                "main_path_excludes_ocr_engine_entities"
+            ],
+            "input_ocr_engine_entities_total": ocr_engine_diagnostics[
+                "input_ocr_engine_entities_total"
+            ],
+            "input_ocr_engine_links_total": ocr_engine_diagnostics[
+                "input_ocr_engine_links_total"
+            ],
+            "evidence_units_with_ocr_engine_evidence": ocr_engine_diagnostics[
+                "evidence_units_with_ocr_engine_evidence"
+            ],
+            "ocr_engine_entity_mentions": ocr_engine_diagnostics[
+                "ocr_engine_entity_mentions"
+            ],
+            "ocr_engine_link_mentions": ocr_engine_diagnostics[
+                "ocr_engine_link_mentions"
+            ],
+            "counted_as_candidate_visual_support": False,
+            "counted_as_verified_object_alignment": False,
+        },
         "public_note": (
-            "OCR-only, VLM object-description, detected text, candidate links, verified "
-            "links, and timestamp fallback links are reported as separate public-safe "
-            "aggregates. Timestamp-only fallback remains candidate/fallback support and "
-            "is never counted as verified object alignment."
+            "OCR engine diagnostics, VLM object-description, visible/detected text, "
+            "candidate links, verified links, and timestamp fallback links are reported "
+            "as separate public-safe aggregates. OCR engine evidence is excluded from "
+            "main candidate/verified visual support; timestamp-only fallback remains "
+            "candidate/fallback support and is never counted as verified object alignment."
         ),
     }
 

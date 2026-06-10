@@ -44,6 +44,11 @@ LINK_DIAGNOSTICS_PUBLIC_NOTE = (
     "Timestamp fallback links are candidate/fallback evidence only and are never "
     "counted as verified object alignment unless an explicit verified field is present."
 )
+OCR_ENGINE_DIAGNOSTICS_PUBLIC_NOTE = (
+    "OCR engine entities are excluded from the main object-aligned evidence-unit path. "
+    "They are reported only as baseline/fallback/diagnostic counts; VLM-observed "
+    "visible text remains part of visual scene evidence."
+)
 CONCEPT_FIELD_PUBLIC_NOTE = (
     "Concept field coverage reports public-safe counts only. Concept graph labels, "
     "aliases, and relation text may enrich local evidence-unit search, but timestamp-only "
@@ -367,6 +372,12 @@ def build_project_evidence_units(
         "segments_total": len(segment_rows),
         "frames_total": len(frame_rows),
         "visual_entities_total": len(visual_entity_rows),
+        "main_visual_entities_total": sum(
+            1 for entity in visual_entity_rows if not _is_ocr_engine_entity(entity)
+        ),
+        "ocr_engine_visual_entities_total": sum(
+            1 for entity in visual_entity_rows if _is_ocr_engine_entity(entity)
+        ),
         "entity_links_total": len(entity_link_rows),
         "concept_graph_records_total": len(concept_graph_records),
         "concept_nodes_total": sum(
@@ -382,6 +393,12 @@ def build_project_evidence_units(
         "units_with_visual_state": sum(1 for document in documents if document["source_quality"]["has_visual_state"]),
         "units_with_visual_entity": sum(1 for document in documents if document["source_quality"]["has_visual_entity"]),
         "units_with_vlm_entity": sum(1 for document in documents if document["source_quality"]["has_vlm_entity"]),
+        "units_with_vlm_visible_text": sum(
+            1 for document in documents if document["source_quality"]["has_vlm_visible_text"]
+        ),
+        "units_with_ocr_engine_evidence": sum(
+            1 for document in documents if document["source_quality"]["has_ocr_engine_evidence"]
+        ),
         "units_with_concept": sum(1 for document in documents if document["source_quality"]["has_concept"]),
         "units_with_concept_relation": sum(
             1 for document in documents if document["source_quality"]["has_concept_relation"]
@@ -428,6 +445,15 @@ def build_project_evidence_units(
         ),
         "candidate_links": sum(document["source_quality"]["candidate_link_count"] for document in documents),
         "verified_links": sum(document["source_quality"]["verified_link_count"] for document in documents),
+        "ocr_engine_entity_mentions": sum(
+            document["source_quality"]["ocr_engine_entity_count"] for document in documents
+        ),
+        "ocr_engine_links": sum(
+            document["source_quality"]["ocr_engine_link_count"] for document in documents
+        ),
+        "vlm_visible_text_mentions": sum(
+            document["source_quality"]["vlm_visible_text_count"] for document in documents
+        ),
         "concept_mentions": sum(document["source_quality"]["concept_count"] for document in documents),
         "concept_relation_mentions": sum(
             document["source_quality"]["concept_relation_count"] for document in documents
@@ -441,6 +467,11 @@ def build_project_evidence_units(
         min_visual_states=visual_state_min_total,
     )
     link_diagnostics = _evidence_unit_link_diagnostics(documents)
+    ocr_engine_diagnostics = _ocr_engine_diagnostics_summary(
+        documents=documents,
+        visual_entities=visual_entity_rows,
+        entity_links=entity_link_rows,
+    )
     concept_field_coverage = _concept_field_coverage_summary(
         documents=documents,
         concept_graph_records=concept_graph_records,
@@ -486,6 +517,7 @@ def build_project_evidence_units(
         "counts": counts,
         "alignment_status_counts": _status_counts(documents),
         "link_diagnostics": link_diagnostics,
+        "ocr_engine_diagnostics": ocr_engine_diagnostics,
         "concept_field_coverage": concept_field_coverage,
         "search_field_coverage": search_field_coverage,
     }
@@ -886,14 +918,29 @@ def _evidence_unit_document(
         end_time=end_time,
     )
     window_states = [states_by_id[state_id] for state_id in window_state_ids if state_id in states_by_id]
-    visual_entity_rows = _entities_for_states(window_states, entities_by_frame_id)
-    window_links = [
+    state_visual_entity_rows = _entities_for_states(window_states, entities_by_frame_id)
+    raw_window_links = [
         link
         for segment_id in source_segment_ids
         for link in links_by_segment_id.get(segment_id, [])
         if _text(link.get("entity_id")) in entities_by_id
     ]
-    visual_entity_rows = _merge_entities(visual_entity_rows, window_links, entities_by_id)
+    ocr_engine_links = [
+        link for link in raw_window_links if _link_targets_ocr_engine_entity(link, entities_by_id)
+    ]
+    window_links = [
+        link for link in raw_window_links if not _link_targets_ocr_engine_entity(link, entities_by_id)
+    ]
+    visual_entity_rows = _merge_entities(
+        _main_visual_entities(state_visual_entity_rows),
+        window_links,
+        entities_by_id,
+    )
+    ocr_engine_entity_rows = _merge_entities(
+        _ocr_engine_entities(state_visual_entity_rows),
+        ocr_engine_links,
+        entities_by_id,
+    )
     visual_entity_ids = [_text(entity.get("entity_id")) for entity in visual_entity_rows if _text(entity.get("entity_id"))]
 
     link_statuses = {
@@ -925,6 +972,8 @@ def _evidence_unit_document(
     source_quality = _source_quality(
         visual_states=window_states,
         visual_entities=visual_entity_rows,
+        ocr_engine_entities=ocr_engine_entity_rows,
+        ocr_engine_links=ocr_engine_links,
         links=window_links,
         link_statuses=link_statuses,
         concept_context=concept_context,
@@ -1074,6 +1123,24 @@ def _merge_entities(
     return merged
 
 
+def _main_visual_entities(entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [entity for entity in entities if not _is_ocr_engine_entity(entity)]
+
+
+def _ocr_engine_entities(entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [entity for entity in entities if _is_ocr_engine_entity(entity)]
+
+
+def _link_targets_ocr_engine_entity(
+    link: dict[str, Any],
+    entities_by_id: dict[str, dict[str, Any]],
+) -> bool:
+    entity_id = _text(link.get("entity_id"))
+    if not entity_id:
+        return False
+    return _is_ocr_engine_entity(entities_by_id.get(entity_id, {}))
+
+
 def _link_alignment_status(link: dict[str, Any]) -> str:
     explicit_status = _text(
         link.get("alignment_status")
@@ -1111,6 +1178,8 @@ def _source_quality(
     *,
     visual_states: list[dict[str, Any]],
     visual_entities: list[dict[str, Any]],
+    ocr_engine_entities: list[dict[str, Any]],
+    ocr_engine_links: list[dict[str, Any]],
     links: list[dict[str, Any]],
     link_statuses: dict[str, str],
     concept_context: dict[str, Any],
@@ -1120,11 +1189,19 @@ def _source_quality(
         1 for state in visual_states if _text_values([state.get("detected_text")])
     )
     visual_entity_detected_text_count = sum(
-        1 for entity in visual_entities if _text_values([entity.get("detected_text")])
+        1 for entity in visual_entities if _entity_visible_text_values(entity)
+    )
+    vlm_visible_text_count = sum(
+        1
+        for entity in visual_entities
+        if _is_vlm_entity(entity) and _entity_visible_text_values(entity)
     )
     visual_description_count = sum(
         1 for entity in visual_entities if _text(entity.get("visual_description"))
     )
+    ocr_engine_entity_count = len(ocr_engine_entities)
+    ocr_engine_link_count = len(ocr_engine_links)
+    has_ocr_engine_evidence = bool(ocr_engine_entity_count or ocr_engine_link_count)
     candidate_link_count = sum(1 for status in link_statuses.values() if status == "candidate")
     timestamp_fallback_link_count = sum(
         1 for status in link_statuses.values() if status == "timestamp_fallback"
@@ -1159,16 +1236,28 @@ def _source_quality(
         "has_visual_state": bool(visual_states),
         "has_visual_entity": bool(visual_entities),
         "has_vlm_entity": has_vlm_entity,
+        "has_vlm_visible_text": vlm_visible_text_count > 0,
+        "has_ocr_engine_evidence": has_ocr_engine_evidence,
         "has_concept": concept_count > 0,
         "has_concept_relation": concept_relation_count > 0,
         "has_verified_link": any(status == "verified" for status in link_statuses.values()),
-        "uses_ocr_only": bool(visual_entities) and not has_vlm_entity,
+        "uses_ocr_only": has_ocr_engine_evidence and not visual_entities and not has_vlm_entity,
         "has_detected_text": bool(visual_state_detected_text_count or visual_entity_detected_text_count),
         "has_visual_description": bool(visual_description_count),
         "has_concept_search_text": _has_concept_search_text(concept_context),
+        "visual_state_count": len(visual_states),
+        "visual_entity_count": len(visual_entities),
         "visual_state_detected_text_count": visual_state_detected_text_count,
         "visual_entity_detected_text_count": visual_entity_detected_text_count,
+        "visual_entity_visible_text_count": visual_entity_detected_text_count,
+        "vlm_visible_text_count": vlm_visible_text_count,
         "visual_description_count": visual_description_count,
+        "ocr_engine_entity_count": ocr_engine_entity_count,
+        "ocr_engine_link_count": ocr_engine_link_count,
+        "excluded_ocr_engine_entity_count": ocr_engine_entity_count,
+        "excluded_ocr_engine_link_count": ocr_engine_link_count,
+        "ocr_engine_counted_as_candidate_visual_support": False,
+        "ocr_engine_counted_as_verified_object_alignment": False,
         "concept_count": concept_count,
         "concept_label_count": len(_string_list(concept_context.get("concept_labels"))),
         "concept_alias_count": len(_string_list(concept_context.get("concept_aliases"))),
@@ -1186,6 +1275,12 @@ def _source_quality(
             "has_candidate_visual_support": has_candidate_visual_support,
             "visual_state_count": len(visual_states),
             "visual_entity_count": len(visual_entities),
+            "has_vlm_visible_text": vlm_visible_text_count > 0,
+            "vlm_visible_text_count": vlm_visible_text_count,
+            "has_ocr_engine_evidence": has_ocr_engine_evidence,
+            "ocr_engine_entity_count": ocr_engine_entity_count,
+            "ocr_engine_link_count": ocr_engine_link_count,
+            "ocr_engine_counted_as_candidate_visual_support": False,
             "candidate_link_count": candidate_link_count,
             "timestamp_fallback_link_count": timestamp_fallback_link_count,
             "candidate_link_signal_counts": candidate_signal_counts,
@@ -1196,6 +1291,7 @@ def _source_quality(
             "verified_link_count": verified_link_count,
             "verified_link_source_counts": verified_source_counts,
             "timestamp_fallback_counted_as_verified": False,
+            "ocr_engine_counted_as_verified_object_alignment": False,
             "paper_claim_eligible": has_verified_object_alignment,
         },
         "concept_field_coverage": {
@@ -1348,18 +1444,30 @@ def _evidence_unit_link_diagnostics(documents: list[dict[str, Any]]) -> dict[str
     units_with_candidate_link = 0
     units_with_timestamp_fallback_link = 0
     units_with_verified_object_alignment = 0
+    units_with_ocr_engine_evidence = 0
+    units_with_vlm_visible_text = 0
     candidate_links = 0
     timestamp_fallback_links = 0
     verified_links = 0
+    ocr_engine_entity_mentions = 0
+    ocr_engine_links = 0
+    vlm_visible_text_mentions = 0
     for document in documents:
         source_quality = _mapping(document.get("source_quality"))
         candidate_links += int(source_quality.get("candidate_link_count") or 0)
         timestamp_fallback_links += int(source_quality.get("timestamp_fallback_link_count") or 0)
         verified_links += int(source_quality.get("verified_link_count") or 0)
+        ocr_engine_entity_mentions += int(source_quality.get("ocr_engine_entity_count") or 0)
+        ocr_engine_links += int(source_quality.get("ocr_engine_link_count") or 0)
+        vlm_visible_text_mentions += int(source_quality.get("vlm_visible_text_count") or 0)
         if int(source_quality.get("candidate_link_count") or 0) > 0:
             units_with_candidate_link += 1
         if int(source_quality.get("timestamp_fallback_link_count") or 0) > 0:
             units_with_timestamp_fallback_link += 1
+        if source_quality.get("has_ocr_engine_evidence") is True:
+            units_with_ocr_engine_evidence += 1
+        if source_quality.get("has_vlm_visible_text") is True:
+            units_with_vlm_visible_text += 1
 
         support = _mapping(source_quality.get("candidate_visual_support"))
         verified = _mapping(source_quality.get("verified_object_alignment"))
@@ -1394,9 +1502,60 @@ def _evidence_unit_link_diagnostics(documents: list[dict[str, Any]]) -> dict[str
             "timestamp_fallback_counted_as_verified": False,
             "paper_claim_eligible_units": units_with_verified_object_alignment,
         },
+        "vlm_visible_text": {
+            "units_with_vlm_visible_text": units_with_vlm_visible_text,
+            "vlm_visible_text_mentions": vlm_visible_text_mentions,
+        },
+        "excluded_ocr_engine_evidence": {
+            "units_with_ocr_engine_evidence": units_with_ocr_engine_evidence,
+            "ocr_engine_entity_mentions": ocr_engine_entity_mentions,
+            "ocr_engine_links": ocr_engine_links,
+            "counted_as_candidate_visual_support": False,
+            "counted_as_verified_object_alignment": False,
+        },
         "candidate_link_signal_counts": candidate_signal_counts,
         "verified_link_source_counts": verified_source_counts,
         "public_note": LINK_DIAGNOSTICS_PUBLIC_NOTE,
+    }
+
+
+def _ocr_engine_diagnostics_summary(
+    *,
+    documents: list[dict[str, Any]],
+    visual_entities: list[dict[str, Any]],
+    entity_links: list[dict[str, Any]],
+) -> dict[str, Any]:
+    ocr_entity_ids = {
+        _text(entity.get("entity_id"))
+        for entity in visual_entities
+        if _is_ocr_engine_entity(entity) and _text(entity.get("entity_id"))
+    }
+    ocr_link_count = sum(
+        1 for link in entity_links if _text(link.get("entity_id")) in ocr_entity_ids
+    )
+    return {
+        "source": "visual_entities_artifact",
+        "role": "baseline_fallback_diagnostic_only",
+        "main_path_excludes_ocr_engine_entities": True,
+        "input_ocr_engine_entities_total": len(ocr_entity_ids),
+        "input_ocr_engine_links_total": ocr_link_count,
+        "evidence_units_with_ocr_engine_evidence": sum(
+            1
+            for document in documents
+            if _mapping(document.get("source_quality")).get("has_ocr_engine_evidence")
+            is True
+        ),
+        "ocr_engine_entity_mentions": sum(
+            int(_mapping(document.get("source_quality")).get("ocr_engine_entity_count") or 0)
+            for document in documents
+        ),
+        "ocr_engine_link_mentions": sum(
+            int(_mapping(document.get("source_quality")).get("ocr_engine_link_count") or 0)
+            for document in documents
+        ),
+        "counted_as_candidate_visual_support": False,
+        "counted_as_verified_object_alignment": False,
+        "public_note": OCR_ENGINE_DIAGNOSTICS_PUBLIC_NOTE,
     }
 
 
@@ -1545,6 +1704,29 @@ def _is_vlm_entity(entity: dict[str, Any]) -> bool:
     return is_paper_quality_vlm_entity(entity)
 
 
+def _is_ocr_engine_entity(entity: dict[str, Any]) -> bool:
+    if not isinstance(entity, dict):
+        return False
+    if _is_vlm_entity(entity):
+        return False
+    source = _text(entity.get("source")).casefold()
+    backend = _text(entity.get("backend")).casefold()
+    parser_version = _text(entity.get("parser_version")).casefold()
+    entity_type = _text(entity.get("entity_type")).casefold()
+    source_markers = (source, backend, parser_version)
+    source_values = " ".join(source_markers)
+    return bool(
+        any(marker.startswith(("ocr", "local-ocr")) for marker in source_markers if marker)
+        or "tesseract" in source_values
+        or "local-ocr" in source_values
+        or (entity_type == "ocr_text" and not _is_vlm_entity(entity))
+    )
+
+
+def _entity_visible_text_values(entity: dict[str, Any]) -> list[str]:
+    return _text_values([entity.get("visible_text"), entity.get("detected_text")])
+
+
 def _visual_state_context(state: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -1572,6 +1754,7 @@ def _visual_entity_context(entity: dict[str, Any]) -> dict[str, Any]:
             "entity_type": entity.get("entity_type"),
             "text": entity.get("text"),
             "visual_description": entity.get("visual_description"),
+            "visible_text": entity.get("visible_text"),
             "position": entity.get("position"),
             "relations": entity.get("relations"),
             "detected_text": entity.get("detected_text"),
@@ -1615,6 +1798,7 @@ def _visual_entity_summary_text(visual_entities: list[dict[str, Any]]) -> str:
                 entity.get("text"),
                 entity.get("visual_description"),
                 entity.get("entity_type"),
+                entity.get("visible_text"),
                 entity.get("detected_text"),
                 entity.get("position"),
                 entity.get("relations"),
@@ -2056,6 +2240,7 @@ def _update_project_manifest(
         "counts": summary["counts"],
         "alignment_status_counts": summary["alignment_status_counts"],
         "link_diagnostics": summary["link_diagnostics"],
+        "ocr_engine_diagnostics": summary["ocr_engine_diagnostics"],
         "concept_field_coverage": summary["concept_field_coverage"],
         "search_field_coverage": summary["search_field_coverage"],
     }

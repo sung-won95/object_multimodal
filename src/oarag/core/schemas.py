@@ -47,6 +47,7 @@ VLM_JSONL_ARTIFACT_CONTRACT = {
             "observation_id",
             "observation_type",
             "visual_description",
+            "visible_text",
             "detected_text",
             "bbox",
             "position",
@@ -464,6 +465,8 @@ class VisualEntity:
 
         visual_description = payload.get("visual_description")
         detected_text = payload.get("detected_text")
+        if detected_text is None:
+            detected_text = payload.get("visible_text")
         parser_version = payload.get("parser_version")
         source_model = payload.get("source_model")
 
@@ -576,7 +579,7 @@ class VLMVisualObservation:
             status=str(payload.get("status", "")),
             observation_type=str(payload.get("observation_type", "")),
             visual_description=str(payload.get("visual_description", "")),
-            detected_text=_optional_str(payload.get("detected_text")),
+            detected_text=_optional_str(payload.get("detected_text") or payload.get("visible_text")),
             bbox=_float_mapping_or_none(payload.get("bbox")),
             position=_optional_mapping(payload.get("position")),
             attributes=_mapping(payload.get("attributes")),

@@ -391,12 +391,19 @@ def test_evidence_unit_settings_payload_indexes_enriched_search_fields() -> None
         "transcript_keywords",
         "visual_state_text",
         "visual_entity_text",
+        "visual_entities.visible_text",
         "visual_entities.detected_text",
         "visual_states.detected_text",
         "candidate_link_signal_summary",
         "verified_link_signal_summary",
     ]:
         assert field in settings["searchableAttributes"]
+    for field in [
+        "source_quality.has_vlm_visible_text",
+        "source_quality.has_ocr_engine_evidence",
+        "source_quality.uses_ocr_only",
+    ]:
+        assert field in settings["filterableAttributes"]
     assert "source_video_path" not in settings["displayedAttributes"]
     assert settings["rankingRules"] == [
         "words",
