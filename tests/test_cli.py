@@ -1624,6 +1624,24 @@ def test_audit_paper_readiness_cli_accepts_bundle_paths() -> None:
     assert args.fail_on_gap is True
 
 
+def test_check_retrieval_gate_cli_accepts_semantic_smoke_path() -> None:
+    args = build_parser().parse_args(
+        [
+            "check-retrieval-gate",
+            "--metrics",
+            "reports/paper/dev/metrics.json",
+            "--config",
+            "reports/paper/dev/retrieval_quality_gate.json",
+            "--semantic-smoke",
+            "reports/paper/dev/semantic_smoke.json",
+        ]
+    )
+
+    assert str(args.metrics) == "reports/paper/dev/metrics.json"
+    assert str(args.config) == "reports/paper/dev/retrieval_quality_gate.json"
+    assert str(args.semantic_smoke) == "reports/paper/dev/semantic_smoke.json"
+
+
 def test_eval_eduvidqa_cli_accepts_diagnostic_options() -> None:
     args = build_parser().parse_args(
         [

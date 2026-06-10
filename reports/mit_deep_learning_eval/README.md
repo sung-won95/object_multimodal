@@ -25,10 +25,21 @@ PYTHONPATH=src python3 -m oarag run-paper-bundle \
   --seed 139
 ```
 
-The default gate in `paper_matrix_v1/retrieval_quality_gate.json` is a completeness
-guard for bundle continuity, not a final paper performance threshold. Treat a bundle
-as paper-ready only when the generated registry, readiness audit, claim matrix, and
-robustness intervals all support the intended claim.
+The gate in `paper_matrix_v1/retrieval_quality_gate.json` is a regression guard
+derived from the #267 48-query provider-backed run. Run it immediately after every
+benchmark or paper bundle generation, using the `semantic_smoke.json` produced by the
+same run:
+
+```bash
+PYTHONPATH=src python3 -m oarag check-retrieval-gate \
+  --metrics reports/mit_deep_learning_eval/full_provider_matrix_v1/metrics.json \
+  --config reports/mit_deep_learning_eval/paper_matrix_v1/retrieval_quality_gate.json \
+  --semantic-smoke reports/mit_deep_learning_eval/full_provider_matrix_v1/semantic_smoke.json
+```
+
+Treat a bundle as paper-ready only when the generated registry, readiness audit,
+claim matrix, robustness intervals, and retrieval gate all support the intended
+claim.
 
 For dynamic concept graph diagnostics, use `cross-lecture-retrieval-smoke` and keep
 Meili-only, Graph-only, Meili+Graph, and graph-aware rerank results separate from the

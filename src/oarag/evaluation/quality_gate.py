@@ -17,25 +17,42 @@ DEFAULT_RETRIEVAL_ANSWER_MATRIX_VARIANTS = [
 ]
 
 
-def check_retrieval_quality_gate(*, metrics_path: Path, config_path: Path) -> dict[str, Any]:
+def check_retrieval_quality_gate(
+    *,
+    metrics_path: Path,
+    config_path: Path,
+    semantic_smoke_path: Path | None = None,
+) -> dict[str, Any]:
     """Load aggregate benchmark metrics and evaluate the retrieval quality gate."""
     metrics = _read_json(metrics_path)
     config = _read_json(config_path)
-    return evaluate_retrieval_quality_gate(metrics=metrics, config=config)
+    semantic_smoke = _read_json(semantic_smoke_path) if semantic_smoke_path is not None else None
+    return evaluate_retrieval_quality_gate(
+        metrics=metrics,
+        config=config,
+        semantic_smoke=semantic_smoke,
+    )
 
 
 def evaluate_retrieval_quality_gate(
     *,
     metrics: Mapping[str, Any],
     config: Mapping[str, Any],
+    semantic_smoke: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate aggregate retrieval benchmark metrics against public fixture thresholds."""
+    """Evaluate aggregate retrieval benchmark metrics against regression thresholds."""
     gate_id = str(config.get("gate_id") or "retrieval_quality_gate")
     note = str(config.get("note") or PUBLIC_FIXTURE_GATE_NOTE)
     suites = _list_of_dicts(metrics.get("suites"))
     configured_suites = _configured_suites(config)
     failures: list[dict[str, Any]] = []
     checked_suites: list[dict[str, Any]] = []
+    semantic_smoke_result = _evaluate_semantic_smoke_gate(
+        suites=suites,
+        config=config,
+        semantic_smoke=semantic_smoke,
+        failures=failures,
+    )
 
     if not suites:
         failures.append(
@@ -63,6 +80,7 @@ def evaluate_retrieval_quality_gate(
         "failure_count": len(failures),
         "failures": failures,
         "checked_suites": checked_suites,
+        "semantic_smoke": semantic_smoke_result,
         "privacy": {
             "payload": "aggregate_metrics_only",
             "query_content": "excluded",
@@ -80,7 +98,19 @@ def _evaluate_suite_gate(
 ) -> dict[str, Any]:
     selector = _suite_selector(suite_config)
     expected_schema = str(suite_config.get("schema_version") or MATRIX_SCHEMA_VERSION)
-    thresholds = _metric_thresholds(suite_config)
+    thresholds = _threshold_specs(
+        suite_config.get("thresholds", suite_config.get("metric_thresholds")),
+        scope="suite",
+        failures=failures,
+        suite_id=selector.get("suite_id"),
+        suite_type=selector.get("suite_type"),
+    )
+    variant_thresholds = _variant_threshold_specs(
+        suite_config.get("variant_thresholds"),
+        failures=failures,
+        suite_id=selector.get("suite_id"),
+        suite_type=selector.get("suite_type"),
+    )
     required_variants = _required_variants(suite_config)
     suite = _find_suite(suites=suites, selector=selector)
     suite_result: dict[str, Any] = {
@@ -88,8 +118,13 @@ def _evaluate_suite_gate(
         "suite_type": selector.get("suite_type"),
         "expected_schema_version": expected_schema,
         "required_variants": required_variants,
-        "thresholds": thresholds,
+        "thresholds": _threshold_values(thresholds),
+        "variant_thresholds": {
+            variant_id: _threshold_values(specs)
+            for variant_id, specs in variant_thresholds.items()
+        },
         "found": suite is not None,
+        "checked_metrics": {},
         "checked_variants": [],
     }
 
@@ -114,6 +149,7 @@ def _evaluate_suite_gate(
     suite_result["schema_version"] = _optional_text(suite.get("schema_version"))
     suite_result["query_count"] = _optional_int(suite.get("query_count"))
     suite_result["variant_count"] = _optional_int(suite.get("variant_count"))
+    suite_result["skipped_count"] = _optional_int(suite.get("skipped_count"))
 
     if "schema_version" not in suite:
         failures.append(
@@ -139,6 +175,15 @@ def _evaluate_suite_gate(
                 suite_type=suite_type,
             )
         )
+
+    suite_result["checked_metrics"] = _evaluate_metric_thresholds(
+        metric_payload=suite,
+        thresholds=thresholds,
+        failures=failures,
+        suite_id=suite_id,
+        suite_type=suite_type,
+        variant_id=None,
+    )
 
     variant_metrics = _variant_metrics_by_id(suite)
     if not variant_metrics:
@@ -172,74 +217,32 @@ def _evaluate_suite_gate(
             checked_variants.append(variant_result)
             continue
 
-        for metric_name, threshold in thresholds.items():
-            if metric_name not in variant_metric:
-                failures.append(
-                    _failure(
-                        code="metric_missing",
-                        message=(
-                            f"suite={suite_id} variant={variant_id} missing metric={metric_name}"
-                        ),
-                        suite_id=suite_id,
-                        suite_type=suite_type,
-                        variant_id=variant_id,
-                        metric=metric_name,
-                        threshold=threshold,
-                    )
+        skipped_count = _optional_int(variant_metric.get("skipped_count")) or 0
+        variant_result["skipped_count"] = skipped_count
+        if skipped_count > 0:
+            failures.append(
+                _failure(
+                    code="required_variant_skipped",
+                    message=(
+                        f"suite={suite_id} required variant={variant_id} "
+                        f"has skipped_count={skipped_count}"
+                    ),
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                    variant_id=variant_id,
+                    value=float(skipped_count),
+                    threshold=0.0,
                 )
-                variant_result["metrics"][metric_name] = {
-                    "threshold": threshold,
-                    "value": None,
-                    "passed": False,
-                }
-                continue
+            )
 
-            value = variant_metric.get(metric_name)
-            if not _is_number(value):
-                failures.append(
-                    _failure(
-                        code="metric_not_numeric",
-                        message=(
-                            f"suite={suite_id} variant={variant_id} metric={metric_name} "
-                            "is not numeric"
-                        ),
-                        suite_id=suite_id,
-                        suite_type=suite_type,
-                        variant_id=variant_id,
-                        metric=metric_name,
-                        threshold=threshold,
-                    )
-                )
-                variant_result["metrics"][metric_name] = {
-                    "threshold": threshold,
-                    "value": None,
-                    "passed": False,
-                }
-                continue
-
-            numeric_value = round(float(value), 4)
-            passed = numeric_value >= threshold
-            variant_result["metrics"][metric_name] = {
-                "threshold": threshold,
-                "value": numeric_value,
-                "passed": passed,
-            }
-            if not passed:
-                failures.append(
-                    _failure(
-                        code="metric_below_threshold",
-                        message=(
-                            f"suite={suite_id} variant={variant_id} metric={metric_name} "
-                            f"value={numeric_value} below public fixture guard threshold={threshold}"
-                        ),
-                        suite_id=suite_id,
-                        suite_type=suite_type,
-                        variant_id=variant_id,
-                        metric=metric_name,
-                        value=numeric_value,
-                        threshold=threshold,
-                    )
-                )
+        variant_result["metrics"] = _evaluate_metric_thresholds(
+            metric_payload=variant_metric,
+            thresholds=variant_thresholds.get(variant_id, {}),
+            failures=failures,
+            suite_id=suite_id,
+            suite_type=suite_type,
+            variant_id=variant_id,
+        )
 
         checked_variants.append(variant_result)
 
@@ -265,19 +268,349 @@ def _suite_selector(suite_config: Mapping[str, Any]) -> dict[str, str | None]:
     return {"suite_id": suite_id, "suite_type": suite_type}
 
 
-def _metric_thresholds(suite_config: Mapping[str, Any]) -> dict[str, float]:
-    raw_thresholds = suite_config.get("thresholds", suite_config.get("metric_thresholds"))
+def _threshold_specs(
+    raw_thresholds: Any,
+    *,
+    scope: str,
+    failures: list[dict[str, Any]],
+    suite_id: str | None,
+    suite_type: str | None,
+    variant_id: str | None = None,
+) -> dict[str, dict[str, Any]]:
     if not isinstance(raw_thresholds, Mapping) or not raw_thresholds:
-        raise ValueError("retrieval quality gate suite config requires metric thresholds")
-    thresholds: dict[str, float] = {}
-    for raw_name, raw_value in raw_thresholds.items():
+        if scope == "suite":
+            failures.append(
+                _failure(
+                    code="thresholds_missing",
+                    message="retrieval quality gate suite config requires metric thresholds",
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                )
+            )
+        return {}
+    thresholds: dict[str, dict[str, Any]] = {}
+    for raw_name, raw_spec in raw_thresholds.items():
         metric_name = str(raw_name).strip()
         if not metric_name:
-            raise ValueError("retrieval quality gate metric threshold has an empty metric name")
+            failures.append(
+                _failure(
+                    code="threshold_metric_name_empty",
+                    message="retrieval quality gate metric threshold has an empty metric name",
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                    variant_id=variant_id,
+                )
+            )
+            continue
+
+        if isinstance(raw_spec, Mapping):
+            raw_value = raw_spec.get("threshold")
+            allow_zero = raw_spec.get("allow_zero_threshold") is True
+            reason = _optional_text(raw_spec.get("reason") or raw_spec.get("note"))
+        else:
+            raw_value = raw_spec
+            allow_zero = False
+            reason = None
+
         if not _is_number(raw_value):
-            raise ValueError(f"retrieval quality gate threshold for {metric_name} must be numeric")
-        thresholds[metric_name] = round(float(raw_value), 4)
+            failures.append(
+                _failure(
+                    code="threshold_not_numeric",
+                    message=f"retrieval quality gate threshold for {metric_name} must be numeric",
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                    variant_id=variant_id,
+                    metric=metric_name,
+                )
+            )
+            continue
+
+        threshold = round(float(raw_value), 4)
+        if threshold < 0:
+            failures.append(
+                _failure(
+                    code="threshold_negative",
+                    message=(
+                        f"suite={suite_id} variant={variant_id or '*'} metric={metric_name} "
+                        f"has negative threshold={threshold}"
+                    ),
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                    variant_id=variant_id,
+                    metric=metric_name,
+                    threshold=threshold,
+                )
+            )
+        if threshold == 0 and (not allow_zero or scope != "variant"):
+            reason_suffix = (
+                " without allow_zero_threshold=true"
+                if not allow_zero
+                else "; zero thresholds are only allowed for variant-specific metrics"
+            )
+            failures.append(
+                _failure(
+                    code="zero_threshold_not_allowed",
+                    message=(
+                        f"suite={suite_id} variant={variant_id or '*'} metric={metric_name} "
+                        f"uses threshold=0{reason_suffix}"
+                    ),
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                    variant_id=variant_id,
+                    metric=metric_name,
+                    threshold=threshold,
+                )
+            )
+        if threshold == 0 and allow_zero and scope == "variant" and not reason:
+            failures.append(
+                _failure(
+                    code="zero_threshold_reason_missing",
+                    message=(
+                        f"suite={suite_id} variant={variant_id or '*'} metric={metric_name} "
+                        "allows threshold=0 but is missing a public-safe reason"
+                    ),
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                    variant_id=variant_id,
+                    metric=metric_name,
+                    threshold=threshold,
+                )
+            )
+
+        thresholds[metric_name] = {
+            "threshold": threshold,
+            "allow_zero_threshold": allow_zero,
+            "reason": reason,
+        }
     return thresholds
+
+
+def _variant_threshold_specs(
+    raw_variant_thresholds: Any,
+    *,
+    failures: list[dict[str, Any]],
+    suite_id: str | None,
+    suite_type: str | None,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    if raw_variant_thresholds is None:
+        return {}
+    if not isinstance(raw_variant_thresholds, Mapping):
+        failures.append(
+            _failure(
+                code="variant_thresholds_not_object",
+                message="retrieval quality gate variant_thresholds must be a JSON object",
+                suite_id=suite_id,
+                suite_type=suite_type,
+            )
+        )
+        return {}
+    return {
+        str(raw_variant_id): _threshold_specs(
+            raw_thresholds,
+            scope="variant",
+            failures=failures,
+            suite_id=suite_id,
+            suite_type=suite_type,
+            variant_id=str(raw_variant_id),
+        )
+        for raw_variant_id, raw_thresholds in raw_variant_thresholds.items()
+    }
+
+
+def _threshold_values(thresholds: Mapping[str, Mapping[str, Any]]) -> dict[str, float]:
+    return {
+        metric_name: float(spec["threshold"])
+        for metric_name, spec in thresholds.items()
+        if _is_number(spec.get("threshold"))
+    }
+
+
+def _evaluate_metric_thresholds(
+    *,
+    metric_payload: Mapping[str, Any],
+    thresholds: Mapping[str, Mapping[str, Any]],
+    failures: list[dict[str, Any]],
+    suite_id: str | None,
+    suite_type: str | None,
+    variant_id: str | None,
+) -> dict[str, dict[str, Any]]:
+    checked: dict[str, dict[str, Any]] = {}
+    for metric_name, spec in thresholds.items():
+        threshold = float(spec["threshold"])
+        if metric_name not in metric_payload:
+            failures.append(
+                _failure(
+                    code="metric_missing",
+                    message=_metric_message(
+                        suite_id=suite_id,
+                        variant_id=variant_id,
+                        metric_name=metric_name,
+                        suffix="missing metric",
+                    ),
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                    variant_id=variant_id,
+                    metric=metric_name,
+                    threshold=threshold,
+                )
+            )
+            checked[metric_name] = {
+                "threshold": threshold,
+                "value": None,
+                "passed": False,
+            }
+            continue
+
+        value = metric_payload.get(metric_name)
+        if not _is_number(value):
+            failures.append(
+                _failure(
+                    code="metric_not_numeric",
+                    message=_metric_message(
+                        suite_id=suite_id,
+                        variant_id=variant_id,
+                        metric_name=metric_name,
+                        suffix="is not numeric",
+                    ),
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                    variant_id=variant_id,
+                    metric=metric_name,
+                    threshold=threshold,
+                )
+            )
+            checked[metric_name] = {
+                "threshold": threshold,
+                "value": None,
+                "passed": False,
+            }
+            continue
+
+        numeric_value = round(float(value), 4)
+        passed = numeric_value >= threshold
+        checked[metric_name] = {
+            "threshold": threshold,
+            "value": numeric_value,
+            "passed": passed,
+        }
+        if not passed:
+            failures.append(
+                _failure(
+                    code="metric_below_threshold",
+                    message=(
+                        f"suite={suite_id} variant={variant_id or '*'} metric={metric_name} "
+                        f"value={numeric_value} below regression threshold={threshold}"
+                    ),
+                    suite_id=suite_id,
+                    suite_type=suite_type,
+                    variant_id=variant_id,
+                    metric=metric_name,
+                    value=numeric_value,
+                    threshold=threshold,
+                )
+            )
+    return checked
+
+
+def _metric_message(
+    *,
+    suite_id: str | None,
+    variant_id: str | None,
+    metric_name: str,
+    suffix: str,
+) -> str:
+    if variant_id is None:
+        return f"suite={suite_id} metric={metric_name} {suffix}"
+    return f"suite={suite_id} variant={variant_id} metric={metric_name} {suffix}"
+
+
+def _evaluate_semantic_smoke_gate(
+    *,
+    suites: list[dict[str, Any]],
+    config: Mapping[str, Any],
+    semantic_smoke: Mapping[str, Any] | None,
+    failures: list[dict[str, Any]],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "provided": semantic_smoke is not None,
+        "provider_backed": None,
+        "hybrid_metric_reported": False,
+        "hybrid_variant_ids": [],
+    }
+    if semantic_smoke is None:
+        return result
+
+    smoke_block = semantic_smoke.get("semantic_live_smoke")
+    provider_backed = (
+        isinstance(smoke_block, Mapping)
+        and smoke_block.get("provider_backed") is True
+    )
+    result["provider_backed"] = provider_backed
+    hybrid_variant_ids = _hybrid_variant_ids(
+        suites=suites,
+        config=config,
+        semantic_smoke=semantic_smoke,
+    )
+    result["hybrid_variant_ids"] = sorted(hybrid_variant_ids)
+    hybrid_metric_reported = _hybrid_metric_reported(
+        suites=suites,
+        hybrid_variant_ids=hybrid_variant_ids,
+    )
+    result["hybrid_metric_reported"] = hybrid_metric_reported
+
+    if provider_backed is False and hybrid_metric_reported:
+        failures.append(
+            _failure(
+                code="semantic_smoke_provider_unbacked_hybrid_metrics",
+                message=(
+                    "semantic_smoke provider_backed=false but hybrid variant metrics "
+                    "are present in metrics payload"
+                ),
+            )
+        )
+    return result
+
+
+def _hybrid_variant_ids(
+    *,
+    suites: list[dict[str, Any]],
+    config: Mapping[str, Any],
+    semantic_smoke: Mapping[str, Any],
+) -> set[str]:
+    variant_ids: set[str] = set()
+    raw_smoke_ids = semantic_smoke.get("hybrid_variant_ids")
+    if isinstance(raw_smoke_ids, list):
+        variant_ids.update(str(item) for item in raw_smoke_ids if str(item).strip())
+    raw_config_ids = config.get("hybrid_variant_ids")
+    if isinstance(raw_config_ids, list):
+        variant_ids.update(str(item) for item in raw_config_ids if str(item).strip())
+    for suite in suites:
+        for variant_id in _variant_metrics_by_id(suite):
+            if "hybrid" in variant_id:
+                variant_ids.add(variant_id)
+    return variant_ids
+
+
+def _hybrid_metric_reported(
+    *,
+    suites: list[dict[str, Any]],
+    hybrid_variant_ids: set[str],
+) -> bool:
+    if not hybrid_variant_ids:
+        return False
+    metric_names = {
+        "hit_at_10s",
+        "mrr_at_max_delta",
+        "grounded_answer_ratio",
+        "expected_citation_hit_ratio",
+    }
+    for suite in suites:
+        for variant_id, variant_metric in _variant_metrics_by_id(suite).items():
+            if variant_id not in hybrid_variant_ids:
+                continue
+            if any(_is_number(variant_metric.get(metric_name)) for metric_name in metric_names):
+                return True
+    return False
 
 
 def _required_variants(suite_config: Mapping[str, Any]) -> list[str]:

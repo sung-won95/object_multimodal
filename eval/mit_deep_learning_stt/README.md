@@ -173,8 +173,20 @@ python -m oarag run-paper-bundle \
   --baseline-variant-id segment_lexical
 ```
 
+Run the retrieval quality gate as a required post-benchmark step with the
+`semantic_smoke.json` from the same output directory:
+
+```bash
+python -m oarag check-retrieval-gate \
+  --metrics reports/mit_deep_learning_eval/full_provider_matrix_v1/metrics.json \
+  --config reports/mit_deep_learning_eval/paper_matrix_v1/retrieval_quality_gate.json \
+  --semantic-smoke reports/mit_deep_learning_eval/full_provider_matrix_v1/semantic_smoke.json
+```
+
 `reports/mit_deep_learning_eval/paper_matrix_v1/retrieval_quality_gate.json` is a
-bundle-completeness guard, not a final paper performance threshold.
+#267-derived regression guard. Suite aggregate thresholds cover retrieval quality
+floors, and variant-specific thresholds preserve observed variant behavior; zero
+variant thresholds require an explicit public-safe allowance.
 
 ## Caveat
 

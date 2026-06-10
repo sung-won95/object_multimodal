@@ -287,6 +287,7 @@ def test_run_paper_bundle_public_fixture_writes_private_safe_bundle(
         sample_count=100,
         seed=7,
         repo_root=Path.cwd(),
+        fail_on_gate=False,
         command=[
             "oarag",
             "run-paper-bundle",
@@ -308,9 +309,9 @@ def test_run_paper_bundle_public_fixture_writes_private_safe_bundle(
     assert run.metric_intervals.payload["status"] == "needs_evidence"
     assert run.claims.payload["summary"]["robustness_status"] == "needs_evidence"
     assert run.registry.payload["status"] == {
-        "gate": "passed",
-        "readiness": "ready",
-        "claims": "needs_evidence",
+        "gate": "failed",
+        "readiness": "gaps_found",
+        "claims": "blocked",
         "robustness": "needs_evidence",
     }
     assert run.registry.payload["status_links"]["robustness"] == {
@@ -432,7 +433,8 @@ def test_mit_paper_bundle_manifest_and_skeleton_contract_are_private_safe() -> N
 
     gate_path = Path("reports/mit_deep_learning_eval/paper_matrix_v1/retrieval_quality_gate.json")
     gate = json.loads(gate_path.read_text(encoding="utf-8"))
-    assert gate["gate_id"] == "mit_deep_learning_stt_paper_matrix_completeness_gate_v1"
+    assert gate["gate_id"] == "mit_deep_learning_stt_paper_matrix_regression_gate_v1"
+    assert gate["baseline_artifact"]["query_count"] == 48
     assert len(gate["suites"]) == len(suites)
     assert {suite["suite_id"] for suite in gate["suites"]} == {
         suite["suite_id"] for suite in suites
@@ -445,10 +447,28 @@ def test_mit_paper_bundle_manifest_and_skeleton_contract_are_private_safe() -> N
             "hit_at_10s",
             "mrr_at_max_delta",
             "grounded_answer_ratio",
-            "expected_citation_hit_ratio",
         }
         for suite in gate["suites"]
     )
+    assert all(
+        threshold > 0
+        for suite in gate["suites"]
+        for threshold in suite["thresholds"].values()
+    )
+    assert all(
+        set(suite["variant_thresholds"]) == set(MIT_PAPER_MATRIX_VARIANTS)
+        for suite in gate["suites"]
+    )
+    zero_specs = [
+        spec
+        for suite in gate["suites"]
+        for variant_thresholds in suite["variant_thresholds"].values()
+        for spec in variant_thresholds.values()
+        if isinstance(spec, dict) and spec.get("threshold") == 0
+    ]
+    assert zero_specs
+    assert all(spec.get("allow_zero_threshold") is True for spec in zero_specs)
+    assert all(spec.get("reason") for spec in zero_specs)
 
     expected_artifacts_path = Path(
         "reports/mit_deep_learning_eval/paper_matrix_v1/expected_artifacts.json"

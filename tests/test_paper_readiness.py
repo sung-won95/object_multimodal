@@ -212,6 +212,7 @@ def test_paper_readiness_audit_public_fixture_writes_private_safe_reports(
         run_id="paper_readiness_fixture",
         gate_config_path=fixture_dir / "retrieval_quality_gate.json",
         repo_root=Path.cwd(),
+        fail_on_gate=False,
         command=[
             "oarag",
             "run-paper-experiment",
@@ -228,12 +229,13 @@ def test_paper_readiness_audit_public_fixture_writes_private_safe_reports(
     )
 
     assert audit.payload["schema_version"] == "paper-readiness-audit-v1"
-    assert audit.payload["ready"] is True
-    assert audit.payload["gap_count"] == 0
+    assert audit.payload["ready"] is False
+    assert audit.payload["gap_count"] == 1
+    assert audit.payload["gaps"][0]["code"] == "quality_gate_not_passed"
     assert "not a paper acceptance guarantee" in audit.payload["disclaimer"]
     assert audit.json_path == audit_dir / "paper_readiness_audit.json"
     assert audit.markdown_path == audit_dir / "paper_readiness_audit.md"
-    assert {check["status"] for check in audit.payload["checks"]} == {"pass"}
+    assert {check["status"] for check in audit.payload["checks"]} == {"pass", "fail"}
 
     semantic_check = next(
         check for check in audit.payload["checks"] if check["id"] == "semantic_live_smoke_evidence"

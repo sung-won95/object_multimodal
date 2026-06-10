@@ -79,6 +79,7 @@ def run_paper_experiment(
             quality_gate_result = check_retrieval_quality_gate(
                 metrics_path=benchmark.metrics_path,
                 config_path=gate_config_path,
+                semantic_smoke_path=benchmark.semantic_smoke_path,
             )
             gate_stage_status = "passed" if quality_gate_result.get("passed") else "failed"
         write_json(quality_gate_result_path, quality_gate_result)
