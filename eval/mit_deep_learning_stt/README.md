@@ -64,6 +64,24 @@ timestamp correction if corrections were made. The current 48-row seed is
 expected to fail this completion gate until a real person audits the expanded
 labels.
 
+## Expanded Candidate Packet
+
+Create the automatic 240-row candidate packet for human audit with:
+
+```bash
+python scripts/prepare_mit_deep_learning_eval_expansion_candidates.py \
+  --manifest eval/mit_deep_learning_stt/benchmark_matrix_manifest.json \
+  --output-dir eval/mit_deep_learning_stt/candidates/expanded_seed_v1
+```
+
+The generated `candidates/expanded_seed_v1/queries_candidate.csv` is a
+pre-audit candidate set and does not replace `queries.csv`. It should satisfy
+the row/video/per-video/question-type shape requirements, but it is expected to
+fail the final validator gate because all labels are `codex_*` generated and no
+human audit summary exists yet. Use `human_audit_sample.csv` as the initial
+48-row audit packet, then create a separate human-audited expanded CSV before
+using the expansion in benchmark claims or closing #270.
+
 ## Public-Safe Evidence-Unit Slice
 
 `mit_lec01_02_public_safe_eval_slice.json` fixes 24 query targets across two MIT
