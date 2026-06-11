@@ -28,6 +28,10 @@ from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_
 from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
 from oarag.evaluation.eval import candidate_diagnostics, evaluate_query, summarize
 from oarag.vision.entity_links import link_entities
+from oarag.vision.strict_deterministic_verifier import (
+    DEFAULT_STRICT_LEXICAL_OVERLAP_THRESHOLD,
+    verify_entity_links_strict_deterministic,
+)
 from oarag.retrieval.evidence import build_evidence_response
 from oarag.graph.concept_extraction import extract_project_concept_candidates
 from oarag.graph.concept_graph_ingest import ingest_concept_graph
@@ -1134,6 +1138,53 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional domain_lexicon.json path. Relative paths are resolved from project dir.",
     )
     entity_links.set_defaults(func=cmd_link_entities)
+
+    strict_link_verifier = subparsers.add_parser(
+        "verify-entity-links-strict",
+        help="Promote candidate entity links with a strict deterministic text-overlap rule",
+    )
+    location = strict_link_verifier.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    strict_link_verifier.add_argument(
+        "--entity-links",
+        type=Path,
+        help="Input candidate entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    strict_link_verifier.add_argument(
+        "--segments",
+        type=Path,
+        help="Input segment JSONL path. Relative paths are resolved from project dir.",
+    )
+    strict_link_verifier.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Input visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    strict_link_verifier.add_argument(
+        "--output",
+        type=Path,
+        help="Output verified entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    strict_link_verifier.add_argument(
+        "--report",
+        type=Path,
+        help="Optional public-safe JSON report path. Relative paths are resolved from project dir.",
+    )
+    strict_link_verifier.add_argument(
+        "--lexical-overlap-threshold",
+        type=float,
+        default=DEFAULT_STRICT_LEXICAL_OVERLAP_THRESHOLD,
+        help="Minimum visual-text term coverage required for deterministic promotion.",
+    )
+    strict_link_verifier.add_argument(
+        "--sweep-threshold",
+        type=float,
+        action="append",
+        dest="sweep_thresholds",
+        help="Threshold to include in the public-safe sweep report. Repeat to add values.",
+    )
+    strict_link_verifier.set_defaults(func=cmd_verify_entity_links_strict)
 
     query = subparsers.add_parser("query", help="Search one query")
     query.add_argument("--index", required=True)
@@ -2647,6 +2698,21 @@ def cmd_link_entities(args: argparse.Namespace) -> None:
         output_path=args.output,
         manifest_path=args.manifest,
         domain_lexicon_path=args.domain_lexicon,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_verify_entity_links_strict(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = verify_entity_links_strict_deterministic(
+        project_dir=project_dir,
+        entity_links_path=args.entity_links,
+        segments_path=args.segments,
+        visual_entities_path=args.visual_entities,
+        output_path=args.output,
+        report_path=args.report,
+        lexical_overlap_threshold=args.lexical_overlap_threshold,
+        sweep_thresholds=args.sweep_thresholds,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

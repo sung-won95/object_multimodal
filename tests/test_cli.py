@@ -9,6 +9,7 @@ from oarag.cli import (
     cmd_build_project_evidence_units,
     cmd_build_project_visual_states,
     cmd_build_project_windows,
+    cmd_verify_entity_links_strict,
     cmd_concept_graph_ingest,
     cmd_extract_concept_candidates,
     cmd_merge_cross_lecture_concepts,
@@ -578,6 +579,62 @@ def test_cmd_build_project_evidence_units_forwards_inputs(monkeypatch, capsys) -
     assert calls["build_kwargs"]["previous_neighbor_count"] == 2
     assert calls["build_kwargs"]["next_neighbor_count"] == 0
     assert json.loads(capsys.readouterr().out)["counts"]["evidence_units_total"] == 1
+
+
+def test_verify_entity_links_strict_cli_forwards_inputs(monkeypatch, capsys) -> None:
+    calls = {}
+    project_dir = Path("/tmp/project")
+
+    def fake_project_dir_from_args(*, project_id, project_dir):
+        calls["location"] = (project_id, project_dir)
+        return Path("/tmp/project")
+
+    def fake_verify_entity_links_strict_deterministic(**kwargs):
+        calls["verify_kwargs"] = kwargs
+        return {"counts": {"promoted_links": 1}}
+
+    monkeypatch.setattr("oarag.cli.project_dir_from_args", fake_project_dir_from_args)
+    monkeypatch.setattr(
+        "oarag.cli.verify_entity_links_strict_deterministic",
+        fake_verify_entity_links_strict_deterministic,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "verify-entity-links-strict",
+            "--project-dir",
+            str(project_dir),
+            "--entity-links",
+            "manifests/entity_links.jsonl",
+            "--segments",
+            "segments/lecture_segments_aligned.jsonl",
+            "--visual-entities",
+            "manifests/visual_entities.jsonl",
+            "--output",
+            "manifests/entity_links.strict.jsonl",
+            "--report",
+            "reports/strict_report.json",
+            "--lexical-overlap-threshold",
+            "0.6",
+            "--sweep-threshold",
+            "0.4",
+            "--sweep-threshold",
+            "0.8",
+        ]
+    )
+
+    cmd_verify_entity_links_strict(args)
+
+    assert calls["location"] == (None, project_dir)
+    assert calls["verify_kwargs"]["project_dir"] == Path("/tmp/project")
+    assert calls["verify_kwargs"]["entity_links_path"].as_posix() == "manifests/entity_links.jsonl"
+    assert calls["verify_kwargs"]["segments_path"].as_posix() == "segments/lecture_segments_aligned.jsonl"
+    assert calls["verify_kwargs"]["visual_entities_path"].as_posix() == "manifests/visual_entities.jsonl"
+    assert calls["verify_kwargs"]["output_path"].as_posix() == "manifests/entity_links.strict.jsonl"
+    assert calls["verify_kwargs"]["report_path"].as_posix() == "reports/strict_report.json"
+    assert calls["verify_kwargs"]["lexical_overlap_threshold"] == 0.6
+    assert calls["verify_kwargs"]["sweep_thresholds"] == [0.4, 0.8]
+    assert json.loads(capsys.readouterr().out)["counts"]["promoted_links"] == 1
 
 
 def test_index_project_evidence_units_cli_defaults() -> None:
