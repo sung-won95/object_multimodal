@@ -561,6 +561,46 @@ Current linking behavior:
 - Adds `mention_candidate` evidence when transcript mention hooks or configured aliases match visual text.
 - Records evidence type counts in `entity_linking.evidence_type_counts`.
 
+### Strict deterministic link verification
+
+Existing candidate `entity_links.jsonl` artifacts can be post-processed without
+rerunning ingest or visual extraction:
+
+```bash
+PYTHONPATH=src python -m oarag verify-entity-links-strict \
+  --project-id sample_lecture \
+  --entity-links manifests/entity_links.jsonl \
+  --output manifests/entity_links.strict.jsonl \
+  --report reports/strict_deterministic_entity_link_verifier.json \
+  --lexical-overlap-threshold 0.5 \
+  --sweep-threshold 0.25 \
+  --sweep-threshold 0.5 \
+  --sweep-threshold 0.75
+```
+
+The rule promotes only candidate links that satisfy all of these checks:
+
+- The link is not already verified and is not timestamp-fallback/time-overlap-only.
+- Transcript terms exactly match terms from visual text fields: `visible_text`,
+  `detected_text`, or `text`.
+- The lexical overlap score, defined as matched visual-text terms divided by
+  total visual-text terms, is greater than the configured threshold.
+
+Promoted links receive `alignment_status="verified"`,
+`verification_status="verified"`, `verified_link_source="strict_deterministic_rule"`,
+and `verification_source="strict_deterministic_rule"`. The duplicated source
+field is intentional: downstream evidence-unit and benchmark consumers aggregate
+verified sources from `verification_source`, `verified_source`, `verified_by`,
+`verifier`, `source`, and `reason_metadata.*`.
+
+The verifier records a public-safe reason block under
+`reason_metadata.strict_deterministic_verifier`. It stores counts, score,
+threshold, source fields, and the rule name, but not raw transcript or visual
+text terms. The optional report is also public-safe: it contains promotion
+counts, reason buckets, and threshold-sweep counts by hashed lecture reference.
+Use the verifier output as the `--entity-links` input when rebuilding evidence
+units.
+
 Optional project domain lexicon:
 
 ```json

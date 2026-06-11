@@ -1,0 +1,69 @@
+{
+  "schema_version": "oarag-strict-deterministic-link-verifier-report-public-v1",
+  "privacy": {
+    "raw_transcript": "redacted",
+    "raw_visual_text": "redacted",
+    "raw_ids": "omitted",
+    "local_paths": "omitted"
+  },
+  "rule": {
+    "source": "strict_deterministic_rule",
+    "exact_match_required": true,
+    "lexical_overlap_threshold": 0.5,
+    "time_overlap_only_promoted": false,
+    "visual_text_sources": [
+      "visible_text",
+      "detected_text",
+      "text"
+    ]
+  },
+  "counts": {
+    "links_total": 3,
+    "promoted_links": 1,
+    "already_verified_links": 0,
+    "time_overlap_only_excluded": 1,
+    "below_threshold": 1,
+    "no_exact_match": 0
+  },
+  "promotion_distribution": {
+    "by_public_lecture_ref": {
+      "video:synthetic001": 1
+    }
+  },
+  "decision_reason_counts": {
+    "below_lexical_overlap_threshold": 1,
+    "exact_text_match_above_threshold": 1,
+    "time_overlap_only_excluded": 1
+  },
+  "threshold_sweep": [
+    {
+      "threshold": 0.25,
+      "promoted_links": 1,
+      "by_public_lecture_ref": {
+        "video:synthetic001": 1
+      }
+    },
+    {
+      "threshold": 0.5,
+      "promoted_links": 1,
+      "by_public_lecture_ref": {
+        "video:synthetic001": 1
+      }
+    },
+    {
+      "threshold": 0.75,
+      "promoted_links": 1,
+      "by_public_lecture_ref": {
+        "video:synthetic001": 1
+      }
+    }
+  ],
+  "evidence_unit_rebuild_smoke": {
+    "verified_object_alignment_ratio": 0.333333,
+    "verified_link_source_counts": {
+      "strict_deterministic_rule": 1
+    },
+    "timestamp_fallback_promoted": 0
+  },
+  "public_note": "Synthetic public-safe sample; raw transcripts, visual text, local paths, and raw IDs are intentionally omitted."
+}

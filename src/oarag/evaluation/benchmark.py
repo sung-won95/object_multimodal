@@ -4318,6 +4318,7 @@ def _matrix_verified_source_text(link: dict[str, Any]) -> str:
     metadata = _mapping(link.get("reason_metadata"))
     values = [
         link.get("verification_source"),
+        link.get("verified_link_source"),
         link.get("verified_source"),
         link.get("verified_by"),
         link.get("verifier"),

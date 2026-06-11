@@ -9,6 +9,7 @@ from oarag.evaluation.benchmark import (
     _answer_grounding_metrics,
     _expected_ranges,
     _expected_segment_ids,
+    _matrix_verified_link_source_counts,
     _matrix_target_rank_diagnostics,
     _public_answer_summary,
 )
@@ -84,6 +85,24 @@ class FakeClient:
         else:
             hits = []
         return {"hits": hits[:limit], "processingTimeMs": 3, "indexUid": index_uid}
+
+
+def test_matrix_verified_source_counts_accept_strict_deterministic_source_fields() -> None:
+    via_verification_source = _matrix_verified_link_source_counts(
+        {
+            "alignment_status": "verified",
+            "verification_source": "strict_deterministic_rule",
+        }
+    )
+    via_verified_link_source = _matrix_verified_link_source_counts(
+        {
+            "alignment_status": "verified",
+            "verified_link_source": "strict_deterministic_rule",
+        }
+    )
+
+    assert via_verification_source["strict_deterministic_rule"] == 1
+    assert via_verified_link_source["strict_deterministic_rule"] == 1
 
 
 class FakeAblationClient:
