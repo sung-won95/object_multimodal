@@ -1,0 +1,261 @@
+{
+  "schema_version": "paper-claim-evidence-matrix-v1",
+  "run_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+  "artifacts": {
+    "metrics": "metrics.json",
+    "reproducibility": "reproducibility.json",
+    "quality_gate_result": "quality_gate_result.json",
+    "readiness_audit": "paper_readiness_audit.json",
+    "robustness": "paper_metric_intervals.json"
+  },
+  "summary": {
+    "overall_status": "blocked",
+    "status_counts": {
+      "supported": 0,
+      "needs_evidence": 0,
+      "blocked": 6
+    },
+    "quality_gate_status": "failed",
+    "readiness_status": "gaps_found",
+    "robustness_status": "passed"
+  },
+  "claims": [
+    {
+      "claim_id": "readiness_audit_passed",
+      "claim": "Paper readiness audit supports moving aggregate results into paper claims.",
+      "status": "blocked",
+      "summary": "Paper readiness audit reports gaps.",
+      "evidence": [
+        {
+          "artifact": "paper_readiness_audit.json",
+          "fields": [
+            "schema_version",
+            "ready",
+            "gaps[].code"
+          ]
+        }
+      ],
+      "missing_evidence": [],
+      "blockers": [
+        {
+          "reason": "paper_readiness_audit_not_ready",
+          "gap_codes": [
+            "quality_gate_not_passed"
+          ]
+        }
+      ]
+    },
+    {
+      "claim_id": "quality_gate_passed",
+      "claim": "Aggregate retrieval quality gate supports the reported experiment bundle.",
+      "status": "blocked",
+      "summary": "Retrieval quality gate did not pass.",
+      "evidence": [
+        {
+          "artifact": "quality_gate_result.json",
+          "fields": [
+            "schema_version",
+            "gate_id",
+            "passed",
+            "failure_count"
+          ]
+        }
+      ],
+      "missing_evidence": [],
+      "blockers": [
+        {
+          "reason": "quality_gate_not_passed",
+          "failure_codes": [
+            "metric_below_threshold"
+          ]
+        }
+      ]
+    },
+    {
+      "claim_id": "retrieval_answer_matrix_complete",
+      "claim": "Retrieval-answer matrix includes the required comparison variants.",
+      "status": "blocked",
+      "summary": "Required retrieval-answer matrix variants are present.",
+      "evidence": [
+        {
+          "artifact": "metrics.json",
+          "fields": [
+            "suites[].schema_version",
+            "suites[].variants[].variant_id"
+          ],
+          "schema_version": "retrieval-answer-ablation-matrix-v1",
+          "required_variant_ids": [
+            "segment_lexical",
+            "domain_lexicon",
+            "hybrid",
+            "window",
+            "window_hybrid",
+            "rerank",
+            "evidence_unit_candidate",
+            "evidence_unit_verified",
+            "evidence_unit_quality_rerank"
+          ],
+          "covered_variant_ids": [
+            "domain_lexicon",
+            "evidence_unit_candidate",
+            "evidence_unit_quality_rerank",
+            "evidence_unit_verified",
+            "hybrid",
+            "rerank",
+            "segment_lexical",
+            "window",
+            "window_hybrid"
+          ]
+        }
+      ],
+      "missing_evidence": [],
+      "blockers": [
+        {
+          "reason": "paper_readiness_audit_not_ready",
+          "gap_codes": [
+            "quality_gate_not_passed"
+          ]
+        },
+        {
+          "reason": "quality_gate_not_passed",
+          "failure_codes": [
+            "metric_below_threshold"
+          ]
+        }
+      ]
+    },
+    {
+      "claim_id": "answer_citation_metrics_available",
+      "claim": "Answer grounding and citation proxy metrics are present for matrix evidence.",
+      "status": "blocked",
+      "summary": "Answer/citation metric fields are present.",
+      "evidence": [
+        {
+          "artifact": "metrics.json",
+          "fields": [
+            "suites[].variants[].grounded_answer_ratio",
+            "suites[].variants[].citation_coverage_ratio",
+            "suites[].variants[].answer_citation_precision",
+            "suites[].variants[].answer_citation_recall",
+            "suites[].variants[].expected_citation_hit_ratio",
+            "suites[].variants[].mean_unsupported_claim_count",
+            "suites[].variants[].unsupported_claim_ratio"
+          ],
+          "metric_names": [
+            "grounded_answer_ratio",
+            "citation_coverage_ratio",
+            "answer_citation_precision",
+            "answer_citation_recall",
+            "expected_citation_hit_ratio",
+            "mean_unsupported_claim_count",
+            "unsupported_claim_ratio"
+          ]
+        }
+      ],
+      "missing_evidence": [],
+      "blockers": [
+        {
+          "reason": "paper_readiness_audit_not_ready",
+          "gap_codes": [
+            "quality_gate_not_passed"
+          ]
+        },
+        {
+          "reason": "quality_gate_not_passed",
+          "failure_codes": [
+            "metric_below_threshold"
+          ]
+        }
+      ]
+    },
+    {
+      "claim_id": "private_safe_artifact_bundle",
+      "claim": "Public-facing paper artifacts exclude raw private text, local paths, and eval values.",
+      "status": "blocked",
+      "summary": "Private-safe exclusion statements are present.",
+      "evidence": [
+        {
+          "artifact": "metrics.json",
+          "fields": [
+            "suites[].privacy"
+          ]
+        },
+        {
+          "artifact": "reproducibility.json",
+          "fields": [
+            "privacy"
+          ]
+        },
+        {
+          "artifact": "quality_gate_result.json",
+          "fields": [
+            "privacy"
+          ]
+        },
+        {
+          "artifact": "paper_readiness_audit.json",
+          "fields": [
+            "privacy"
+          ]
+        }
+      ],
+      "missing_evidence": [],
+      "blockers": [
+        {
+          "reason": "paper_readiness_audit_not_ready",
+          "gap_codes": [
+            "quality_gate_not_passed"
+          ]
+        },
+        {
+          "reason": "quality_gate_not_passed",
+          "failure_codes": [
+            "metric_below_threshold"
+          ]
+        }
+      ]
+    },
+    {
+      "claim_id": "robustness_artifact_recorded",
+      "claim": "Robustness evidence is registered before final paper claims are treated as complete.",
+      "status": "blocked",
+      "summary": "Robustness artifact reports a passing status.",
+      "evidence": [
+        {
+          "artifact": "paper_metric_intervals.json",
+          "fields": [
+            "schema_version",
+            "status",
+            "summary.robustness_status",
+            "summary.caveat_count",
+            "paired_deltas[]"
+          ]
+        }
+      ],
+      "missing_evidence": [],
+      "blockers": [
+        {
+          "reason": "paper_readiness_audit_not_ready",
+          "gap_codes": [
+            "quality_gate_not_passed"
+          ]
+        },
+        {
+          "reason": "quality_gate_not_passed",
+          "failure_codes": [
+            "metric_below_threshold"
+          ]
+        }
+      ]
+    }
+  ],
+  "privacy": {
+    "payload": "artifact_names_statuses_and_aggregate_schema_metadata_only",
+    "raw_queries": "excluded",
+    "answer_text": "excluded",
+    "transcript_content": "excluded",
+    "candidate_evidence_text": "excluded",
+    "local_paths": "excluded",
+    "private_eval_values": "excluded"
+  }
+}

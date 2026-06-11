@@ -1,0 +1,239 @@
+{
+  "schema_version": "full-provider-matrix-v2-go-no-go-report-v1",
+  "run_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+  "decision": {
+    "result": "no-go",
+    "follow_up_issue": "https://github.com/sung-won95/object_multimodal/issues/285",
+    "reason_codes": [
+      "citation_precision_not_significantly_higher_than_candidate",
+      "quality_gate_failed"
+    ],
+    "criteria": {
+      "citation_precision_significant_increase": false,
+      "unsupported_claim_ratio_lower": true,
+      "hit_at_10s_loss_within_abs_0_10": true
+    },
+    "fixed_thresholds": {
+      "bootstrap_ci": "95%",
+      "hit_at_10s_loss_max_abs": 0.1,
+      "sample_count": 1000,
+      "seed": 139
+    }
+  },
+  "inputs": {
+    "v1_query_results": "reports/mit_deep_learning_eval/full_provider_matrix_v1/query_results.jsonl",
+    "v2_query_results": "reports/mit_deep_learning_eval/full_provider_matrix_v2/query_results.jsonl",
+    "v2_quality_gate": "reports/mit_deep_learning_eval/full_provider_matrix_v2/quality_gate_result.json",
+    "query_count_per_run": {
+      "v1": 48,
+      "v2": 48
+    },
+    "variant_count_per_run": {
+      "v1": 9,
+      "v2": 9
+    }
+  },
+  "matrix_completion": {
+    "suite_count": 24,
+    "variant_count": 9,
+    "query_result_rows": 432,
+    "skipped_variant_count": 0,
+    "semantic_live_smoke": {
+      "provider_backed": true,
+      "provider_backed_query_vector_count": 96,
+      "local_hash_query_vector_count": 0
+    }
+  },
+  "quality_gate": {
+    "passed": false,
+    "failure_count": 3,
+    "failures": [
+      {
+        "suite_id": "mitdl_lec05",
+        "variant_id": "window_hybrid",
+        "metric": "hit_at_10s",
+        "value": 0.5,
+        "threshold": 0.9
+      },
+      {
+        "suite_id": "mitdl_lec05",
+        "variant_id": "window_hybrid",
+        "metric": "mrr_at_max_delta",
+        "value": 0.5,
+        "threshold": 0.9
+      },
+      {
+        "suite_id": "mitdl_lec05",
+        "variant_id": "window_hybrid",
+        "metric": "expected_citation_hit_ratio",
+        "value": 0.5,
+        "threshold": 0.9
+      }
+    ]
+  },
+  "paired_bootstrap": {
+    "v2_candidate_to_verified": [
+      {
+        "metric": "citation_precision",
+        "direction": "higher_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.277777,
+        "comparison_mean": 0.298613,
+        "mean_delta": 0.020835,
+        "ci_low": 0.0,
+        "ci_high": 0.048612,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      },
+      {
+        "metric": "expected_citation_hit",
+        "direction": "higher_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.458333,
+        "comparison_mean": 0.479167,
+        "mean_delta": 0.020833,
+        "ci_low": 0.0,
+        "ci_high": 0.0625,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      },
+      {
+        "metric": "unsupported_claim_ratio",
+        "direction": "lower_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.291667,
+        "comparison_mean": 0.270833,
+        "mean_delta": -0.020833,
+        "ci_low": -0.0625,
+        "ci_high": 0.0,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      },
+      {
+        "metric": "hit_at_10s",
+        "direction": "higher_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.520833,
+        "comparison_mean": 0.541667,
+        "mean_delta": 0.020833,
+        "ci_low": 0.0,
+        "ci_high": 0.0625,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      }
+    ],
+    "v1_verified_to_v2_verified": [
+      {
+        "metric": "citation_precision",
+        "direction": "higher_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.298613,
+        "comparison_mean": 0.298613,
+        "mean_delta": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      },
+      {
+        "metric": "expected_citation_hit",
+        "direction": "higher_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.479167,
+        "comparison_mean": 0.479167,
+        "mean_delta": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      },
+      {
+        "metric": "unsupported_claim_ratio",
+        "direction": "lower_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.270833,
+        "comparison_mean": 0.270833,
+        "mean_delta": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      },
+      {
+        "metric": "hit_at_10s",
+        "direction": "higher_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.541667,
+        "comparison_mean": 0.541667,
+        "mean_delta": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      }
+    ],
+    "v2_candidate_to_quality_rerank": [
+      {
+        "metric": "citation_precision",
+        "direction": "higher_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.277777,
+        "comparison_mean": 0.340277,
+        "mean_delta": 0.0625,
+        "ci_low": -0.04861,
+        "ci_high": 0.166673,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      },
+      {
+        "metric": "expected_citation_hit",
+        "direction": "higher_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.458333,
+        "comparison_mean": 0.458333,
+        "mean_delta": 0.0,
+        "ci_low": -0.104167,
+        "ci_high": 0.104167,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      },
+      {
+        "metric": "unsupported_claim_ratio",
+        "direction": "lower_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.291667,
+        "comparison_mean": 0.229167,
+        "mean_delta": -0.0625,
+        "ci_low": -0.208333,
+        "ci_high": 0.083333,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      },
+      {
+        "metric": "hit_at_10s",
+        "direction": "higher_is_better",
+        "paired_query_count": 48,
+        "baseline_mean": 0.520833,
+        "comparison_mean": 0.520833,
+        "mean_delta": 0.0,
+        "ci_low": -0.125,
+        "ci_high": 0.125,
+        "bootstrap_sample_count": 1000,
+        "seed": 139
+      }
+    ]
+  },
+  "limitations": [
+    "#281 human audit and real VLM smoke are not complete; this is a deterministic-first v2 decision.",
+    "The expanded query set from #270 was not available, so the decision uses the locked 48-query matrix.",
+    "full_provider_matrix_v2 quality gate failure keeps paper readiness and claim matrix blocked."
+  ],
+  "privacy": {
+    "payload": "aggregate_and_paired_scalar_metrics_only",
+    "raw_queries": "excluded",
+    "answer_text": "excluded",
+    "candidate_evidence_text": "excluded",
+    "transcript_content": "excluded",
+    "local_paths": "excluded"
+  }
+}

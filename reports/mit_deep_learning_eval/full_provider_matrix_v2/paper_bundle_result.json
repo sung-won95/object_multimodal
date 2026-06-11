@@ -1,0 +1,127 @@
+{
+  "schema_version": "paper-bundle-result-v1",
+  "run_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+  "status": "passed",
+  "failed_stage": null,
+  "stages": [
+    {
+      "stage": "run_paper_experiment",
+      "status": "passed",
+      "artifacts": [
+        "metrics.json",
+        "query_results.jsonl",
+        "semantic_smoke.json",
+        "paper_report",
+        "quality_gate_result.json",
+        "experiment_manifest.json"
+      ],
+      "details": {
+        "gate_status": "failed"
+      }
+    },
+    {
+      "stage": "generate_metric_intervals",
+      "status": "passed",
+      "artifacts": [
+        "paper_metric_intervals/paper_metric_intervals.json",
+        "paper_metric_intervals/paper_metric_intervals.csv",
+        "paper_metric_intervals/paper_metric_intervals.md"
+      ],
+      "details": {
+        "robustness_status": "passed",
+        "caveat_count": 0
+      }
+    },
+    {
+      "stage": "audit_paper_readiness",
+      "status": "passed",
+      "artifacts": [
+        "paper_readiness/paper_readiness_audit.json",
+        "paper_readiness/paper_readiness_audit.md"
+      ],
+      "details": {
+        "readiness_status": "gaps_found",
+        "gap_count": 1
+      }
+    },
+    {
+      "stage": "build_paper_claims",
+      "status": "passed",
+      "artifacts": [
+        "paper_claims/claim_evidence_matrix.json",
+        "paper_claims/claim_evidence_matrix.md"
+      ],
+      "details": {
+        "claims_status": "blocked",
+        "robustness_status": "passed"
+      }
+    },
+    {
+      "stage": "build_paper_artifact_registry",
+      "status": "passed",
+      "artifacts": [
+        "paper_artifact_registry.json"
+      ],
+      "details": {
+        "gate": "failed",
+        "readiness": "gaps_found",
+        "claims": "blocked",
+        "robustness": "passed"
+      }
+    }
+  ],
+  "artifacts": {
+    "paper_bundle_result": "paper_bundle_result.json",
+    "metrics": "metrics.json",
+    "metrics_summary": "metrics_summary.csv",
+    "query_results": "query_results.jsonl",
+    "semantic_smoke": "semantic_smoke.json",
+    "summary": "summary.md",
+    "paper_report_dir": "paper_report",
+    "paper_table_csv": "paper_report/paper_table.csv",
+    "paper_table_markdown": "paper_report/paper_table.md",
+    "reproducibility_json": "paper_report/reproducibility.json",
+    "quality_gate_result": "quality_gate_result.json",
+    "experiment_manifest": "experiment_manifest.json",
+    "metric_intervals_json": "paper_metric_intervals/paper_metric_intervals.json",
+    "metric_intervals_csv": "paper_metric_intervals/paper_metric_intervals.csv",
+    "metric_intervals_markdown": "paper_metric_intervals/paper_metric_intervals.md",
+    "robustness": "paper_metric_intervals/paper_metric_intervals.json",
+    "readiness_audit": "paper_readiness/paper_readiness_audit.json",
+    "claim_matrix": "paper_claims/claim_evidence_matrix.json",
+    "artifact_registry": "paper_artifact_registry.json"
+  },
+  "registry_status": {
+    "gate": "failed",
+    "readiness": "gaps_found",
+    "claims": "blocked",
+    "robustness": "passed"
+  },
+  "status_links": {
+    "gate": {
+      "artifact": "quality_gate_result.json",
+      "status": "failed"
+    },
+    "readiness": {
+      "artifact": "paper_readiness_audit.json",
+      "status": "gaps_found"
+    },
+    "claims": {
+      "artifact": "claim_evidence_matrix.json",
+      "status": "blocked"
+    },
+    "robustness": {
+      "artifact": "paper_metric_intervals.json",
+      "status": "passed"
+    }
+  },
+  "privacy": {
+    "payload": "artifact_names_stage_statuses_and_coarse_statuses_only",
+    "raw_queries": "excluded",
+    "answer_text": "excluded",
+    "transcript_content": "excluded",
+    "candidate_evidence_text": "excluded",
+    "local_paths": "excluded",
+    "private_eval_values": "excluded"
+  }
+}

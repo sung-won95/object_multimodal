@@ -1,0 +1,307 @@
+{
+  "schema_version": "evaluation-report-v1",
+  "run_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+  "commit": {
+    "sha": "55f5f1f3fbe691aa28732ada3879495322cddd6c"
+  },
+  "command": {
+    "argv": [
+      "oarag",
+      "run-paper-bundle",
+      "--manifest",
+      "full_provider_matrix_v2_manifest.json",
+      "--output-dir",
+      "full_provider_matrix_v2",
+      "--run-id",
+      "mit_deep_learning_stt_full_provider_matrix_v2",
+      "--gate-config",
+      "retrieval_quality_gate.json",
+      "--baseline-variant-id",
+      "segment_lexical",
+      "--sample-count",
+      "1000",
+      "--seed",
+      "139",
+      "--no-fail-on-gate"
+    ]
+  },
+  "artifacts": {
+    "metrics": "metrics.json",
+    "paper_tables": [
+      "paper_table.csv",
+      "paper_table.md"
+    ]
+  },
+  "dataset_descriptors": [
+    {
+      "suite_id": "mitdl_lec01",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec02",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec03",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec04",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec05",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec06",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec07",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec08",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec09",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec10",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec11",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec12",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec13",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec14",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec15",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec16",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec17",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec18",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec19",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec20",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec21",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec23",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_lec24",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    },
+    {
+      "suite_id": "mitdl_review",
+      "suite_type": "retrieval_answer_matrix",
+      "domain": "mit_deep_learning_stt_paper_matrix",
+      "query_count": 2,
+      "descriptor_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+      "split": "dev_test",
+      "version": "seed_v1",
+      "privacy": "aggregate_only"
+    }
+  ],
+  "benchmark": {
+    "suite_count": 24,
+    "query_count": 432,
+    "deltas": [
+      5,
+      10,
+      15,
+      30
+    ],
+    "anti_overfit": {
+      "domain_count": 1,
+      "domains": {
+        "mit_deep_learning_stt_paper_matrix": {
+          "suite_count": 24,
+          "query_count": 48,
+          "mean_hit_at_10s": 0.4259,
+          "mean_mrr_at_max_delta": 0.3739
+        }
+      }
+    }
+  },
+  "privacy": {
+    "raw_queries": "excluded",
+    "answer_text": "excluded",
+    "transcript_excerpts": "excluded",
+    "candidate_evidence_text": "excluded",
+    "local_paths": "excluded",
+    "raw_candidate_ids": "excluded_or_hashed",
+    "grounding_proxy_metrics": "deterministic_expected_hint_overlap_not_full_llm_quality"
+  }
+}

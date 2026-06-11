@@ -1,0 +1,81 @@
+{
+  "schema_version": "paper-experiment-manifest-v1",
+  "run_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+  "status": "failed",
+  "inputs": {
+    "benchmark_manifest": "full_provider_matrix_v2_manifest.json",
+    "quality_gate_config": "retrieval_quality_gate.json"
+  },
+  "command": {
+    "argv": [
+      "oarag",
+      "run-paper-bundle",
+      "--manifest",
+      "full_provider_matrix_v2_manifest.json",
+      "--output-dir",
+      "full_provider_matrix_v2",
+      "--run-id",
+      "mit_deep_learning_stt_full_provider_matrix_v2",
+      "--gate-config",
+      "retrieval_quality_gate.json",
+      "--baseline-variant-id",
+      "segment_lexical",
+      "--sample-count",
+      "1000",
+      "--seed",
+      "139",
+      "--no-fail-on-gate"
+    ]
+  },
+  "commit": {
+    "sha": "55f5f1f3fbe691aa28732ada3879495322cddd6c"
+  },
+  "artifacts": {
+    "metrics": "metrics.json",
+    "metrics_summary": "metrics_summary.csv",
+    "query_results": "query_results.jsonl",
+    "semantic_smoke": "semantic_smoke.json",
+    "summary": "summary.md",
+    "paper_report_dir": "paper_report",
+    "paper_table_csv": "paper_report/paper_table.csv",
+    "paper_table_markdown": "paper_report/paper_table.md",
+    "reproducibility_json": "paper_report/reproducibility.json",
+    "reproducibility_markdown": "paper_report/reproducibility.md",
+    "quality_gate_result": "quality_gate_result.json",
+    "experiment_manifest": "experiment_manifest.json"
+  },
+  "stages": [
+    {
+      "stage": "benchmark",
+      "status": "passed",
+      "artifacts": [
+        "metrics.json",
+        "metrics_summary.csv",
+        "query_results.jsonl",
+        "semantic_smoke.json"
+      ]
+    },
+    {
+      "stage": "report",
+      "status": "passed",
+      "artifacts": [
+        "summary.md",
+        "paper_report/"
+      ]
+    },
+    {
+      "stage": "quality_gate",
+      "status": "failed",
+      "artifact": "quality_gate_result.json",
+      "failure_count": 3
+    }
+  ],
+  "privacy": {
+    "payload": "artifact_schema_and_aggregate_metadata_only",
+    "raw_queries": "excluded",
+    "answer_text": "excluded",
+    "transcript_content": "excluded",
+    "candidate_evidence_text": "excluded",
+    "local_paths": "excluded"
+  }
+}
