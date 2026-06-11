@@ -28,6 +28,7 @@ from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_
 from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
 from oarag.evaluation.eval import candidate_diagnostics, evaluate_query, summarize
 from oarag.vision.entity_links import link_entities
+from oarag.vision.entity_link_verifier import verify_entity_links_vlm
 from oarag.vision.strict_deterministic_verifier import (
     DEFAULT_STRICT_LEXICAL_OVERLAP_THRESHOLD,
     verify_entity_links_strict_deterministic,
@@ -1185,6 +1186,89 @@ def build_parser() -> argparse.ArgumentParser:
         help="Threshold to include in the public-safe sweep report. Repeat to add values.",
     )
     strict_link_verifier.set_defaults(func=cmd_verify_entity_links_strict)
+
+    vlm_link_verifier = subparsers.add_parser(
+        "verify-entity-links-vlm",
+        help="Verify candidate entity links with a VLM decision backend",
+    )
+    location = vlm_link_verifier.add_mutually_exclusive_group(required=True)
+    location.add_argument("--project-id", help="Project ID under artifacts/projects/")
+    location.add_argument("--project-dir", type=Path, help="Project artifact directory")
+    vlm_link_verifier.add_argument(
+        "--entity-links",
+        type=Path,
+        help="Input candidate entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    vlm_link_verifier.add_argument(
+        "--segments",
+        type=Path,
+        help="Input segment JSONL path. Relative paths are resolved from project dir.",
+    )
+    vlm_link_verifier.add_argument(
+        "--visual-entities",
+        type=Path,
+        help="Input visual_entities JSONL path. Relative paths are resolved from project dir.",
+    )
+    vlm_link_verifier.add_argument(
+        "--frames-manifest",
+        type=Path,
+        help="Input frames_manifest JSONL path. Relative paths are resolved from project dir.",
+    )
+    vlm_link_verifier.add_argument(
+        "--output",
+        type=Path,
+        help="Output entity_links JSONL path. Relative paths are resolved from project dir.",
+    )
+    vlm_link_verifier.add_argument(
+        "--cache",
+        type=Path,
+        help=(
+            "Public-safe link-id decision cache JSON path. Relative paths are resolved "
+            "from project dir. Defaults to manifests/entity_links.vlm_verifier_cache.json."
+        ),
+    )
+    vlm_link_verifier.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable the default project-local VLM verifier decision cache.",
+    )
+    vlm_link_verifier.add_argument(
+        "--report",
+        type=Path,
+        help="Optional public-safe JSON report path. Relative paths are resolved from project dir.",
+    )
+    vlm_link_verifier.add_argument(
+        "--human-audit-template",
+        type=Path,
+        help="Optional JSONL template for manual human audit decisions.",
+    )
+    vlm_link_verifier.add_argument(
+        "--vlm-backend",
+        choices=available_vlm_backends(),
+        default=DEFAULT_VLM_BACKEND,
+        help="Verifier backend. jsonl is useful for fixture-based smoke tests.",
+    )
+    vlm_link_verifier.add_argument(
+        "--vlm-model",
+        help="VLM model name for command/provider-backed verification.",
+    )
+    vlm_link_verifier.add_argument("--vlm-device", help="Optional VLM device label.")
+    vlm_link_verifier.add_argument(
+        "--vlm-options",
+        help="JSON object or comma-separated key=value backend options.",
+    )
+    vlm_link_verifier.add_argument(
+        "--limit",
+        type=int,
+        help="Evaluate at most this many links from the input artifact.",
+    )
+    vlm_link_verifier.add_argument(
+        "--skip-on-unavailable",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write an explicit skip summary instead of promoting links when the VLM backend is unavailable.",
+    )
+    vlm_link_verifier.set_defaults(func=cmd_verify_entity_links_vlm)
 
     query = subparsers.add_parser("query", help="Search one query")
     query.add_argument("--index", required=True)
@@ -2713,6 +2797,29 @@ def cmd_verify_entity_links_strict(args: argparse.Namespace) -> None:
         report_path=args.report,
         lexical_overlap_threshold=args.lexical_overlap_threshold,
         sweep_thresholds=args.sweep_thresholds,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_verify_entity_links_vlm(args: argparse.Namespace) -> None:
+    project_dir = project_dir_from_args(project_id=args.project_id, project_dir=args.project_dir)
+    summary = verify_entity_links_vlm(
+        project_dir=project_dir,
+        entity_links_path=args.entity_links,
+        segments_path=args.segments,
+        visual_entities_path=args.visual_entities,
+        frames_manifest_path=args.frames_manifest,
+        output_path=args.output,
+        cache_path=args.cache,
+        cache_enabled=not args.no_cache,
+        report_path=args.report,
+        audit_template_path=args.human_audit_template,
+        backend=args.vlm_backend,
+        model=args.vlm_model,
+        device=args.vlm_device,
+        options=parse_vlm_options(args.vlm_options),
+        limit=args.limit,
+        skip_on_unavailable=args.skip_on_unavailable,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

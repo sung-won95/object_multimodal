@@ -111,6 +111,73 @@ def test_vlm_command_adapter_reads_request_and_outputs_observations(
     assert str(captured["image_url"]).startswith("data:image/jpeg;base64,")
 
 
+def test_vlm_command_adapter_reads_verifier_request_and_outputs_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame_path = tmp_path / "frame.jpg"
+    frame_path.write_bytes(b"\xff\xd8\xff\xe0fixture-image")
+    request = {
+        "schema_version": "vlm-entity-link-verifier-request-v1",
+        "model": "fixture-vlm",
+        "prompt_template_version": "vlm-entity-link-verifier-v1",
+        "frame": {
+            "frame_id": "frame_000001",
+            "frame_path": str(frame_path),
+            "timestamp": 3.5,
+        },
+        "segment": {"segment_id": "seg_1", "transcript_text": "Look at this curve."},
+        "visual_entity": {
+            "entity_id": "ent_1",
+            "entity_type": "chart",
+            "visual_description": "A curve on a chart.",
+        },
+        "link": {"link_id": "link_1", "evidence": ["time_overlap"]},
+    }
+    captured: dict[str, object] = {}
+
+    def fake_call_chat_completions(**kwargs: object) -> dict:
+        captured.update(kwargs)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "decision": "verified",
+                                "reason": "Look at this curve.",
+                                "public_reason": "Look at this curve.",
+                                "confidence": 0.88,
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setenv("OARAG_TEST_VLM_API_KEY", "test-api-key")
+    monkeypatch.setattr(adapter, "_call_chat_completions", fake_call_chat_completions)
+    args = argparse.Namespace(
+        api_key_env="OARAG_TEST_VLM_API_KEY",
+        fallback_api_key_env="OARAG_TEST_OPENAI_API_KEY",
+        base_url_env="OARAG_TEST_VLM_BASE_URL",
+        frame_root=None,
+    )
+
+    decision = adapter.run_verifier_adapter_request(request=request, args=args)
+
+    assert decision == {
+        "parser_version": "oarag-openai-compatible-vlm-link-verifier-v1",
+        "decision": "verified",
+        "reason_code": "vlm_decision_verified",
+        "public_reason": "VLM judged this link as verified.",
+        "confidence": 0.88,
+    }
+    assert "Look at this curve." in str(captured["prompt"])
+    assert "Look at this curve." not in json.dumps(decision)
+    assert str(captured["image_url"]).startswith("data:image/jpeg;base64,")
+
+
 def _adapter_env() -> dict[str, str]:
     env = os.environ.copy()
     repo_root = Path(__file__).resolve().parents[1]
