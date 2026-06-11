@@ -1,0 +1,327 @@
+{
+  "schema_version": "benchmark-transition-plan-v1",
+  "source_run_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+  "source_issue": 285,
+  "related_issues": [
+    282,
+    281
+  ],
+  "decision": {
+    "performance_paper_result": "no-go",
+    "recommended_direction": "benchmark_and_evaluation_protocol_paper",
+    "direction_statement": "Introduce a public-safe evaluation protocol for object-aligned multimodal retrieval-augmented generation using a locked 48-query, 24-suite matrix to compare retrieval and answer-grounding variants, report uncertainty, and characterize object-level citation-grounding failures.",
+    "non_claim": "Do not claim that evidence_unit_verified significantly improves citation precision over evidence_unit_candidate under the fixed go criterion.",
+    "basis": {
+      "suite_count": 24,
+      "variant_count": 9,
+      "query_result_rows": 432,
+      "skipped_variant_count": 0,
+      "semantic_live_smoke": {
+        "provider_backed_query_vector_count": 96,
+        "local_hash_query_vector_count": 0
+      },
+      "quality_gate": {
+        "status": "failed",
+        "failure_count": 3,
+        "stress_case": {
+          "suite_id": "mitdl_lec05",
+          "variant_id": "window_hybrid",
+          "failures": [
+            {
+              "metric": "hit_at_10s",
+              "value": 0.5,
+              "threshold": 0.9
+            },
+            {
+              "metric": "mrr_at_max_delta",
+              "value": 0.5,
+              "threshold": 0.9
+            },
+            {
+              "metric": "expected_citation_hit_ratio",
+              "value": 0.5,
+              "threshold": 0.9
+            }
+          ]
+        }
+      },
+      "candidate_to_verified_bootstrap": {
+        "paired_query_count": 48,
+        "sample_count": 1000,
+        "seed": 139,
+        "confidence_level": 0.95,
+        "metrics": {
+          "citation_precision": {
+            "delta": 0.020835,
+            "ci_low": 0.0,
+            "ci_high": 0.048612,
+            "go_criterion_met": false
+          },
+          "unsupported_claim_ratio": {
+            "delta": -0.020833,
+            "ci_low": -0.0625,
+            "ci_high": 0.0,
+            "go_criterion_met": true
+          },
+          "hit_at_10s": {
+            "delta": 0.020833,
+            "ci_low": 0.0,
+            "ci_high": 0.0625,
+            "go_criterion_met": true
+          }
+        }
+      }
+    }
+  },
+  "claim_matrix_draft": [
+    {
+      "claim_id": "protocol_matrix_complete",
+      "avoid_claim": "The method improves retrieval-answer performance across the benchmark.",
+      "replacement_claim": "The locked matrix executes a complete 24-suite by 9-variant evaluation protocol with no skipped variants.",
+      "evidence_role": "coverage_and_reproducibility",
+      "status": "supported_as_protocol_evidence"
+    },
+    {
+      "claim_id": "verified_vs_candidate_delta",
+      "avoid_claim": "Verified object evidence significantly improves citation precision over candidate evidence.",
+      "replacement_claim": "Candidate and verified evidence-unit variants are comparable baselines whose paired deltas quantify uncertainty and failure modes.",
+      "evidence_role": "baseline_comparison_and_uncertainty",
+      "status": "supported_for_benchmarking_not_performance_win"
+    },
+    {
+      "claim_id": "quality_gate_interpretation",
+      "avoid_claim": "The system is paper-ready for aggregate performance claims.",
+      "replacement_claim": "The failed regression gate identifies a benchmark stress case and motivates failure-taxonomy reporting.",
+      "evidence_role": "negative_result_and_stress_case",
+      "status": "supported_as_limitation_evidence"
+    },
+    {
+      "claim_id": "object_alignment_protocol",
+      "avoid_claim": "Object-aligned verification solves grounding.",
+      "replacement_claim": "Object-aligned verification defines an auditable protocol for separating candidate visual support, verified links, and citation grounding.",
+      "evidence_role": "protocol_definition_and_annotation_evidence",
+      "status": "draft_requires_human_audit_follow_up"
+    },
+    {
+      "claim_id": "public_safe_release",
+      "avoid_claim": "The paper can release full examples and evidence traces.",
+      "replacement_claim": "The benchmark report can release aggregate metrics, artifact names, schema metadata, reason-code counts, and exclusion rules without private payload text.",
+      "evidence_role": "public_safe_reporting",
+      "status": "supported_keep_enforced"
+    },
+    {
+      "claim_id": "human_vlm_limitation",
+      "avoid_claim": "Deterministic verifier outputs are final human/VLM-validated labels.",
+      "replacement_claim": "Deterministic verifier outputs are first-pass benchmark labels; #281 human audit and real VLM smoke remain required before stronger annotation-quality claims.",
+      "evidence_role": "risk_and_limitation",
+      "status": "blocked_until_issue_281_completes"
+    }
+  ],
+  "reusable_artifacts": [
+    {
+      "artifact": "go_no_go_report.md",
+      "role": "decision_anchor",
+      "benchmark_use": "No-go decision, fixed criteria, quality-gate failure, and transition rationale."
+    },
+    {
+      "artifact": "go_no_go_report.json",
+      "role": "machine_readable_decision_anchor",
+      "benchmark_use": "Reason codes, thresholds, bootstrap settings, and follow-up issue link."
+    },
+    {
+      "artifact": "paper_claims/claim_evidence_matrix.json",
+      "role": "claim_rewrite_source",
+      "benchmark_use": "Convert blocked performance claims into benchmark/protocol claims."
+    },
+    {
+      "artifact": "paper_readiness/paper_readiness_audit.json",
+      "role": "readiness_and_gap_source",
+      "benchmark_use": "Matrix coverage, semantic smoke evidence, privacy coverage, and quality-gate gap."
+    },
+    {
+      "artifact": "paper_artifact_registry.json",
+      "role": "registry_source",
+      "benchmark_use": "Reusable artifact filenames and current statuses."
+    },
+    {
+      "artifact": "paper_metric_intervals/paper_metric_intervals.json",
+      "role": "baseline_table_source",
+      "benchmark_use": "Variant-level aggregate means and uncertainty protocol."
+    },
+    {
+      "artifact": "quality_gate_result.json",
+      "role": "stress_case_source",
+      "benchmark_use": "Failed metrics as benchmark stress cases."
+    },
+    {
+      "artifact": "metrics.json",
+      "role": "failure_taxonomy_source",
+      "benchmark_use": "Reason-code counts and variant aggregate metrics."
+    },
+    {
+      "artifact": "metrics_summary.csv",
+      "role": "tabular_failure_taxonomy_source",
+      "benchmark_use": "Compact aggregate table for manual inspection."
+    },
+    {
+      "artifact": "semantic_smoke.json",
+      "role": "provider_backed_smoke_source",
+      "benchmark_use": "Provider-backed semantic vector evidence."
+    },
+    {
+      "artifact": "paper_report/reproducibility.json",
+      "role": "reproducibility_source",
+      "benchmark_use": "Commands, dataset descriptor counts, and privacy policy metadata."
+    }
+  ],
+  "baseline_table_summary": [
+    {
+      "variant_id": "segment_lexical",
+      "query_count": 48,
+      "hit_at_10s": 0.145833,
+      "mrr": 0.166667,
+      "grounded_answer": 0.125,
+      "expected_citation_hit": 0.083333,
+      "unsupported_claim_count": 0.0625
+    },
+    {
+      "variant_id": "domain_lexicon",
+      "query_count": 48,
+      "hit_at_10s": 0.229167,
+      "mrr": 0.207292,
+      "grounded_answer": 0.291667,
+      "expected_citation_hit": 0.125,
+      "unsupported_claim_count": 0.25
+    },
+    {
+      "variant_id": "hybrid",
+      "query_count": 48,
+      "hit_at_10s": 0.875,
+      "mrr": 0.733333,
+      "grounded_answer": 0.791667,
+      "expected_citation_hit": 0.5625,
+      "unsupported_claim_count": 0.291667
+    },
+    {
+      "variant_id": "window",
+      "query_count": 48,
+      "hit_at_10s": 0.166667,
+      "mrr": 0.178819,
+      "grounded_answer": 0.104167,
+      "expected_citation_hit": 0.166667,
+      "unsupported_claim_count": 0.083333
+    },
+    {
+      "variant_id": "window_hybrid",
+      "query_count": 48,
+      "hit_at_10s": 0.666667,
+      "mrr": 0.614931,
+      "grounded_answer": 0.291667,
+      "expected_citation_hit": 0.520833,
+      "unsupported_claim_count": 0.104167
+    },
+    {
+      "variant_id": "rerank",
+      "query_count": 48,
+      "hit_at_10s": 0.166667,
+      "mrr": 0.182292,
+      "grounded_answer": 0.125,
+      "expected_citation_hit": 0.083333,
+      "unsupported_claim_count": 0.0625
+    },
+    {
+      "variant_id": "evidence_unit_candidate",
+      "query_count": 48,
+      "hit_at_10s": 0.520833,
+      "mrr": 0.408681,
+      "grounded_answer": 0.479167,
+      "expected_citation_hit": 0.458333,
+      "unsupported_claim_count": 0.291667
+    },
+    {
+      "variant_id": "evidence_unit_verified",
+      "query_count": 48,
+      "hit_at_10s": 0.541667,
+      "mrr": 0.409722,
+      "grounded_answer": 0.458333,
+      "expected_citation_hit": 0.479167,
+      "unsupported_claim_count": 0.270833
+    },
+    {
+      "variant_id": "evidence_unit_quality_rerank",
+      "query_count": 48,
+      "hit_at_10s": 0.520833,
+      "mrr": 0.463194,
+      "grounded_answer": 0.583333,
+      "expected_citation_hit": 0.458333,
+      "unsupported_claim_count": 0.229167
+    }
+  ],
+  "failure_taxonomy_summary": {
+    "answer_failure_reason_counts": {
+      "retrieval_miss": 291,
+      "grounded_expected_citation": 81,
+      "insufficient_evidence": 45,
+      "unsupported_claims": 15
+    },
+    "failure_stage_reason_counts": {
+      "retrieval:target_not_found": 256,
+      "grounding:expected_citation_miss": 35,
+      "ok:grounded_expected_citation": 81,
+      "grounding:insufficient_evidence": 45,
+      "grounding:unsupported_claims": 15
+    },
+    "interpretation": "Retrieval misses dominate, while insufficient evidence and unsupported claims remain distinct answer-grounding risks."
+  },
+  "risks_and_limitations": [
+    {
+      "id": "issue_281_incomplete",
+      "risk": "#281 human audit and real VLM smoke are incomplete.",
+      "paper_impact": "Deterministic verifier labels should be described as first-pass protocol labels rather than final human/VLM-validated annotations."
+    },
+    {
+      "id": "locked_query_matrix",
+      "risk": "The expanded query set was not available for the no-go decision.",
+      "paper_impact": "Claims should be scoped to the locked 48-query matrix."
+    },
+    {
+      "id": "quality_gate_failed",
+      "risk": "The regression gate failed on a stress case.",
+      "paper_impact": "Use the failure as benchmark evidence and a readiness blocker, not as a passed aggregate result."
+    },
+    {
+      "id": "no_significant_verified_lift",
+      "risk": "The candidate-to-verified citation-precision delta did not meet the fixed significance criterion.",
+      "paper_impact": "Do not frame verified object alignment as a demonstrated performance improvement."
+    }
+  ],
+  "public_safe_policy": {
+    "allowed": [
+      "aggregate_metrics",
+      "confidence_intervals",
+      "reason_code_counts",
+      "suite_ids",
+      "variant_ids",
+      "artifact_filenames",
+      "schema_versions",
+      "pass_fail_statuses",
+      "threshold_metadata"
+    ],
+    "excluded": [
+      "raw query content",
+      "answer content",
+      "transcript content",
+      "candidate evidence content",
+      "local filesystem paths",
+      "private example payloads",
+      "copied evidence snippets"
+    ]
+  },
+  "next_tasks": [
+    "Convert benchmark claims into a paper outline.",
+    "Add the 9-variant aggregate baseline table to the draft.",
+    "Add a failure-taxonomy section centered on retrieval miss, insufficient evidence, and unsupported claim behavior.",
+    "Keep annotation-quality claims blocked until #281 audit evidence exists.",
+    "Run the public-safe scanner before PR or manuscript export."
+  ]
+}
