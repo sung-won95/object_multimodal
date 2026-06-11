@@ -1,0 +1,1553 @@
+{
+  "schema_version": "paper-readiness-audit-v1",
+  "run_id": "mit_deep_learning_stt_full_provider_matrix_v2",
+  "ready": false,
+  "gap_count": 1,
+  "disclaimer": "This audit is a private-safe readiness checklist and gap report. It is not a paper acceptance guarantee.",
+  "artifacts": {
+    "experiment_manifest": "experiment_manifest.json",
+    "metrics": "metrics.json",
+    "query_results": "query_results.jsonl",
+    "quality_gate_result": "quality_gate_result.json",
+    "reproducibility": "paper_report/reproducibility.json",
+    "semantic_smoke": "semantic_smoke.json"
+  },
+  "checks": [
+    {
+      "id": "matrix_variant_coverage",
+      "title": "Matrix Variant Coverage",
+      "status": "pass",
+      "summary": "Required retrieval-answer matrix variants are covered.",
+      "evidence": {
+        "required_variant_ids": [
+          "segment_lexical",
+          "domain_lexicon",
+          "hybrid",
+          "window",
+          "window_hybrid",
+          "rerank",
+          "evidence_unit_candidate",
+          "evidence_unit_verified",
+          "evidence_unit_quality_rerank"
+        ],
+        "matrix_suite_count": 24,
+        "suite_coverage": [
+          {
+            "suite_id": "mitdl_lec01",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec02",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec03",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec04",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec05",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec06",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec07",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec08",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec09",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec10",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec11",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec12",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec13",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec14",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec15",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec16",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec17",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec18",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec19",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec20",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec21",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec23",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_lec24",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          },
+          {
+            "suite_id": "mitdl_review",
+            "schema_version": "retrieval-answer-ablation-matrix-v1",
+            "required_variant_count": 9,
+            "covered_variant_count": 9,
+            "missing_variant_ids": []
+          }
+        ]
+      },
+      "gaps": []
+    },
+    {
+      "id": "semantic_live_smoke_evidence",
+      "title": "Semantic Live Smoke Evidence",
+      "status": "pass",
+      "summary": "Semantic live smoke evidence is present.",
+      "evidence": {
+        "explicit_smoke_ok": true,
+        "hybrid_metric_variant_count": 48,
+        "hybrid_query_result_count": 96,
+        "semantic_query_result_count": 94,
+        "query_results_available": true
+      },
+      "gaps": []
+    },
+    {
+      "id": "answer_citation_metrics",
+      "title": "Answer/Citation Metrics",
+      "status": "pass",
+      "summary": "Answer and citation aggregate metrics are present.",
+      "evidence": {
+        "suite_metric_coverage": [
+          {
+            "suite_id": "mitdl_lec01",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec02",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec03",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec04",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec05",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec06",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec07",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec08",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec09",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec10",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec11",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec12",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec13",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec14",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec15",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec16",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec17",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec18",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec19",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec20",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec21",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec23",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_lec24",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          },
+          {
+            "suite_id": "mitdl_review",
+            "required_metric_names": [
+              "grounded_answer_ratio",
+              "citation_coverage_ratio",
+              "answer_citation_precision",
+              "answer_citation_recall",
+              "expected_citation_hit_ratio",
+              "mean_unsupported_claim_count",
+              "unsupported_claim_ratio"
+            ],
+            "missing_metric_names": [],
+            "variant_coverage": [
+              {
+                "variant_id": "segment_lexical",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "domain_lexicon",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "window_hybrid",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "rerank",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_candidate",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_verified",
+                "missing_metric_names": []
+              },
+              {
+                "variant_id": "evidence_unit_quality_rerank",
+                "missing_metric_names": []
+              }
+            ]
+          }
+        ]
+      },
+      "gaps": []
+    },
+    {
+      "id": "quality_gate_pass",
+      "title": "Quality Gate Pass",
+      "status": "fail",
+      "summary": "Quality gate did not pass.",
+      "evidence": {
+        "schema_version": "retrieval-quality-gate-result-v1",
+        "gate_id": "mit_deep_learning_stt_paper_matrix_regression_gate_v1",
+        "passed": false,
+        "skipped": false,
+        "failure_count": 3,
+        "failure_codes": [
+          "metric_below_threshold"
+        ]
+      },
+      "gaps": [
+        {
+          "code": "quality_gate_not_passed",
+          "message": "Quality gate did not pass."
+        }
+      ]
+    },
+    {
+      "id": "reproducibility_metadata",
+      "title": "Reproducibility Metadata",
+      "status": "pass",
+      "summary": "Reproducibility metadata is present.",
+      "evidence": {
+        "schema_version": "evaluation-report-v1",
+        "commit_sha_present": true,
+        "command_present": true,
+        "dataset_descriptor_count": 24,
+        "missing_fields": []
+      },
+      "gaps": []
+    },
+    {
+      "id": "privacy_statement",
+      "title": "Privacy Statement",
+      "status": "pass",
+      "summary": "Private-safe exclusion statements are present.",
+      "evidence": {
+        "privacy_coverage": [
+          {
+            "artifact": "experiment_manifest",
+            "covered_exclusion_keys": [
+              "raw_queries",
+              "answer_text",
+              "transcript_content",
+              "transcript_excerpts",
+              "candidate_evidence_text",
+              "local_paths"
+            ]
+          },
+          {
+            "artifact": "quality_gate_result",
+            "covered_exclusion_keys": [
+              "raw_queries",
+              "transcript_content",
+              "transcript_excerpts",
+              "candidate_evidence_text"
+            ]
+          },
+          {
+            "artifact": "reproducibility",
+            "covered_exclusion_keys": [
+              "raw_queries",
+              "answer_text",
+              "transcript_content",
+              "transcript_excerpts",
+              "candidate_evidence_text",
+              "local_paths"
+            ]
+          }
+        ],
+        "missing_artifacts": [],
+        "missing_exclusion_keys": []
+      },
+      "gaps": []
+    }
+  ],
+  "gaps": [
+    {
+      "code": "quality_gate_not_passed",
+      "message": "Quality gate did not pass.",
+      "check_id": "quality_gate_pass"
+    }
+  ],
+  "privacy": {
+    "payload": "artifact_schema_and_aggregate_metadata_only",
+    "raw_queries": "excluded",
+    "answer_text": "excluded",
+    "transcript_content": "excluded",
+    "candidate_evidence_text": "excluded",
+    "local_paths": "excluded",
+    "raw_private_text": "excluded"
+  }
+}

@@ -1,0 +1,194 @@
+[
+  {
+    "suite_id": "mitdl_lec01",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec01_mp4_56139a7a",
+    "indexed_documents": 1023,
+    "document_vectors": 1023,
+    "missing_vectors": 0,
+    "reset": true
+  },
+  {
+    "suite_id": "mitdl_lec02",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec02_mp4_137b37f3",
+    "indexed_documents": 1394,
+    "document_vectors": 1394,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec03",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec03_mp4_e6784d22",
+    "indexed_documents": 1395,
+    "document_vectors": 1395,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec04",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec04_mp4_3860bda7",
+    "indexed_documents": 1451,
+    "document_vectors": 1451,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec05",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec05_mp4_df1d6cc5",
+    "indexed_documents": 1633,
+    "document_vectors": 1633,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec06",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec06_mp4_6d2876fe",
+    "indexed_documents": 1527,
+    "document_vectors": 1527,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec07",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec07_mp4_95366e80",
+    "indexed_documents": 1478,
+    "document_vectors": 1478,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec08",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec08_mp4_6943752f",
+    "indexed_documents": 1384,
+    "document_vectors": 1384,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec09",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec09_mp4_267ad20c",
+    "indexed_documents": 1565,
+    "document_vectors": 1565,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec10",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec10_mp4_5f17cf1d",
+    "indexed_documents": 1319,
+    "document_vectors": 1319,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec11",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec11_mp4_259b5768",
+    "indexed_documents": 1592,
+    "document_vectors": 1592,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec12",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec12_mp4_ec48c08b",
+    "indexed_documents": 1354,
+    "document_vectors": 1354,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec13",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec13_mp4_05eb0467",
+    "indexed_documents": 1165,
+    "document_vectors": 1165,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec14",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec14_mp4_892c261e",
+    "indexed_documents": 1580,
+    "document_vectors": 1580,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec15",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec15_mp4_4c650c0a",
+    "indexed_documents": 1606,
+    "document_vectors": 1606,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec16",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec16_mp4_693e3912",
+    "indexed_documents": 1624,
+    "document_vectors": 1624,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec17",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec17_mp4_ccf2b0f7",
+    "indexed_documents": 1055,
+    "document_vectors": 1055,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec18",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec18_mp4_7af6a0b8",
+    "indexed_documents": 1340,
+    "document_vectors": 1340,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec19",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec19_mp4_7cb91035",
+    "indexed_documents": 1216,
+    "document_vectors": 1216,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec20",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec20_mp4_ab42173e",
+    "indexed_documents": 744,
+    "document_vectors": 744,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec21",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec21_mp4_b5770da3",
+    "indexed_documents": 1395,
+    "document_vectors": 1395,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec23",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec23_mp4_1f769853",
+    "indexed_documents": 1222,
+    "document_vectors": 1222,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_lec24",
+    "project": "mit_deep_learning_stt__mit6_7960f24_lec24_mp4_ab60a8c1",
+    "indexed_documents": 1853,
+    "document_vectors": 1853,
+    "missing_vectors": 0,
+    "reset": false
+  },
+  {
+    "suite_id": "mitdl_review",
+    "project": "mit_deep_learning_stt__mit6_7960f24_review_mp4_40028071",
+    "indexed_documents": 484,
+    "document_vectors": 484,
+    "missing_vectors": 0,
+    "reset": false
+  }
+]
