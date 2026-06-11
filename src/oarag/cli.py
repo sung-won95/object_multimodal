@@ -1222,7 +1222,15 @@ def build_parser() -> argparse.ArgumentParser:
     vlm_link_verifier.add_argument(
         "--cache",
         type=Path,
-        help="Public-safe link-id decision cache JSON path. Relative paths are resolved from project dir.",
+        help=(
+            "Public-safe link-id decision cache JSON path. Relative paths are resolved "
+            "from project dir. Defaults to manifests/entity_links.vlm_verifier_cache.json."
+        ),
+    )
+    vlm_link_verifier.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable the default project-local VLM verifier decision cache.",
     )
     vlm_link_verifier.add_argument(
         "--report",
@@ -2803,6 +2811,7 @@ def cmd_verify_entity_links_vlm(args: argparse.Namespace) -> None:
         frames_manifest_path=args.frames_manifest,
         output_path=args.output,
         cache_path=args.cache,
+        cache_enabled=not args.no_cache,
         report_path=args.report,
         audit_template_path=args.human_audit_template,
         backend=args.vlm_backend,

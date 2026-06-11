@@ -124,6 +124,25 @@ def test_verify_entity_links_vlm_cli_accepts_project_dir_and_fixture_backend() -
     assert args.vlm_backend == "jsonl"
     assert args.limit == 5
     assert args.skip_on_unavailable is True
+    assert args.no_cache is False
+
+
+def test_verify_entity_links_vlm_cli_can_disable_default_cache() -> None:
+    args = build_parser().parse_args(
+        [
+            "verify-entity-links-vlm",
+            "--project-dir",
+            "artifacts/projects/sample",
+            "--vlm-backend",
+            "jsonl",
+            "--vlm-options",
+            "jsonl_path=manifests/vlm_link_decisions.jsonl",
+            "--no-cache",
+        ]
+    )
+
+    assert args.func is cmd_verify_entity_links_vlm
+    assert args.no_cache is True
 
 
 def test_index_project_accepts_project_id() -> None:

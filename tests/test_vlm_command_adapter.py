@@ -145,8 +145,8 @@ def test_vlm_command_adapter_reads_verifier_request_and_outputs_decision(
                         "content": json.dumps(
                             {
                                 "decision": "verified",
-                                "reason_code": "speaker_refers_to_visible_curve",
-                                "public_reason": "Speaker refers to the visible curve.",
+                                "reason": "Look at this curve.",
+                                "public_reason": "Look at this curve.",
                                 "confidence": 0.88,
                             }
                         )
@@ -169,11 +169,12 @@ def test_vlm_command_adapter_reads_verifier_request_and_outputs_decision(
     assert decision == {
         "parser_version": "oarag-openai-compatible-vlm-link-verifier-v1",
         "decision": "verified",
-        "reason_code": "speaker_refers_to_visible_curve",
-        "public_reason": "Speaker refers to the visible curve.",
+        "reason_code": "vlm_decision_verified",
+        "public_reason": "VLM judged this link as verified.",
         "confidence": 0.88,
     }
     assert "Look at this curve." in str(captured["prompt"])
+    assert "Look at this curve." not in json.dumps(decision)
     assert str(captured["image_url"]).startswith("data:image/jpeg;base64,")
 
 

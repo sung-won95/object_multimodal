@@ -18,7 +18,6 @@ PYTHONPATH=src python -m oarag verify-entity-links-vlm \
   --vlm-model fixture-vlm \
   --vlm-options jsonl_path=manifests/vlm_link_decisions.jsonl \
   --output manifests/entity_links.vlm_verified.jsonl \
-  --cache manifests/entity_links.vlm_verifier_cache.json \
   --report reports/vlm_entity_link_verifier.json \
   --human-audit-template reports/vlm_entity_link_verifier_human_audit_template.jsonl
 
@@ -34,7 +33,13 @@ Expected smoke properties:
 - evidence-unit rebuild has
   `verified_link_source_counts.vlm_verifier > 0` when at least one verified
   decision is present
-- cache stores link-id keyed public-safe decisions and reason codes only
+- cache is enabled by default at
+  `manifests/entity_links.vlm_verifier_cache.json`; use `--no-cache` only for
+  explicit cache-free debugging
+- cache stores link-id keyed public-safe decisions and allowlisted/generic
+  reason codes only
+- backend free-text `public_reason`/`reason` values are not copied into public
+  artifacts; public reasons are generated from allowlisted/generic codes
 - backend unavailability writes an explicit skip report and never promotes all
   candidates as a fallback
 

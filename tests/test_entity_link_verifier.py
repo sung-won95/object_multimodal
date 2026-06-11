@@ -20,21 +20,21 @@ def test_vlm_link_verifier_promotes_only_verified_and_counts_source(
                 "link_id": "link_verified",
                 "decision": "verified",
                 "reason_code": "speaker_refers_to_visible_chart",
-                "public_reason": "Speaker refers to the visible chart.",
+                "public_reason": "Gradient descent follows this chart.",
                 "confidence": 0.91,
             },
             {
                 "link_id": "link_rejected",
                 "decision": "rejected",
-                "reason_code": "visual_entity_not_referenced",
-                "public_reason": "Visual entity is not referenced.",
+                "reason": "Gradient descent follows this chart.",
+                "public_reason": "Gradient descent follows this chart.",
                 "confidence": 0.84,
             },
             {
                 "link_id": "link_uncertain",
                 "decision": "uncertain",
                 "reason_code": "ambiguous_deictic_reference",
-                "public_reason": "Reference is ambiguous.",
+                "public_reason": "Gradient descent follows this chart.",
                 "confidence": 0.51,
             },
         ],
@@ -62,9 +62,14 @@ def test_vlm_link_verifier_promotes_only_verified_and_counts_source(
     assert promoted["verification_source"] == VLM_ENTITY_LINK_VERIFIER_SOURCE
     assert promoted["verifier"] == VLM_ENTITY_LINK_VERIFIER_SOURCE
     assert promoted["reason_metadata"]["vlm_verifier"]["decision"] == "verified"
+    assert (
+        promoted["reason_metadata"]["vlm_verifier"]["public_reason"]
+        == "VLM judged that the speaker refers to the visible entity."
+    )
     assert rejected.get("alignment_status") != "verified"
     assert rejected.get("verification_status") != "verified"
     assert rejected["reason_metadata"]["vlm_verifier"]["decision"] == "rejected"
+    assert rejected["reason_metadata"]["vlm_verifier"]["reason_code"] == "vlm_decision_rejected"
     assert uncertain.get("alignment_status") != "verified"
     assert uncertain.get("verification_status") != "verified"
     assert uncertain["reason_metadata"]["vlm_verifier"]["decision"] == "uncertain"
@@ -92,6 +97,13 @@ def test_vlm_link_verifier_promotes_only_verified_and_counts_source(
     assert report["counts"]["uncertain"] == 1
     assert report["manual_audit"]["human_audit_completed"] is False
     assert summary["counts"]["promoted_links"] == 1
+    for artifact in (
+        project_dir / "manifests" / "entity_links.vlm.jsonl",
+        project_dir / "manifests" / "entity_links.vlm.cache.json",
+        project_dir / "reports" / "vlm_report.json",
+        project_dir / "reports" / "vlm_audit_template.jsonl",
+    ):
+        assert "Gradient descent follows this chart" not in artifact.read_text(encoding="utf-8")
 
 
 def test_vlm_link_verifier_cache_is_public_safe_and_replays_without_backend(
@@ -99,7 +111,7 @@ def test_vlm_link_verifier_cache_is_public_safe_and_replays_without_backend(
 ) -> None:
     project_dir = _write_project_fixture(tmp_path)
     fixture = project_dir / "manifests" / "vlm_link_decisions.jsonl"
-    cache = project_dir / "manifests" / "entity_links.vlm.cache.json"
+    cache = project_dir / "manifests" / "entity_links.vlm_verifier_cache.json"
     _write_jsonl(
         fixture,
         [
@@ -120,7 +132,6 @@ def test_vlm_link_verifier_cache_is_public_safe_and_replays_without_backend(
         model="fixture-vlm",
         options={"jsonl_path": fixture},
         output_path=Path("manifests/entity_links.vlm.jsonl"),
-        cache_path=cache,
     )
     fixture.unlink()
     second = verify_entity_links_vlm(
@@ -129,15 +140,39 @@ def test_vlm_link_verifier_cache_is_public_safe_and_replays_without_backend(
         model="fixture-vlm",
         options={"jsonl_path": fixture},
         output_path=Path("manifests/entity_links.vlm.second.jsonl"),
-        cache_path=cache,
     )
 
     cache_text = cache.read_text(encoding="utf-8")
     assert "Gradient descent follows this chart" not in cache_text
     assert "frames/frame_target.jpg" not in cache_text
     assert first["counts"]["links_fresh"] == 3
+    assert first["paths"]["cache"] == str(cache)
     assert second["counts"]["links_cached"] == 3
     assert second["status"] == "completed"
+
+
+def test_vlm_link_verifier_can_disable_default_cache(tmp_path: Path) -> None:
+    project_dir = _write_project_fixture(tmp_path)
+    _write_jsonl(
+        project_dir / "manifests" / "vlm_link_decisions.jsonl",
+        [
+            {"link_id": "link_verified", "decision": "verified", "reason_code": "not_referenced"},
+            {"link_id": "link_rejected", "decision": "rejected", "reason_code": "not_referenced"},
+            {"link_id": "link_uncertain", "decision": "uncertain", "reason_code": "ambiguous"},
+        ],
+    )
+
+    summary = verify_entity_links_vlm(
+        project_dir=project_dir,
+        backend="jsonl",
+        model="fixture-vlm",
+        options={"jsonl_path": "manifests/vlm_link_decisions.jsonl"},
+        output_path=Path("manifests/entity_links.vlm.jsonl"),
+        cache_enabled=False,
+    )
+
+    assert summary["paths"]["cache"] is None
+    assert not (project_dir / "manifests" / "entity_links.vlm_verifier_cache.json").exists()
 
 
 def test_vlm_link_verifier_unavailable_backend_writes_explicit_skip(

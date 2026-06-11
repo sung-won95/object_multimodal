@@ -30,6 +30,24 @@ VLM_ENTITY_LINK_VERIFIER_AUDIT_SCHEMA_VERSION = (
 VLM_ENTITY_LINK_VERIFIER_SOURCE = "vlm_verifier"
 DEFAULT_VERIFIER_PROMPT_TEMPLATE_VERSION = "vlm-entity-link-verifier-v1"
 ALLOWED_DECISIONS = {"verified", "rejected", "uncertain"}
+GENERIC_REASON_BY_DECISION = {
+    "verified": "vlm_decision_verified",
+    "rejected": "vlm_decision_rejected",
+    "uncertain": "vlm_decision_uncertain",
+}
+PUBLIC_REASON_TEXT_BY_CODE = {
+    "speaker_refers_to_visible_chart": "VLM judged that the speaker refers to the visible entity.",
+    "speaker_refers_to_visible_curve": "VLM judged that the speaker refers to the visible entity.",
+    "visual_entity_not_referenced": "VLM judged that the visual entity is not referenced.",
+    "not_referenced": "VLM judged that the visual entity is not referenced.",
+    "ambiguous_deictic_reference": "VLM judged that the reference is ambiguous.",
+    "ambiguous": "VLM judged that the reference is ambiguous.",
+    "configured_default_decision": "VLM verifier used a configured default decision.",
+    "vlm_decision_verified": "VLM judged this link as verified.",
+    "vlm_decision_rejected": "VLM judged this link as rejected.",
+    "vlm_decision_uncertain": "VLM judged this link as uncertain.",
+}
+PUBLIC_REASON_CODE_ALLOWLIST = frozenset(PUBLIC_REASON_TEXT_BY_CODE)
 
 
 class VLMVerifierUnavailable(RuntimeError):
@@ -69,6 +87,7 @@ def verify_entity_links_vlm(
     frames_manifest_path: Path | None = None,
     output_path: Path | None = None,
     cache_path: Path | None = None,
+    cache_enabled: bool = True,
     report_path: Path | None = None,
     audit_template_path: Path | None = None,
     backend: str,
@@ -112,7 +131,7 @@ def verify_entity_links_vlm(
             path=cache_path,
             default=resolved_project_dir / "manifests" / "entity_links.vlm_verifier_cache.json",
         )
-        if cache_path is not None
+        if cache_enabled
         else None
     )
     resolved_report_path = (
@@ -443,13 +462,14 @@ def _normalize_decision(
         raise VLMVerifierParseError(
             f"VLM verifier decision must be one of {sorted(ALLOWED_DECISIONS)}"
         )
-    reason_code = _public_reason_code(
+    reason_code = _safe_reason_code(
         parent.get("reason_code")
         or parent.get("public_reason_code")
         or parent.get("reason")
-        or f"vlm_decision_{decision}"
+        or GENERIC_REASON_BY_DECISION[decision],
+        decision=decision,
     )
-    public_reason = _public_reason_text(parent.get("public_reason") or reason_code)
+    public_reason = _safe_public_reason(reason_code=reason_code, decision=decision)
     confidence = _optional_float(parent.get("confidence"))
     if confidence is not None and not 0.0 <= confidence <= 1.0:
         raise VLMVerifierParseError("VLM verifier confidence must be between 0 and 1")
@@ -542,7 +562,7 @@ def _public_report(
         "status": "skipped" if skipped else "completed",
         "skip": {
             "skipped": skipped,
-            "reason": _public_reason_text(skip_reason) if skip_reason else None,
+            "reason": "vlm_backend_unavailable" if skip_reason else None,
             "no_candidate_auto_promotion": True,
         },
         "backend": {
@@ -749,6 +769,20 @@ def _public_reason_code(value: Any) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in text)
     cleaned = "_".join(part for part in cleaned.split("_") if part)
     return cleaned[:80] or "unspecified_public_reason"
+
+
+def _safe_reason_code(value: Any, *, decision: str) -> str:
+    code = _public_reason_code(value)
+    if code in PUBLIC_REASON_CODE_ALLOWLIST:
+        return code
+    return GENERIC_REASON_BY_DECISION.get(decision, "vlm_decision_uncertain")
+
+
+def _safe_public_reason(*, reason_code: str, decision: str) -> str:
+    return PUBLIC_REASON_TEXT_BY_CODE.get(
+        reason_code,
+        PUBLIC_REASON_TEXT_BY_CODE[GENERIC_REASON_BY_DECISION.get(decision, "vlm_decision_uncertain")],
+    )
 
 
 def _public_reason_text(value: Any) -> str:

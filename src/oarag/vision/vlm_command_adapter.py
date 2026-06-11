@@ -23,6 +23,24 @@ PARSER_VERSION = "oarag-openai-compatible-command-v1"
 VERIFIER_PARSER_VERSION = "oarag-openai-compatible-vlm-link-verifier-v1"
 OBSERVATION_REQUEST_SCHEMA_VERSION = "vlm-command-request-v1"
 VERIFIER_REQUEST_SCHEMA_VERSION = "vlm-entity-link-verifier-request-v1"
+GENERIC_REASON_BY_DECISION = {
+    "verified": "vlm_decision_verified",
+    "rejected": "vlm_decision_rejected",
+    "uncertain": "vlm_decision_uncertain",
+}
+PUBLIC_REASON_TEXT_BY_CODE = {
+    "speaker_refers_to_visible_chart": "VLM judged that the speaker refers to the visible entity.",
+    "speaker_refers_to_visible_curve": "VLM judged that the speaker refers to the visible entity.",
+    "visual_entity_not_referenced": "VLM judged that the visual entity is not referenced.",
+    "not_referenced": "VLM judged that the visual entity is not referenced.",
+    "ambiguous_deictic_reference": "VLM judged that the reference is ambiguous.",
+    "ambiguous": "VLM judged that the reference is ambiguous.",
+    "configured_default_decision": "VLM verifier used a configured default decision.",
+    "vlm_decision_verified": "VLM judged this link as verified.",
+    "vlm_decision_rejected": "VLM judged this link as rejected.",
+    "vlm_decision_uncertain": "VLM judged this link as uncertain.",
+}
+PUBLIC_REASON_CODE_ALLOWLIST = frozenset(PUBLIC_REASON_TEXT_BY_CODE)
 
 
 class AdapterConfigError(RuntimeError):
@@ -442,17 +460,21 @@ def _normalize_verifier_decision(decision: Mapping[str, Any]) -> dict[str, Any]:
             raise AdapterResponseError("verifier confidence must be numeric") from exc
         if not 0.0 <= confidence <= 1.0:
             raise AdapterResponseError("verifier confidence must be between 0 and 1")
-    reason_code = _public_code(
+    reason_code = _safe_reason_code(
         decision.get("reason_code")
         or decision.get("public_reason_code")
         or decision.get("reason")
-        or f"vlm_decision_{normalized_decision}"
+        or GENERIC_REASON_BY_DECISION[normalized_decision],
+        decision=normalized_decision,
     )
     normalized = {
         "parser_version": _non_empty(decision.get("parser_version")) or VERIFIER_PARSER_VERSION,
         "decision": normalized_decision,
         "reason_code": reason_code,
-        "public_reason": _public_text(decision.get("public_reason") or reason_code),
+        "public_reason": _safe_public_reason(
+            reason_code=reason_code,
+            decision=normalized_decision,
+        ),
     }
     if confidence is not None:
         normalized["confidence"] = confidence
@@ -464,6 +486,22 @@ def _public_code(value: Any) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in text)
     cleaned = "_".join(part for part in cleaned.split("_") if part)
     return cleaned[:80] or "unspecified_public_reason"
+
+
+def _safe_reason_code(value: Any, *, decision: str) -> str:
+    code = _public_code(value)
+    if code in PUBLIC_REASON_CODE_ALLOWLIST:
+        return code
+    return GENERIC_REASON_BY_DECISION.get(decision, "vlm_decision_uncertain")
+
+
+def _safe_public_reason(*, reason_code: str, decision: str) -> str:
+    return PUBLIC_REASON_TEXT_BY_CODE.get(
+        reason_code,
+        PUBLIC_REASON_TEXT_BY_CODE[
+            GENERIC_REASON_BY_DECISION.get(decision, "vlm_decision_uncertain")
+        ],
+    )
 
 
 def _public_text(value: Any) -> str:
