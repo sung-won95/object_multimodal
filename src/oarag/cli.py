@@ -28,7 +28,10 @@ from oarag.core.config import DEFAULT_MEILI_API_KEY, DEFAULT_MEILI_URL, ENV_STT_
 from oarag.ingestion.eduvidqa import iter_lecture_segments, iter_records
 from oarag.evaluation.eval import candidate_diagnostics, evaluate_query, summarize
 from oarag.vision.entity_links import link_entities
-from oarag.vision.entity_link_verifier import verify_entity_links_vlm
+from oarag.vision.entity_link_verifier import (
+    load_human_audit_agreement,
+    verify_entity_links_vlm,
+)
 from oarag.vision.strict_deterministic_verifier import (
     DEFAULT_STRICT_LEXICAL_OVERLAP_THRESHOLD,
     verify_entity_links_strict_deterministic,
@@ -1269,6 +1272,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write an explicit skip summary instead of promoting links when the VLM backend is unavailable.",
     )
     vlm_link_verifier.set_defaults(func=cmd_verify_entity_links_vlm)
+
+    vlm_audit_summary = subparsers.add_parser(
+        "summarize-vlm-human-audit",
+        help="Summarize completed human audit rows for VLM entity-link verifier decisions",
+    )
+    vlm_audit_summary.add_argument(
+        "--audit",
+        type=Path,
+        required=True,
+        help="Human-filled JSONL audit template emitted by verify-entity-links-vlm.",
+    )
+    vlm_audit_summary.add_argument(
+        "--output",
+        type=Path,
+        help="Optional public-safe JSON report path.",
+    )
+    vlm_audit_summary.set_defaults(func=cmd_summarize_vlm_human_audit)
 
     query = subparsers.add_parser("query", help="Search one query")
     query.add_argument("--index", required=True)
@@ -2821,6 +2841,13 @@ def cmd_verify_entity_links_vlm(args: argparse.Namespace) -> None:
         limit=args.limit,
         skip_on_unavailable=args.skip_on_unavailable,
     )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def cmd_summarize_vlm_human_audit(args: argparse.Namespace) -> None:
+    summary = load_human_audit_agreement(args.audit)
+    if args.output is not None:
+        write_json(args.output, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 

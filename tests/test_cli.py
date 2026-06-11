@@ -19,6 +19,7 @@ from oarag.cli import (
     cmd_index_project_windows,
     cmd_query_project_dual_candidates,
     cmd_query_project_evidence_units,
+    cmd_summarize_vlm_human_audit,
     cmd_verify_entity_links_vlm,
     parse_vlm_options,
 )
@@ -143,6 +144,61 @@ def test_verify_entity_links_vlm_cli_can_disable_default_cache() -> None:
 
     assert args.func is cmd_verify_entity_links_vlm
     assert args.no_cache is True
+
+
+def test_summarize_vlm_human_audit_cli_accepts_paths() -> None:
+    args = build_parser().parse_args(
+        [
+            "summarize-vlm-human-audit",
+            "--audit",
+            "reports/vlm_audit_template.jsonl",
+            "--output",
+            "reports/vlm_audit_agreement.json",
+        ]
+    )
+
+    assert args.func is cmd_summarize_vlm_human_audit
+    assert args.audit == Path("reports/vlm_audit_template.jsonl")
+    assert args.output == Path("reports/vlm_audit_agreement.json")
+
+
+def test_summarize_vlm_human_audit_cli_writes_public_report(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    audit = tmp_path / "audit.jsonl"
+    audit.write_text(
+        "\n".join(
+            [
+                json.dumps({"vlm_decision": "verified", "human_decision": "verified"}),
+                json.dumps({"vlm_decision": "rejected", "human_decision": "uncertain"}),
+                json.dumps({"vlm_decision": "uncertain", "human_decision": ""}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "reports" / "agreement.json"
+    args = build_parser().parse_args(
+        [
+            "summarize-vlm-human-audit",
+            "--audit",
+            str(audit),
+            "--output",
+            str(output),
+        ]
+    )
+
+    args.func(args)
+
+    printed = json.loads(capsys.readouterr().out)
+    written = json.loads(output.read_text(encoding="utf-8"))
+    assert printed == written
+    assert printed["completed_rows"] == 2
+    assert printed["matches"] == 1
+    assert printed["agreement_rate"] == 0.5
+    assert printed["meets_issue_281_sample_size"] is False
+    assert printed["public_safe"] is True
 
 
 def test_index_project_accepts_project_id() -> None:
