@@ -20,6 +20,9 @@ ENV_TIMEOUT_SECONDS = "OARAG_VLM_TIMEOUT_SECONDS"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 PARSER_VERSION = "oarag-openai-compatible-command-v1"
+VERIFIER_PARSER_VERSION = "oarag-openai-compatible-vlm-link-verifier-v1"
+OBSERVATION_REQUEST_SCHEMA_VERSION = "vlm-command-request-v1"
+VERIFIER_REQUEST_SCHEMA_VERSION = "vlm-entity-link-verifier-request-v1"
 
 
 class AdapterConfigError(RuntimeError):
@@ -116,6 +119,10 @@ def _run_request(args: argparse.Namespace) -> int:
             raise AdapterConfigError(
                 "Missing required real VLM config: " + ", ".join(missing)
             )
+        if request.get("schema_version") == VERIFIER_REQUEST_SCHEMA_VERSION:
+            decision = run_verifier_adapter_request(request=request, args=args)
+            _write_json(decision)
+            return 0
         observations = run_adapter_request(request=request, args=args)
     except AdapterConfigError as exc:
         _write_error(exc, status="blocked_missing_config")
@@ -143,6 +150,24 @@ def run_adapter_request(*, request: Mapping[str, Any], args: argparse.Namespace)
     return [_normalize_observation(observation) for observation in observations]
 
 
+def run_verifier_adapter_request(
+    *,
+    request: Mapping[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    frame = _request_frame(request)
+    image_url = _frame_image_data_url(frame=frame, frame_root=args.frame_root)
+    response_payload = _call_chat_completions(
+        api_key=_api_key(args),
+        base_url=_base_url(args),
+        model=_request_model(request),
+        image_url=image_url,
+        prompt=_verifier_prompt_from_request(request),
+        timeout_seconds=_timeout_seconds(),
+    )
+    return _normalize_verifier_decision(_verifier_decision_from_response(response_payload))
+
+
 def _read_request() -> dict[str, Any]:
     try:
         payload = json.load(sys.stdin)
@@ -154,8 +179,14 @@ def _read_request() -> dict[str, Any]:
 
 
 def _validate_request(request: Mapping[str, Any]) -> None:
-    if request.get("schema_version") != "vlm-command-request-v1":
-        raise AdapterResponseError("expected schema_version=vlm-command-request-v1")
+    if request.get("schema_version") not in {
+        OBSERVATION_REQUEST_SCHEMA_VERSION,
+        VERIFIER_REQUEST_SCHEMA_VERSION,
+    }:
+        raise AdapterResponseError(
+            "expected schema_version=vlm-command-request-v1 "
+            "or vlm-entity-link-verifier-request-v1"
+        )
     frame = request.get("frame")
     if not isinstance(frame, dict):
         raise AdapterResponseError("request.frame is required")
@@ -244,6 +275,28 @@ def _prompt_from_request(request: Mapping[str, Any]) -> str:
     )
 
 
+def _verifier_prompt_from_request(request: Mapping[str, Any]) -> str:
+    template = _non_empty(request.get("prompt_template"))
+    if template is not None:
+        return template
+    version = _non_empty(request.get("prompt_template_version")) or "vlm-entity-link-verifier-v1"
+    segment = request.get("segment") if isinstance(request.get("segment"), Mapping) else {}
+    entity = request.get("visual_entity") if isinstance(request.get("visual_entity"), Mapping) else {}
+    link = request.get("link") if isinstance(request.get("link"), Mapping) else {}
+    return (
+        f"Prompt template: {version}\n"
+        "Decide whether the speaker in this transcript segment is actually referring "
+        "to or explaining the visual entity in the frame. Return strict JSON only.\n"
+        "Allowed decisions: verified, rejected, uncertain.\n"
+        "Return fields: decision, reason_code, public_reason, confidence.\n"
+        "The public_reason must be short and must not quote the raw transcript, expose "
+        "local paths, or include private identifiers.\n"
+        f"Link evidence: {json.dumps(link.get('evidence', []), ensure_ascii=False)}\n"
+        f"Transcript segment: {segment.get('transcript_text', '')}\n"
+        f"Visual entity metadata: {json.dumps(entity, ensure_ascii=False)}"
+    )
+
+
 def _call_chat_completions(
     *,
     api_key: str,
@@ -317,6 +370,19 @@ def _observations_from_response(response: Mapping[str, Any]) -> list[dict[str, A
     return observations
 
 
+def _verifier_decision_from_response(response: Mapping[str, Any]) -> dict[str, Any]:
+    content = _chat_message_content(response)
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise AdapterResponseError("VLM verifier response message was not JSON") from exc
+    if isinstance(parsed, Mapping) and isinstance(parsed.get("decision"), Mapping):
+        parsed = parsed["decision"]
+    if not isinstance(parsed, Mapping):
+        raise AdapterResponseError("VLM verifier response JSON must be an object")
+    return dict(parsed)
+
+
 def _chat_message_content(response: Mapping[str, Any]) -> str:
     choices = response.get("choices")
     if not isinstance(choices, list) or not choices:
@@ -359,6 +425,50 @@ def _normalize_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
         normalized["confidence"] = confidence
     normalized.setdefault("observation_type", "frame_summary")
     return normalized
+
+
+def _normalize_verifier_decision(decision: Mapping[str, Any]) -> dict[str, Any]:
+    value = _non_empty(decision.get("decision") or decision.get("status"))
+    if value is None:
+        raise AdapterResponseError("verifier decision is required")
+    normalized_decision = value.casefold()
+    if normalized_decision not in {"verified", "rejected", "uncertain"}:
+        raise AdapterResponseError("verifier decision must be verified, rejected, or uncertain")
+    confidence = decision.get("confidence")
+    if confidence is not None:
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError) as exc:
+            raise AdapterResponseError("verifier confidence must be numeric") from exc
+        if not 0.0 <= confidence <= 1.0:
+            raise AdapterResponseError("verifier confidence must be between 0 and 1")
+    reason_code = _public_code(
+        decision.get("reason_code")
+        or decision.get("public_reason_code")
+        or decision.get("reason")
+        or f"vlm_decision_{normalized_decision}"
+    )
+    normalized = {
+        "parser_version": _non_empty(decision.get("parser_version")) or VERIFIER_PARSER_VERSION,
+        "decision": normalized_decision,
+        "reason_code": reason_code,
+        "public_reason": _public_text(decision.get("public_reason") or reason_code),
+    }
+    if confidence is not None:
+        normalized["confidence"] = confidence
+    return normalized
+
+
+def _public_code(value: Any) -> str:
+    text = (_non_empty(value) or "unspecified_public_reason").casefold()
+    cleaned = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in text)
+    cleaned = "_".join(part for part in cleaned.split("_") if part)
+    return cleaned[:80] or "unspecified_public_reason"
+
+
+def _public_text(value: Any) -> str:
+    text = " ".join((_non_empty(value) or "unspecified_public_reason").split())
+    return text[:180]
 
 
 def _write_error(exc: Exception, *, status: str) -> None:

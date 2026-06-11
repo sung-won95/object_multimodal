@@ -19,6 +19,7 @@ from oarag.cli import (
     cmd_index_project_windows,
     cmd_query_project_dual_candidates,
     cmd_query_project_evidence_units,
+    cmd_verify_entity_links_vlm,
     parse_vlm_options,
 )
 from oarag.meili import (
@@ -90,6 +91,39 @@ def test_align_frames_cli_defaults() -> None:
     assert args.project_id == "sample"
     assert args.output_root.as_posix() == "artifacts/projects"
     assert args.margin_seconds == 0.0
+
+
+def test_verify_entity_links_vlm_cli_accepts_project_dir_and_fixture_backend() -> None:
+    args = build_parser().parse_args(
+        [
+            "verify-entity-links-vlm",
+            "--project-dir",
+            "artifacts/projects/sample",
+            "--vlm-backend",
+            "jsonl",
+            "--vlm-model",
+            "fixture-vlm",
+            "--vlm-options",
+            "jsonl_path=manifests/vlm_link_decisions.jsonl",
+            "--output",
+            "manifests/entity_links.vlm.jsonl",
+            "--cache",
+            "manifests/entity_links.vlm.cache.json",
+            "--report",
+            "reports/vlm_report.json",
+            "--human-audit-template",
+            "reports/vlm_audit_template.jsonl",
+            "--limit",
+            "5",
+        ]
+    )
+
+    assert args.func is cmd_verify_entity_links_vlm
+    assert args.project_id is None
+    assert str(args.project_dir) == "artifacts/projects/sample"
+    assert args.vlm_backend == "jsonl"
+    assert args.limit == 5
+    assert args.skip_on_unavailable is True
 
 
 def test_index_project_accepts_project_id() -> None:
